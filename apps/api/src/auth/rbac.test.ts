@@ -5,11 +5,19 @@ const casos: Array<[Papel, Acao, boolean]> = [
   ['super_admin', 'membro:convidar', true],
   ['admin', 'projeto:criar', true],
   ['admin', 'auditoria:ler', true],
+  ['admin', 'empreendimento:editar', true],
+  ['admin', 'importacao:executar', true],
+  ['admin', 'unidade:status', true],
   ['consultora', 'projeto:ler', true],
+  ['consultora', 'unidade:status', true],
   ['consultora', 'projeto:criar', false],
+  ['consultora', 'empreendimento:editar', false],
+  ['consultora', 'importacao:executar', false],
   ['consultora', 'auditoria:ler', false],
   ['produtor', 'projeto:criar', false],
+  ['produtor', 'unidade:status', false],
   ['viewer', 'projeto:ler', true],
+  ['viewer', 'unidade:status', false],
   ['viewer', 'membro:convidar', false],
 ];
 
@@ -21,8 +29,12 @@ describe('MFA obrigatório', () => {
   it.each([
     ['admin', 'projeto:criar', true],
     ['admin', 'membro:convidar', true],
+    ['admin', 'empreendimento:editar', true],
+    ['admin', 'importacao:executar', true],
+    ['admin', 'unidade:status', true],
     ['super_admin', 'auditoria:ler', true],
     ['admin', 'projeto:ler', false],
     ['consultora', 'projeto:ler', false],
+    ['consultora', 'unidade:status', false],
   ] as Array<[Papel, Acao, boolean]>)('%s em %s → %s', (papel, acao, esperado) => expect(exigeMfa(papel, acao)).toBe(esperado));
 });
