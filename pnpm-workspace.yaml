@@ -1,5 +1,6 @@
 packages:
   - apps/*
   - packages/*
-onlyBuiltDependencies:
-  - esbuild
+# pnpm 11: scripts de instalação só rodam se liberados aqui (onlyBuiltDependencies foi substituído)
+allowBuilds:
+  esbuild: true
