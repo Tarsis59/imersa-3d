@@ -1,0 +1,14 @@
+[project]
+name = "imersa-recon"
+version = "0.1.0"
+description = "Imersa 3D: fotos/vídeo -> 3D (validação, rostos, quadros, treino na GPU gratuita do Kaggle, compressão)"
+requires-python = ">=3.11"
+dependencies = ["numpy>=2.0", "opencv-python-headless>=4.10"]
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+nuvem = ["kaggle>=2.2"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]

@@ -1,3 +1,4 @@
+import { fileURLToPath } from 'node:url';
 import { test, expect } from '@playwright/test';
 import { entrarComoAdminComMfa } from './ajuda';
 
@@ -63,4 +64,35 @@ test('interior real (splat) abre sob demanda na Vitrine, sem pesar a carga inici
   await page.getByRole('button', { name: '← Voltar ao prédio' }).click();
   await expect(interior).toHaveCount(0);
   await expect(page.getByTestId('vitrine-3d')).toHaveAttribute('data-estado', 'pronto');
+});
+
+test('splats gerados pelo pipeline de reconstrução (SOG e SPZ, via splat-transform) abrem no interior', async ({ page, request }) => {
+  test.setTimeout(300_000);
+  await entrarComoAdminComMfa(page, request, 'pipeline');
+  await page.getByLabel('Nome do projeto').fill('Interior do pipeline');
+  await page.getByRole('button', { name: 'Criar projeto' }).click();
+  await page.getByRole('link', { name: /Interior do pipeline/ }).click();
+  for (const arquivo of ['esfera.sog', 'esfera.spz']) {
+    await page.locator('#tipo-arquivo').selectOption({ label: 'Interior real (splat)' });
+    await page.locator('#arquivo-envio').setInputFiles(fileURLToPath(new URL(`./fixtures/${arquivo}`, import.meta.url)));
+    await page.getByRole('button', { name: 'Enviar arquivo' }).click();
+    await expect(page.getByText(`${arquivo} enviado e verificado.`)).toBeVisible({ timeout: 30_000 });
+  }
+  await page.getByLabel('Nome do prédio').fill('Casa');
+  await page.getByLabel('Andares').fill('1');
+  await page.getByRole('button', { name: 'Criar prédio' }).click();
+  await expect(page.getByText('Prédio criado.')).toBeVisible();
+  await page.getByLabel('Conteúdo da planilha').fill('predio;andar;codigo\nCasa;1;101');
+  await page.getByRole('button', { name: 'Prévia' }).click();
+  await page.getByRole('button', { name: 'Aplicar' }).click();
+  await expect(page.getByText('Importação aplicada.')).toBeVisible();
+  await page.getByRole('link', { name: /ver espelho de vendas/ }).click();
+  await page.getByRole('link', { name: 'Abrir Vitrine 3D' }).click();
+  await expect(page.getByTestId('vitrine-3d')).toHaveAttribute('data-estado', 'pronto', { timeout: 45_000 });
+  for (const arquivo of ['esfera.sog', 'esfera.spz']) {
+    await page.getByRole('button', { name: `Ver interior: ${arquivo}` }).click();
+    await expect(page.getByTestId('interior')).toHaveAttribute('data-estado', 'pronto', { timeout: 60_000 });
+    await page.getByRole('button', { name: '← Voltar ao prédio' }).click();
+    await expect(page.getByTestId('interior')).toHaveCount(0);
+  }
 });

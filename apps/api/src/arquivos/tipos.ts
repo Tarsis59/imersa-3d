@@ -26,7 +26,8 @@ const comeca =
 /** Assinatura binária ("número mágico") de cada extensão: o arquivo precisa ser o que diz ser. */
 const MAGIA: Record<string, Conferidor> = {
   '.glb': comeca('glTF'),
-  '.spz': comeca([0x1f, 0x8b]),
+  // SPZ (Niantic): até a v2 o arquivo inteiro é gzip; da v3 em diante começa com o cabeçalho "NGSP"
+  '.spz': (b, t) => comeca([0x1f, 0x8b])(b, t) || comeca('NGSP')(b, t),
   '.ply': (b) => /^ply\r?\n/.test(b.subarray(0, 5).toString('latin1')),
   '.sog': comeca([0x50, 0x4b, 0x03, 0x04]),
   '.splat': (_b, tamanho) => tamanho > 0 && tamanho % 32 === 0, // sem cabeçalho: 32 bytes por ponto
