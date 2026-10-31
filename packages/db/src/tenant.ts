@@ -7,12 +7,17 @@ export interface Contexto {
   conviteHash?: string | null;
 }
 
+export interface Opcoes {
+  /** Executa tudo e desfaz no fim (ROLLBACK). Usado na prévia da importação. */
+  simular?: boolean;
+}
+
 /**
  * Executa `fn` numa transação com o contexto da requisição.
  * `set_config(..., true)` = SET LOCAL: vale só até o COMMIT/ROLLBACK, então não vaza para a próxima
  * requisição que reutilizar a mesma conexão do pool.
  */
-export async function withTenant<T>(pool: pg.Pool, ctx: Contexto, fn: (c: pg.PoolClient) => Promise<T>): Promise<T> {
+export async function withTenant<T>(pool: pg.Pool, ctx: Contexto, fn: (c: pg.PoolClient) => Promise<T>, opcoes: Opcoes = {}): Promise<T> {
   const c = await pool.connect();
   try {
     await c.query('BEGIN');
@@ -21,7 +26,7 @@ export async function withTenant<T>(pool: pg.Pool, ctx: Contexto, fn: (c: pg.Poo
       [ctx.tenantId ?? '', ctx.userId ?? '', ctx.conviteHash ?? ''],
     );
     const r = await fn(c);
-    await c.query('COMMIT');
+    await c.query(opcoes.simular ? 'ROLLBACK' : 'COMMIT');
     return r;
   } catch (e) {
     await c.query('ROLLBACK').catch(() => undefined);
