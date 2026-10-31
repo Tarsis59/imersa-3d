@@ -24,6 +24,9 @@ services:
         sync: false
       - key: ARMAZENAMENTO
         value: s3
+      # teto por empresa abaixo dos 10 GB grátis do R2 (no Supabase Storage o teto real é 1 GB)
+      - key: LIMITE_ARMAZENAMENTO_GB
+        value: '9'
       - key: S3_BUCKET
         sync: false
       - key: S3_REGIAO

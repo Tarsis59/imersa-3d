@@ -149,7 +149,7 @@ describe('prédios do entorno (OSM)', () => {
 
 describe('prédios de arquivo (dados reais da Av. Paulista, sem internet)', () => {
   it('lê os prédios reais em volta e respeita o raio', async () => {
-    const arquivo = fileURLToPath(new URL('../../../../../exemplos/cidade-real/sao-paulo-paulista-osm.json', import.meta.url));
+    const arquivo = fileURLToPath(new URL('../../../../exemplos/cidade-real/sao-paulo-paulista-osm.json', import.meta.url));
     const base = {} as ServicosMapa;
     const mapa = comPrediosDeArquivo(base, arquivo);
     const predios = await mapa.buscarPredios(-23.56175, -46.6545, 300);

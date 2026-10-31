@@ -38,10 +38,34 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm typecheck
       - run: pnpm test
-      - run: pnpm --filter @imersa/web exec playwright install --with-deps chromium
+      # chromium (computador, celular, tablet Android) e webkit (motor do Safari: iPad)
+      - run: pnpm --filter @imersa/web exec playwright install --with-deps chromium webkit
       - run: pnpm e2e
       - uses: actions/upload-artifact@v4
         if: failure()
         with:
           name: playwright-traces
           path: apps/web/test-results
+
+  python:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - servico: reconstrucao
+            deps: '"numpy>=2.0" "opencv-python-headless>=4.10" pytest'
+          - servico: bim
+            deps: '"ifcopenshell>=0.8" "numpy>=2.0" pytest'
+    defaults:
+      run:
+        working-directory: servicos/${{ matrix.servico }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: pip install ${{ matrix.deps }}
+      - run: python -m pytest -q

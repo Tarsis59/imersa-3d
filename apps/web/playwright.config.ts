@@ -8,7 +8,7 @@ const PRODUCAO = process.env.E2E_PRODUCAO === '1';
 const CHROMIUM_3D = ['--use-angle=swiftshader', '--enable-unsafe-swiftshader'];
 /** Worker de capturas sem GPU: devolve esta esfera (gerada pelo pipeline real: PLY → SOG). */
 const SPLAT_SIMULADO = fileURLToPath(new URL('./e2e/fixtures/esfera.sog', import.meta.url));
-const PREDIOS_PAULISTA = fileURLToPath(new URL('../../../exemplos/cidade-real/sao-paulo-paulista-osm.json', import.meta.url));
+const PREDIOS_PAULISTA = fileURLToPath(new URL('../../exemplos/cidade-real/sao-paulo-paulista-osm.json', import.meta.url));
 
 export default defineConfig({
   testDir: './e2e',
