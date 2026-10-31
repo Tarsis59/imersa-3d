@@ -66,7 +66,8 @@ test('fluxo completo: registro, login, MFA, projeto, convite, consultora, sair',
   await expect(p2.getByTestId('lista-projetos')).toContainText('Residencial Paulista E2E');
   await expect(p2.getByRole('button', { name: 'Criar projeto' })).toHaveCount(0);
   await p2.goto('/painel/membros');
-  await expect(p2.getByRole('alert')).toContainText('Seu papel não permite');
+  // (o Next também tem um role="alert" invisível — o anunciador de rota — então busca pelo texto)
+  await expect(p2.getByText('Seu papel não permite esta ação.')).toBeVisible();
   await ctx.close();
 
   // o convite não pode ser reutilizado
