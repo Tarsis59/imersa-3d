@@ -1,0 +1,22 @@
+{
+  "name": "@imersa/viewer",
+  "private": true,
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p .",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "suncalc": "^2.1.1",
+    "three": "^0.187.0"
+  },
+  "devDependencies": {
+    "@types/three": "^0.187.0",
+    "typescript": "~5.9.3",
+    "vitest": "^5.0.5"
+  }
+}
