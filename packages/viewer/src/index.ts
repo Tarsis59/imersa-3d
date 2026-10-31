@@ -1,4 +1,4 @@
-export { criarViewer, type Viewer, type ConfigViewer, type EstadoViewer, type MetricasViewer, type ModoCamera } from './viewer';
+export { criarViewer, type Viewer, type ConfigViewer, type EstadoViewer, type Giro, type MetricasViewer, type ModoCamera } from './viewer';
 export { filtrar, filtroVazio, type Filtro } from './units/filtro';
 export { COR_UNIDADE, type StatusUnidade, type UnidadeViewer, type Caixa } from './units/tipos';
 export { massaDoPredio } from './units/massa';
@@ -10,3 +10,4 @@ export { abrirInterior, type Interior } from './interior/interior';
 export { tipoDoSplat } from './interior/tipo';
 export { criarCarregadorGltf, type Decodificadores } from './carregador';
 export { layoutMarca, textoDaMarca, type DadosMarca } from './captura/marca';
+export { corDoIndice, indiceDaCor, quadroPorArrasto, MAX_UNIDADES_GIRO } from './giro/giro';

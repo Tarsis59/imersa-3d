@@ -1,12 +1,13 @@
 'use client';
 import { useEffect, useMemo, useRef, useState, type PointerEvent as EventoPonteiro } from 'react';
-import { criarViewer, filtrar, filtroVazio, pontoCardeal, vetorJoystick, type EstadoViewer, type Filtro, type UnidadeViewer, type Viewer } from '@imersa/viewer';
+import { criarViewer, filtrar, type Giro, filtroVazio, pontoCardeal, vetorJoystick, type EstadoViewer, type Filtro, type UnidadeViewer, type Viewer } from '@imersa/viewer';
 import { Botao, Campo, Cartao, Selecao } from '@/components/ui';
 import { alternarFavorito, lerFavoritos, salvarFavoritos } from '@/lib/favoritos';
 import { brl, COR_STATUS, ROTULO_STATUS, STATUS_UNIDADE } from '@/lib/tipos';
 import { DECODIFICADORES } from '@/lib/decodificadores';
 import { carregarEntorno } from './actions';
 import { InteriorSplat } from './interior';
+import { Giro360 } from './giro';
 
 const ROTULO_NIVEL = { alto: 'alta', medio: 'média', baixo: 'baixa' } as const;
 const hoje = () => new Date().toISOString().slice(0, 10);
@@ -150,6 +151,25 @@ export function Vitrine({
     salvarFavoritos(predioId, novo);
   };
   const [baixando, setBaixando] = useState(false);
+  const [giro, setGiro] = useState<Giro | null>(null);
+  const [mostrarGiro, setMostrarGiro] = useState(false);
+  const [quadroGiro, setQuadroGiro] = useState(0);
+  const [progressoGiro, setProgressoGiro] = useState<string | null>(null);
+  const abrirGiro = async () => {
+    const v = viewer.current;
+    if (!v) return;
+    if (giro) return setMostrarGiro(true); // já gerado nesta visita
+    setProgressoGiro('Preparando…');
+    try {
+      const g = await v.gerarGiro({ quadros: 72, aoProgredir: (feitos, total) => setProgressoGiro(`Gerando ${feitos} de ${total} imagens…`) });
+      setGiro(g);
+      setMostrarGiro(true);
+    } catch {
+      v.registrarErro();
+    } finally {
+      setProgressoGiro(null);
+    }
+  };
   const baixarImagem = async () => {
     const v = viewer.current;
     if (!v) return;
@@ -179,6 +199,7 @@ export function Vitrine({
         data-corte={andarCorte || 'nenhum'}
         data-posicao={telemetria ? `${telemetria.posicao.x.toFixed(1)},${telemetria.posicao.z.toFixed(1)}` : ''}
         data-entorno={entorno.tipo === 'pronto' ? String(entorno.predios) : entorno.tipo}
+        data-giro={mostrarGiro ? 'pronto' : progressoGiro ? 'gerando' : 'fechado'}
         className="relative h-[70vh] min-h-96 overflow-hidden rounded-2xl border border-borda bg-fundo lg:sticky lg:top-6"
       >
         <canvas
@@ -206,6 +227,8 @@ export function Vitrine({
             {entorno.atribuicao}
           </a>
         )}
+        {giro && mostrarGiro && <Giro360 giro={giro} quadro={quadroGiro} aoMudarQuadro={setQuadroGiro} aoSelecionar={setSelecionada} aoFechar={() => setMostrarGiro(false)} />}
+        {progressoGiro && <p className="absolute inset-x-0 bottom-12 mx-auto w-fit rounded-md bg-black/70 px-3 py-1 text-sm text-white">{progressoGiro}</p>}
         {interiorAberto && <InteriorSplat arquivo={interiorAberto} aoFechar={() => setInteriorAberto(null)} />}
         {modo === 'primeira-pessoa' && <Joystick aoMover={(e) => viewer.current?.definirEntrada(e)} />}
       </div>
@@ -346,6 +369,9 @@ export function Vitrine({
                 <input id="hora-sol" type="range" min={6} max={19} step={0.25} value={horaSol} onChange={(e) => setHoraSol(Number(e.target.value))} />
               </label>
             </div>
+            <Botao type="button" variante="secundario" disabled={estado !== 'pronto' || progressoGiro !== null} onClick={() => void abrirGiro()}>
+              {giro ? 'Abrir giro 360° (modo leve)' : 'Gerar giro 360° (modo leve)'}
+            </Botao>
             <Botao type="button" variante="secundario" disabled={estado !== 'pronto' || baixando} onClick={() => void baixarImagem()}>
               {baixando ? 'Gerando imagem…' : 'Baixar imagem (PNG)'}
             </Botao>

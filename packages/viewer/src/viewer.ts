@@ -14,6 +14,7 @@ import { passoPrimeiraPessoa, bloqueioPorCaixas, type Entrada, type EstadoPessoa
 import { QualidadeAdaptativa, type NivelQualidade } from './quality/adaptativa';
 import { criarCarregadorGltf, type Decodificadores } from './carregador';
 import { layoutMarca, textoDaMarca, type DadosMarca } from './captura/marca';
+import { corDoIndice, poseNoGiro } from './giro/giro';
 
 export type ModoCamera = 'orbita' | 'primeira-pessoa';
 
@@ -51,6 +52,14 @@ export interface MetricasViewer {
   erros: number;
 }
 
+/** Giro 360° pré-renderizado: só imagens, para aparelho fraco. `unidades[i]` é a unidade da cor-ID i. */
+export interface Giro {
+  quadros: Array<{ cor: Blob; mascara: Blob }>;
+  unidades: string[];
+  largura: number;
+  altura: number;
+}
+
 export interface Viewer {
   /** Resolve quando o prédio está na tela; rejeita se o modelo não carregar. */
   pronto: Promise<void>;
@@ -70,6 +79,8 @@ export interface Viewer {
   /** PNG da vista atual com faixa da marca (empresa, prédio, data, "imagem ilustrativa" e atribuição do OSM). */
   capturar(dados: Omit<DadosMarca, 'atribuicao'>): Promise<Blob>;
   metricas(): MetricasViewer;
+  /** Renderiza o giro 360° (quadros + máscaras de unidade por cor-ID) a partir da vista atual. */
+  gerarGiro(opcoes?: { quadros?: number; aoProgredir?: (feitos: number, total: number) => void }): Promise<Giro>;
   /** Conta um erro de algo ligado ao 3D (entorno, interior...) na telemetria. */
   registrarErro(): void;
   aoSelecionar(cb: (unidadeId: string | null) => void): void;
@@ -408,7 +419,108 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
   let ultimoAviso = 0;
   const direcaoCamera = new THREE.Vector3();
 
+  function atualizarRaioX(alvo: THREE.Vector3 | null): void {
+    if (!alvo || !cidade) {
+      raioX.raio.value = 0;
+      return;
+    }
+    const c = caixaDoPredio();
+    raioX.camera.value.copy(camera.position);
+    raioX.alvo.value.copy(alvo);
+    raioX.raio.value = Math.max(15, Math.hypot(c.maxX - c.minX, c.maxZ - c.minZ) / 2 + 6);
+  }
+
+  async function gerarGiro(opcoes: { quadros?: number; aoProgredir?: (feitos: number, total: number) => void } = {}): Promise<Giro> {
+    await pronto;
+    const total = opcoes.quadros ?? 72;
+    const w = canvas.width;
+    const h = canvas.height;
+    const unidades = [...pecas.keys()];
+    const c = caixaDoPredio();
+    const centro = new THREE.Vector3((c.minX + c.maxX) / 2, (c.minY + c.maxY) / 2, (c.minZ + c.maxZ) / 2);
+    const inicial = enquadrar(c, camera.fov, camera.aspect || 1, 30);
+    const distancia = inicial.posicao.distanceTo(inicial.alvo);
+    const anguloInicial = Math.atan2(camera.position.x - centro.x, camera.position.z - centro.z);
+    const guardada = { posicao: camera.position.clone(), alvo: orbita.target.clone() };
+
+    // máscara: sem antisserrilhado e sem conversão de cor (alvo linear), para cada pixel ter a cor-ID exata
+    const alvoMascara = new THREE.WebGLRenderTarget(w, h);
+    const preto = new THREE.MeshBasicMaterial({ color: 0x000000, fog: false });
+    const deMascara = new Map<THREE.Mesh, THREE.MeshBasicMaterial>();
+    unidades.forEach((id, i) => {
+      const [r, g, b] = corDoIndice(i);
+      const m = new THREE.MeshBasicMaterial({ fog: false });
+      m.color.setRGB(r / 255, g / 255, b / 255, THREE.LinearSRGBColorSpace);
+      m.clippingPlanes = (pecas.get(id)!.material.clippingPlanes ?? []).slice();
+      deMascara.set(pecas.get(id)!.malha, m);
+    });
+    const pixels = new Uint8Array(w * h * 4);
+    const tela2d = document.createElement('canvas');
+    tela2d.width = w;
+    tela2d.height = h;
+    const ctx = tela2d.getContext('2d');
+    if (!ctx) throw new Error('Sem suporte a canvas 2D');
+    const imagem = ctx.createImageData(w, h);
+    const blob = (alvo: HTMLCanvasElement, tipo: string, q?: number) =>
+      new Promise<Blob>((ok, erro) => alvo.toBlob((b) => (b ? ok(b) : erro(new Error('Falha ao gerar a imagem'))), tipo, q));
+
+    pausado = true;
+    const quadros: Giro['quadros'] = [];
+    try {
+      for (let i = 0; i < total; i++) {
+        const pose = poseNoGiro(i, total, centro, distancia, 30, anguloInicial);
+        camera.position.set(pose.posicao.x, pose.posicao.y, pose.posicao.z);
+        camera.lookAt(centro);
+        camera.updateMatrixWorld();
+        atualizarRaioX(centro);
+        csm.update();
+        renderer.setRenderTarget(null);
+        renderer.render(cena, camera);
+        const cor = blob(canvas, 'image/jpeg', 0.85); // a cópia do canvas é feita já na chamada
+
+        const materiaisOriginais = new Map<THREE.Mesh, THREE.Material | THREE.Material[]>();
+        const fundo = cena.background;
+        const neblina = cena.fog;
+        cena.traverse((o) => {
+          if (!(o instanceof THREE.Mesh)) return;
+          materiaisOriginais.set(o, o.material);
+          o.material = deMascara.get(o) ?? preto;
+        });
+        if (cidade) cidade.visible = false; // o raio-x já tira a cidade da frente na imagem colorida
+        cena.background = new THREE.Color(0x000000);
+        cena.fog = null;
+        renderer.setRenderTarget(alvoMascara);
+        renderer.render(cena, camera);
+        renderer.readRenderTargetPixels(alvoMascara, 0, 0, w, h, pixels);
+        renderer.setRenderTarget(null);
+        for (const [m, mat] of materiaisOriginais) m.material = mat;
+        if (cidade) cidade.visible = true;
+        cena.background = fundo;
+        cena.fog = neblina;
+
+        // WebGL lê de baixo para cima; a imagem é de cima para baixo
+        for (let y = 0; y < h; y++) imagem.data.set(pixels.subarray((h - 1 - y) * w * 4, (h - y) * w * 4), y * w * 4);
+        for (let k = 3; k < imagem.data.length; k += 4) imagem.data[k] = 255;
+        ctx.putImageData(imagem, 0, 0);
+        quadros.push({ cor: await cor, mascara: await blob(tela2d, 'image/png') });
+        opcoes.aoProgredir?.(i + 1, total);
+        await new Promise((r) => setTimeout(r, 0)); // deixa a tela atualizar o progresso
+      }
+    } finally {
+      alvoMascara.dispose();
+      preto.dispose();
+      for (const m of deMascara.values()) m.dispose();
+      camera.position.copy(guardada.posicao);
+      orbita.target.copy(guardada.alvo);
+      camera.lookAt(guardada.alvo);
+      pausado = false;
+    }
+    return { quadros, unidades, largura: w, altura: h };
+  }
+
+  let pausado = false; // enquanto gera o giro, o laço não desenha
   renderer.setAnimationLoop((agora: number) => {
+    if (pausado) return;
     const dtMs = agora - ultimoQuadro;
     ultimoQuadro = agora;
     if (dtMs > 0 && dtMs <= 250) {
@@ -436,14 +548,7 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
       camera.rotation.set(pessoa.pitch, pessoa.yaw, 0, 'YXZ');
     }
 
-    if (modo === 'orbita' && cidade) {
-      const c = caixaDoPredio();
-      raioX.camera.value.copy(camera.position);
-      raioX.alvo.value.copy(orbita.target);
-      raioX.raio.value = Math.max(15, Math.hypot(c.maxX - c.minX, c.maxZ - c.minZ) / 2 + 6);
-    } else {
-      raioX.raio.value = 0;
-    }
+    atualizarRaioX(modo === 'orbita' ? orbita.target : null);
     csm.update();
     renderer.render(cena, camera);
 
@@ -528,6 +633,7 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
       atribuicaoEntorno = entorno.atribuicao;
       return predios.length;
     },
+    gerarGiro,
     metricas() {
       return { cargaMs, fpsMedio: somaQuadrosMs > 0 ? Math.round((quadros * 10_000) / somaQuadrosMs) / 10 : null, nivel: qualidade.nivel.nome, erros };
     },
