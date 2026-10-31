@@ -11,14 +11,15 @@ export default async function PaginaVitrine({ params }: { params: Promise<{ id: 
   const r = await apiNaPagina<Espelho>(`/predios/${encodeURIComponent(id)}`, volta);
   if (r.status !== 200) notFound();
   const { predio, andares } = r.dados;
-  const projeto = (await apiNaPagina<DetalheProjeto>(`/projetos/${encodeURIComponent(predio.projetoId)}`, volta)).dados.projeto;
-  let modeloUrl: string | null = null;
-  if (predio.modeloArquivoId) {
-    const download = await apiNaPagina<{ url: string }>(`/arquivos/${predio.modeloArquivoId}/download`, volta);
-    if (download.status === 200) modeloUrl = download.dados.url;
-  }
-  const arquivos = (await apiNaPagina<Arquivo[]>(`/projetos/${encodeURIComponent(predio.projetoId)}/arquivos`, volta)).dados;
-  const interiores = arquivos.filter((a) => a.tipo === 'splat' && a.status === 'pronto').map((a) => ({ id: a.id, nome: a.nome }));
+  // independentes entre si: em paralelo (cada ida à API custa uma volta de rede)
+  const [detalhe, lista, download] = await Promise.all([
+    apiNaPagina<DetalheProjeto>(`/projetos/${encodeURIComponent(predio.projetoId)}`, volta),
+    apiNaPagina<Arquivo[]>(`/projetos/${encodeURIComponent(predio.projetoId)}/arquivos`, volta),
+    predio.modeloArquivoId ? apiNaPagina<{ url: string }>(`/arquivos/${predio.modeloArquivoId}/download`, volta) : null,
+  ]);
+  const projeto = detalhe.dados.projeto;
+  const modeloUrl = download?.status === 200 ? download.dados.url : null;
+  const interiores = lista.dados.filter((a) => a.tipo === 'splat' && a.status === 'pronto').map((a) => ({ id: a.id, nome: a.nome }));
   const unidades: UnidadeViewer[] = andares.flatMap((a) =>
     a.unidades.map((u) => ({ id: u.id, codigo: u.codigo, andar: a.numero, status: u.status, areaM2: u.areaM2, quartos: u.quartos, preco: u.preco, meshNodeId: u.meshNodeId })),
   );
