@@ -27,6 +27,9 @@ test('giro 360° (modo leve): gera 72 imagens, arrastar gira, setas giram e toca
   await expect(vitrine).toHaveAttribute('data-giro', 'pronto', { timeout: 240_000 });
   const giro = page.getByTestId('giro');
   await expect(giro).toHaveAttribute('data-quadro', '0');
+  // a imagem do quadro carregou de verdade (não só a máscara)
+  const imagemCarregada = () => giro.locator('img').evaluate((i: HTMLImageElement) => i.complete && i.naturalWidth > 0);
+  await expect.poll(imagemCarregada).toBe(true);
 
   // arrastar um quarto da largura para a esquerda = um quarto de volta (18 de 72)
   const area = giro.getByRole('slider');
@@ -57,4 +60,5 @@ test('giro 360° (modo leve): gera 72 imagens, arrastar gira, setas giram e toca
   await expect(giro).toHaveCount(0);
   await page.getByRole('button', { name: 'Abrir giro 360° (modo leve)' }).click();
   await expect(giro).toHaveAttribute('data-quadro', '19');
+  await expect.poll(imagemCarregada).toBe(true);
 });

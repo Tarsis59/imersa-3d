@@ -1,5 +1,5 @@
 'use client';
-import { useEffect, useMemo, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { indiceDaCor, quadroPorArrasto, type Giro } from '@imersa/viewer';
 import { Botao } from '@/components/ui';
 
@@ -21,8 +21,14 @@ export function Giro360({
   aoSelecionar: (unidadeId: string | null) => void;
   aoFechar: () => void;
 }) {
-  const urls = useMemo(() => giro.quadros.map((q) => URL.createObjectURL(q.cor)), [giro]);
-  useEffect(() => () => urls.forEach((u) => URL.revokeObjectURL(u)), [urls]);
+  // links criados e apagados no mesmo efeito: no modo estrito o React monta duas vezes, e um link apagado
+  // na primeira desmontagem quebraria as imagens
+  const [urls, setUrls] = useState<string[]>([]);
+  useEffect(() => {
+    const criados = giro.quadros.map((q) => URL.createObjectURL(q.cor));
+    setUrls(criados);
+    return () => criados.forEach((u) => URL.revokeObjectURL(u));
+  }, [giro]);
   const arrasto = useRef<{ x: number; y: number; inicio: number; moveu: boolean } | null>(null);
   const total = giro.quadros.length;
 
@@ -79,7 +85,7 @@ export function Giro360({
       >
         {/* object-fill: a imagem ocupa exatamente a área, então o ponto tocado corresponde ao pixel da máscara */}
         {/* eslint-disable-next-line @next/next/no-img-element -- imagens geradas no navegador (blob:) */}
-        <img src={urls[quadro]} alt="" draggable={false} className="pointer-events-none h-full w-full object-fill" />
+        {urls[quadro] && <img src={urls[quadro]} alt="" draggable={false} className="pointer-events-none h-full w-full object-fill" />}
       </div>
       <div className="absolute left-3 top-3 flex gap-2">
         <Botao type="button" variante="secundario" onClick={aoFechar}>
