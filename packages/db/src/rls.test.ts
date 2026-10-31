@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import pg from 'pg';
-import { withTenant } from './tenant';
+import { withTenant, type Contexto } from './tenant';
 import { migrate } from './migrate';
 import { resetarBanco } from './testing';
 
@@ -22,6 +22,10 @@ beforeAll(async () => {
   A = t.rows.find((r) => r.slug === 'empresa-a')!.id;
   B = t.rows.find((r) => r.slug === 'empresa-b')!.id;
   await owner.query("INSERT INTO projects (tenant_id, nome) VALUES ($1, 'Projeto A'), ($2, 'Projeto B')", [A, B]);
+  await owner.query(
+    "INSERT INTO convites (tenant_id, email, papel, token_hash, expira_em) VALUES ($1, 'x@teste.com', 'consultora', 'hash-do-convite-a', now() + interval '7 days')",
+    [A],
+  );
 });
 
 afterAll(async () => {
@@ -29,8 +33,9 @@ afterAll(async () => {
   await app.end();
 });
 
-const nomes = (ctx: { tenantId: string | null; userId: string | null }) =>
+const nomes = (ctx: Contexto) =>
   withTenant(app, ctx, async (c) => (await c.query<{ nome: string }>('SELECT nome FROM projects ORDER BY nome')).rows.map((r) => r.nome));
+const convites = (ctx: Contexto) => withTenant(app, ctx, async (c) => (await c.query('SELECT id FROM convites')).rowCount);
 
 describe('RLS por empresa', () => {
   it('empresa A vê só os seus projetos', async () => {
@@ -75,6 +80,13 @@ describe('RLS por empresa', () => {
 
   it('auditoria é somente inserção para a aplicação', async () => {
     await expect(withTenant(app, { tenantId: A, userId: null }, (c) => c.query('DELETE FROM audit_logs'))).rejects.toThrow(/permission denied/);
+  });
+
+  it('convite só aparece para a própria empresa ou para quem tem o token certo', async () => {
+    expect(await convites({ tenantId: A, userId: null })).toBe(1);
+    expect(await convites({ tenantId: B, userId: null })).toBe(0);
+    expect(await convites({ tenantId: null, userId: null, conviteHash: 'hash-do-convite-a' })).toBe(1);
+    expect(await convites({ tenantId: null, userId: null, conviteHash: 'outro-hash' })).toBe(0);
   });
 
   it('migrations são idempotentes', async () => {

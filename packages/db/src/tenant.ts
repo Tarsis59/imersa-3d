@@ -3,6 +3,8 @@ import type pg from 'pg';
 export interface Contexto {
   tenantId: string | null;
   userId: string | null;
+  /** Hash do token de convite: libera ler aquele convite antes de saber a empresa. */
+  conviteHash?: string | null;
 }
 
 /**
@@ -14,7 +16,10 @@ export async function withTenant<T>(pool: pg.Pool, ctx: Contexto, fn: (c: pg.Poo
   const c = await pool.connect();
   try {
     await c.query('BEGIN');
-    await c.query("SELECT set_config('app.tenant_id', $1, true), set_config('app.user_id', $2, true)", [ctx.tenantId ?? '', ctx.userId ?? '']);
+    await c.query(
+      "SELECT set_config('app.tenant_id', $1, true), set_config('app.user_id', $2, true), set_config('app.convite_hash', $3, true)",
+      [ctx.tenantId ?? '', ctx.userId ?? '', ctx.conviteHash ?? ''],
+    );
     const r = await fn(c);
     await c.query('COMMIT');
     return r;
