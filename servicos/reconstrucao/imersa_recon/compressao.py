@@ -19,8 +19,17 @@ def comprimir(entrada: Path, saida: Path, filtros: list[str] | None = None) -> P
     if not npx:
         raise RuntimeError("Node.js (npx) não encontrado: instale o Node para comprimir os splats")
     saida.parent.mkdir(parents=True, exist_ok=True)
-    comando = [npx, "-y", f"@playcanvas/splat-transform@{VERSAO_SPLAT_TRANSFORM}", "-w", str(entrada), *(filtros or ["-N"]), str(saida)]
-    r = subprocess.run(comando, capture_output=True, text=True, timeout=1800)
+    base = [npx, "-y", f"@playcanvas/splat-transform@{VERSAO_SPLAT_TRANSFORM}", "-w"]
+
+    def rodar(destino: Path) -> subprocess.CompletedProcess:
+        return subprocess.run([*base, str(entrada), *(filtros or ["-N"]), str(destino)], capture_output=True, text=True, timeout=1800)
+
+    r = rodar(saida)
+    if (r.returncode != 0 or not saida.exists()) and saida.suffix.lower() == ".sog":
+        # o .sog precisa de GPU local (WebGPU); sem ela, na CPU leva mais de 30 min num splat real.
+        # O .spz sai do mesmo tamanho em segundos e o visualizador abre os dois.
+        saida = saida.with_suffix(".spz")
+        r = rodar(saida)
     if r.returncode != 0 or not saida.exists():
         raise RuntimeError(f"splat-transform falhou: {(r.stderr or r.stdout).strip()[-500:]}")
     return saida

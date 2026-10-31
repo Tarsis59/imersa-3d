@@ -71,7 +71,7 @@ export async function processarProxima(d: DepsWorker): Promise<'vazia' | 'ok' | 
     if (r.ok) {
       const dados = await readFile(r.splat);
       const assetId = randomUUID();
-      const nome = `${cap.nome}.sog`;
+      const nome = `${cap.nome}${extname(r.splat).toLowerCase() || '.sog'}`;
       const chave = `${alvo.tenant_id}/${cap.project_id}/${assetId}/${nomeSeguro(nome)}`;
       await d.armazenamento.salvar(chave, dados, 'application/octet-stream');
       const gravou = await withTenant(d.pool, ctx, async (c) => {

@@ -416,6 +416,19 @@ describe('capturas: fotos/vídeo → 3D (fila, worker, revisão e publicação)'
     expect((await req('POST', `/capturas/${id}/publicar`, {}, admin)).json.erro).toBe('captura_nao_esta_em_revisao');
   });
 
+  it('resultado em SPZ (servidor sem GPU para o SOG): o arquivo publicado mantém a extensão real', async () => {
+    const id = await novaCaptura(admin, 'Cozinha');
+    const spz: Reconstrutor = async (e) => {
+      const splat = join(e.pasta, 'cena.spz');
+      await writeFile(splat, Buffer.from([0x1f, 0x8b, 8, 0, 1, 2, 3]));
+      return { ok: true, splat, avisos: [], metricas: {}, rostos_desfocados: 0 };
+    };
+    expect(await processarProxima(deps(spz))).toBe('ok');
+    const pub = await req('POST', `/capturas/${id}/publicar`, {}, admin);
+    const arquivos = (await req('GET', `/projetos/${p}/arquivos`, undefined, admin)).json;
+    expect(arquivos.find((a: { id: string }) => a.id === pub.json.arquivoId)).toMatchObject({ nome: 'Cozinha.spz', tipo: 'splat' });
+  });
+
   it('fila vazia: nada a fazer', async () => {
     expect(await processarProxima(deps(sucesso))).toBe('vazia');
   });
