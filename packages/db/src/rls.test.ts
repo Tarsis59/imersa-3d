@@ -92,4 +92,14 @@ describe('RLS por empresa', () => {
   it('migrations são idempotentes', async () => {
     expect(await migrate(OWNER)).toEqual([]);
   });
+
+  // Último teste do arquivo: apaga o banco. Duas instâncias da API subindo juntas não podem aplicar a mesma migration duas vezes.
+  it('migrations simultâneas não colidem (trava no banco)', async () => {
+    await owner.query('DROP SCHEMA public CASCADE; CREATE SCHEMA public;');
+    const [x, y] = await Promise.all([migrate(OWNER), migrate(OWNER)]);
+    const todas = [...x, ...y].sort();
+    expect(todas.length).toBeGreaterThan(0);
+    expect(new Set(todas).size).toBe(todas.length);
+    expect((await owner.query('SELECT count(*)::int AS n FROM schema_migrations')).rows[0].n).toBe(todas.length);
+  });
 });
