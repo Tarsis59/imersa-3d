@@ -143,3 +143,48 @@ describe('entorno (cache do OSM) e telemetria do viewer no banco', () => {
     await expect(comoA((c) => c.query('DELETE FROM telemetria_viewer'))).rejects.toThrow(/permission denied/);
   });
 });
+
+describe('capturas (fotos/vídeo → 3D) e fila do worker', () => {
+  const capturaArquivo = (c: pg.PoolClient, projeto: string, chave: string) =>
+    c
+      .query<{ id: string }>("INSERT INTO assets (project_id, tipo, nome, chave, tamanho_declarado) VALUES ($1, 'captura', 'sala.zip', $2, 1000) RETURNING id", [projeto, chave])
+      .then((r) => r.rows[0]!.id);
+  const novaCaptura = (c: pg.PoolClient, projeto: string, arquivo: string, nome: string) =>
+    c.query<{ id: string }>("INSERT INTO capturas (project_id, arquivo_id, nome, status) VALUES ($1, $2, $3, 'na_fila') RETURNING id", [projeto, arquivo, nome]).then((r) => r.rows[0]!.id);
+  const pegar = (pool: pg.Pool) => pool.query<{ id: string; tenant_id: string }>('SELECT * FROM pegar_proxima_captura()').then((r) => r.rows[0] ?? null);
+  let capA = '';
+  let capB = '';
+
+  it('captura nasce ligada a um arquivo do tipo captura; isolada por empresa; status só com valores válidos', async () => {
+    const arqA = await comoA((c) => capturaArquivo(c, projA, 'a/sala.zip'));
+    capA = await comoA((c) => novaCaptura(c, projA, arqA, 'Sala A'));
+    expect(await comoB(async (c) => (await c.query('SELECT * FROM capturas')).rowCount)).toBe(0);
+    await expect(comoA((c) => c.query("UPDATE capturas SET status = 'pronta_demais' WHERE id = $1", [capA]))).rejects.toThrow(/check/);
+    const arqB = await comoB((c) => capturaArquivo(c, projB, 'b/sala.zip'));
+    // BLINDAGEM: arquivo de outra empresa não vira captura
+    await expect(comoA((c) => novaCaptura(c, projA, arqB, 'Invasão'))).rejects.toThrow(/foreign key/);
+    capB = await comoB((c) => novaCaptura(c, projB, arqB, 'Sala B'));
+  });
+
+  it('o worker pega a mais antiga de qualquer empresa, marca processando e conta a tentativa; fila vazia devolve nada', async () => {
+    const p1 = await pegar(app);
+    expect(p1).toEqual({ id: capA, tenant_id: A });
+    const p2 = await pegar(app);
+    expect(p2).toEqual({ id: capB, tenant_id: B });
+    expect(await pegar(app)).toBeNull();
+    expect(await comoA(async (c) => (await c.query('SELECT status, tentativas FROM capturas')).rows)).toEqual([{ status: 'processando', tentativas: 1 }]);
+  });
+
+  it('captura parada (worker caiu) volta a ser pega depois do prazo', async () => {
+    expect(await app.query("SELECT * FROM pegar_proxima_captura('1 hour')").then((r) => r.rowCount)).toBe(0);
+    await owner.query("UPDATE capturas SET trabalho_em = now() - interval '3 hours' WHERE id = $1", [capA]);
+    expect(await pegar(app)).toEqual({ id: capA, tenant_id: A });
+    expect(await comoA(async (c) => (await c.query('SELECT tentativas FROM capturas')).rows[0].tentativas)).toBe(2);
+  });
+
+  it('dois workers ao mesmo tempo nunca pegam a mesma captura', async () => {
+    await owner.query("UPDATE capturas SET status = 'na_fila', trabalho_em = NULL");
+    const [x, y] = await Promise.all([pegar(app), pegar(app)]);
+    expect(x && y && x.id !== y.id).toBe(true);
+  });
+});
