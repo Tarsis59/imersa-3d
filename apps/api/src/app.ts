@@ -1,3 +1,4 @@
+import { randomBytes, randomUUID } from 'node:crypto';
 import Fastify, { type FastifyInstance, type FastifyRequest } from 'fastify';
 import helmet from '@fastify/helmet';
 import cors from '@fastify/cors';
@@ -7,12 +8,14 @@ import { ZodError } from 'zod';
 import { withTenant } from '@imersa/db';
 import type { Config } from './config';
 import { ErroHttp } from './erros';
+import { cifrar, decifrar } from './cripto';
 import { emitirAcesso, verificarAcesso, type Sessao } from './auth/tokens';
-import { pode, type Acao, type Papel } from './auth/rbac';
+import { pode, exigeMfa, type Acao, type Papel } from './auth/rbac';
 import { hashSenha, conferirSenha } from './auth/senha';
-import { criarRefresh, girarRefresh } from './auth/refresh';
+import { hashToken } from './auth/hash';
+import { criarRefresh, girarRefresh, revogarFamilia } from './auth/refresh';
 import { gerarSegredoTotp, conferirTotp, urlOtpauth } from './auth/totp';
-import { Registro, Login, Refresh, NovoProjeto, MfaConfirmar } from './esquemas';
+import { Registro, Login, Refresh, Sair, NovoProjeto, MfaConfirmar, NovoConvite, TokenConvite, AceitarConvite } from './esquemas';
 import { registrarAuditoria } from './auditoria';
 import { documentoOpenApi } from './openapi';
 
@@ -20,14 +23,28 @@ export interface Deps {
   pool: pg.Pool;
   config: Config;
   logger?: boolean;
+  /** Chamado em todo erro 500 (ex.: Sentry). */
+  reportarErro?: (erro: unknown, requestId: string) => void;
 }
 
 // Hash real de uma senha qualquer: login de e-mail inexistente gasta o mesmo tempo (evita descobrir e-mails pelo tempo).
 let hashFalso: Promise<string> | null = null;
 const obterHashFalso = () => (hashFalso ??= hashSenha('senha-falsa-apenas-para-igualar-o-tempo'));
 
-export async function construirApp({ pool, config, logger = false }: Deps): Promise<FastifyInstance> {
-  const app = Fastify({ logger: logger ? { level: 'info', redact: ['req.headers.authorization'] } : false });
+const ID_VALIDO = /^[\w-]{8,64}$/;
+
+export async function construirApp({ pool, config, logger = false, reportarErro }: Deps): Promise<FastifyInstance> {
+  const app = Fastify({
+    logger: logger ? { level: 'info', redact: ['req.headers.authorization'] } : false,
+    trustProxy: config.TRUST_PROXY,
+    genReqId: (req) => {
+      const h = req.headers['x-request-id'];
+      return typeof h === 'string' && ID_VALIDO.test(h) ? h : randomUUID();
+    },
+  });
+  app.addHook('onRequest', async (req, reply) => {
+    reply.header('x-request-id', req.id);
+  });
   await app.register(helmet);
   await app.register(cors, { origin: config.CORS_ORIGIN, credentials: true });
   await app.register(rateLimit, { max: 300, timeWindow: '1 minute' });
@@ -41,6 +58,7 @@ export async function construirApp({ pool, config, logger = false }: Deps): Prom
     const status = (erro as { statusCode?: number }).statusCode;
     if (status && status >= 400 && status < 500) return reply.status(status).send({ erro: (erro as Error).message });
     req.log.error(erro);
+    reportarErro?.(erro, req.id);
     return reply.status(500).send({ erro: 'erro_interno' });
   });
 
@@ -54,6 +72,7 @@ export async function construirApp({ pool, config, logger = false }: Deps): Prom
       throw new ErroHttp(401, 'token_invalido');
     }
     if (acao && !pode(sessao.papel, acao)) throw new ErroHttp(403, 'sem_permissao');
+    if (acao && exigeMfa(sessao.papel, acao) && !sessao.mfa) throw new ErroHttp(403, 'mfa_requerido');
     return sessao;
   }
   const ctx = (s: Sessao) => ({ tenantId: s.tenantId, userId: s.userId });
@@ -63,6 +82,10 @@ export async function construirApp({ pool, config, logger = false }: Deps): Prom
     return m.rows[0]?.papel;
   }
 
+  async function tokens(c: pg.PoolClient, s: Sessao) {
+    return { acesso: await emitirAcesso(s, config.JWT_SECRET), refresh: await criarRefresh(c, s.userId, s.tenantId, s.mfa), papel: s.papel };
+  }
+
   app.get('/health', async () => {
     await pool.query('SELECT 1');
     return { ok: true };
@@ -70,6 +93,7 @@ export async function construirApp({ pool, config, logger = false }: Deps): Prom
 
   app.get('/openapi.json', async () => documentoOpenApi());
 
+  // ------------------------------------------------------------------ autenticação
   app.post('/auth/registro', limiteAuth, async (req, reply) => {
     const d = Registro.parse(req.body);
     const senhaHash = await hashSenha(d.senha);
@@ -112,10 +136,9 @@ export async function construirApp({ pool, config, logger = false }: Deps): Prom
       if (!papel) throw new ErroHttp(401, 'credenciais_invalidas');
       if (user.mfa_secret) {
         if (!d.codigoMfa) throw new ErroHttp(401, 'mfa_obrigatorio');
-        if (!conferirTotp(user.mfa_secret, d.codigoMfa)) throw new ErroHttp(401, 'mfa_invalido');
+        if (!conferirTotp(decifrar(user.mfa_secret, config.TOTP_KEY), d.codigoMfa)) throw new ErroHttp(401, 'mfa_invalido');
       }
-      const sessao: Sessao = { userId: user.id, tenantId, papel };
-      return { acesso: await emitirAcesso(sessao, config.JWT_SECRET), refresh: await criarRefresh(c, user.id, tenantId), papel };
+      return tokens(c, { userId: user.id, tenantId, papel, mfa: Boolean(user.mfa_secret) });
     });
   });
 
@@ -125,41 +148,57 @@ export async function construirApp({ pool, config, logger = false }: Deps): Prom
     return withTenant(pool, { tenantId: g.tenantId, userId: g.userId }, async (c) => {
       const papel = await papelNaEmpresa(c, g.tenantId, g.userId);
       if (!papel) throw new ErroHttp(401, 'sem_acesso');
-      return { acesso: await emitirAcesso({ userId: g.userId, tenantId: g.tenantId, papel }, config.JWT_SECRET), refresh: g.novo, papel };
+      const acesso = await emitirAcesso({ userId: g.userId, tenantId: g.tenantId, papel, mfa: g.mfa }, config.JWT_SECRET);
+      return { acesso, refresh: g.novo, papel };
     });
+  });
+
+  app.post('/auth/sair', limiteAuth, async (req, reply) => {
+    const d = Sair.parse(req.body);
+    await revogarFamilia(pool, d.refresh);
+    return reply.status(204).send();
   });
 
   app.post('/auth/mfa/ativar', async (req) => {
     const s = await exigir(req);
     const segredo = gerarSegredoTotp();
-    const r = await pool.query<{ email: string }>('UPDATE users SET mfa_pendente = $1 WHERE id = $2 RETURNING email', [segredo, s.userId]);
+    const r = await pool.query<{ email: string }>('UPDATE users SET mfa_pendente = $1 WHERE id = $2 RETURNING email', [
+      cifrar(segredo, config.TOTP_KEY),
+      s.userId,
+    ]);
     return { segredo, otpauth: urlOtpauth(segredo, r.rows[0]!.email) };
   });
 
-  app.post('/auth/mfa/confirmar', async (req, reply) => {
+  app.post('/auth/mfa/confirmar', async (req) => {
     const s = await exigir(req);
     const d = MfaConfirmar.parse(req.body);
     const r = await pool.query<{ mfa_pendente: string | null }>('SELECT mfa_pendente FROM users WHERE id = $1', [s.userId]);
     const pendente = r.rows[0]?.mfa_pendente;
-    if (!pendente || !conferirTotp(pendente, d.codigo)) throw new ErroHttp(400, 'codigo_invalido');
-    await withTenant(pool, ctx(s), async (c) => {
+    if (!pendente || !conferirTotp(decifrar(pendente, config.TOTP_KEY), d.codigo)) throw new ErroHttp(400, 'codigo_invalido');
+    return withTenant(pool, ctx(s), async (c) => {
       await c.query('UPDATE users SET mfa_secret = mfa_pendente, mfa_pendente = NULL WHERE id = $1', [s.userId]);
       await registrarAuditoria(c, { userId: s.userId, acao: 'mfa.ativar', entidade: 'user', entidadeId: s.userId });
+      return tokens(c, { ...s, mfa: true });
     });
-    return reply.status(204).send();
   });
 
   app.get('/me', async (req) => {
     const s = await exigir(req);
     return withTenant(pool, { tenantId: null, userId: s.userId }, async (c) => {
-      const r = await c.query(
+      const empresas = await c.query(
         'SELECT t.id, t.nome, t.slug, m.papel FROM memberships m JOIN tenants t ON t.id = m.tenant_id WHERE m.user_id = $1 ORDER BY t.nome',
         [s.userId],
       );
-      return { userId: s.userId, tenantId: s.tenantId, papel: s.papel, empresas: r.rows };
+      const u = await c.query<{ nome: string; email: string; mfa_ativo: boolean }>(
+        'SELECT nome, email, mfa_secret IS NOT NULL AS mfa_ativo FROM users WHERE id = $1',
+        [s.userId],
+      );
+      const usuario = u.rows[0]!;
+      return { userId: s.userId, tenantId: s.tenantId, papel: s.papel, mfa: s.mfa, mfaAtivo: usuario.mfa_ativo, nome: usuario.nome, email: usuario.email, empresas: empresas.rows };
     });
   });
 
+  // ------------------------------------------------------------------ projetos
   app.get('/projetos', async (req) => {
     const s = await exigir(req, 'projeto:ler');
     return withTenant(pool, ctx(s), async (c) => (await c.query('SELECT id, nome, criado_em FROM projects ORDER BY criado_em')).rows);
@@ -177,6 +216,92 @@ export async function construirApp({ pool, config, logger = false }: Deps): Prom
     return reply.status(201).send(novo);
   });
 
+  // ------------------------------------------------------------------ membros e convites
+  app.get('/membros', async (req) => {
+    const s = await exigir(req, 'membro:convidar');
+    return withTenant(pool, ctx(s), async (c) => ({
+      membros: (
+        await c.query('SELECT u.id, u.nome, u.email, m.papel FROM memberships m JOIN users u ON u.id = m.user_id WHERE m.tenant_id = $1 ORDER BY u.nome', [
+          s.tenantId,
+        ])
+      ).rows,
+      convites: (
+        await c.query('SELECT id, email, papel, expira_em FROM convites WHERE tenant_id = $1 AND aceito_em IS NULL AND expira_em > now() ORDER BY criado_em DESC', [
+          s.tenantId,
+        ])
+      ).rows,
+    }));
+  });
+
+  app.post('/membros/convites', async (req, reply) => {
+    const s = await exigir(req, 'membro:convidar');
+    const d = NovoConvite.parse(req.body);
+    const token = randomBytes(32).toString('base64url');
+    const criado = await withTenant(pool, ctx(s), async (c) => {
+      const r = await c.query<{ id: string; expira_em: Date }>(
+        "INSERT INTO convites (email, papel, token_hash, criado_por, expira_em) VALUES ($1, $2, $3, $4, now() + interval '7 days') RETURNING id, expira_em",
+        [d.email, d.papel, hashToken(token), s.userId],
+      );
+      const cv = r.rows[0]!;
+      await registrarAuditoria(c, { userId: s.userId, acao: 'convite.criar', entidade: 'convite', entidadeId: cv.id, depois: { email: d.email, papel: d.papel } });
+      return cv;
+    });
+    return reply.status(201).send({ token, link: `${config.WEB_URL}/convite/${token}`, expiraEm: criado.expira_em });
+  });
+
+  app.get('/convites/:token', limiteAuth, async (req) => {
+    const { token } = TokenConvite.parse(req.params);
+    const h = hashToken(token);
+    return withTenant(pool, { tenantId: null, userId: null, conviteHash: h }, async (c) => {
+      const r = await c.query<{ email: string; papel: string; empresa: string; valido: boolean }>(
+        'SELECT cv.email, cv.papel, t.nome AS empresa, (cv.aceito_em IS NULL AND cv.expira_em > now()) AS valido FROM convites cv JOIN tenants t ON t.id = cv.tenant_id WHERE cv.token_hash = $1',
+        [h],
+      );
+      const cv = r.rows[0];
+      if (!cv?.valido) throw new ErroHttp(404, 'convite_invalido');
+      const u = await c.query('SELECT 1 FROM users WHERE email = $1', [cv.email]);
+      return { email: cv.email, papel: cv.papel, empresa: cv.empresa, temConta: (u.rowCount ?? 0) > 0 };
+    });
+  });
+
+  app.post('/convites/aceitar', limiteAuth, async (req, reply) => {
+    const d = AceitarConvite.parse(req.body);
+    const h = hashToken(d.token);
+    const resultado = await withTenant(pool, { tenantId: null, userId: null, conviteHash: h }, async (c) => {
+      const r = await c.query<{ id: string; tenant_id: string; email: string; papel: Papel; slug: string; valido: boolean }>(
+        'SELECT cv.id, cv.tenant_id, cv.email, cv.papel, t.slug, (cv.aceito_em IS NULL AND cv.expira_em > now()) AS valido FROM convites cv JOIN tenants t ON t.id = cv.tenant_id WHERE cv.token_hash = $1 FOR UPDATE OF cv',
+        [h],
+      );
+      const cv = r.rows[0];
+      if (!cv?.valido) throw new ErroHttp(404, 'convite_invalido');
+
+      const u = await c.query<{ id: string; senha_hash: string }>('SELECT id, senha_hash FROM users WHERE email = $1', [cv.email]);
+      let userId: string;
+      const existente = u.rows[0];
+      if (existente) {
+        if (!(await conferirSenha(existente.senha_hash, d.senha))) throw new ErroHttp(401, 'credenciais_invalidas');
+        userId = existente.id;
+      } else {
+        if (!d.nome) throw new ErroHttp(400, 'nome_obrigatorio');
+        const novo = await c.query<{ id: string }>('INSERT INTO users (nome, email, senha_hash) VALUES ($1, $2, $3) RETURNING id', [
+          d.nome,
+          cv.email,
+          await hashSenha(d.senha),
+        ]);
+        userId = novo.rows[0]!.id;
+      }
+
+      await c.query("SELECT set_config('app.tenant_id', $1, true), set_config('app.user_id', $2, true)", [cv.tenant_id, userId]);
+      const m = await c.query('INSERT INTO memberships (tenant_id, user_id, papel) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING', [cv.tenant_id, userId, cv.papel]);
+      if (m.rowCount === 0) throw new ErroHttp(409, 'ja_e_membro');
+      await c.query('UPDATE convites SET aceito_em = now() WHERE id = $1', [cv.id]);
+      await registrarAuditoria(c, { userId, acao: 'convite.aceitar', entidade: 'membership', entidadeId: userId, depois: { papel: cv.papel } });
+      return { empresa: cv.slug };
+    });
+    return reply.status(201).send(resultado);
+  });
+
+  // ------------------------------------------------------------------ auditoria
   app.get('/auditoria', async (req) => {
     const s = await exigir(req, 'auditoria:ler');
     return withTenant(pool, ctx(s), async (c) =>

@@ -1,9 +1,9 @@
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
+import { randomBytes } from 'node:crypto';
 import pg from 'pg';
 import type { FastifyInstance } from 'fastify';
 import { resetarBanco } from '@imersa/db/testing';
 import { construirApp } from './app';
-import { hashSenha } from './auth/senha';
 import { codigoTotp } from './auth/totp';
 import type { Config } from './config';
 
@@ -12,9 +12,13 @@ const APP = process.env.TEST_API_DATABASE_URL ?? 'postgres://imersa_app:imersa_a
 const config: Config = {
   DATABASE_URL: APP,
   JWT_SECRET: 'segredo-de-teste-com-mais-de-32-caracteres!!',
+  TOTP_KEY: randomBytes(32).toString('base64url'),
   PORT: 0,
   CORS_ORIGIN: 'http://localhost:3000',
+  WEB_URL: 'http://localhost:3000',
   RATE_LIMIT_AUTH: 1000,
+  TRUST_PROXY: false,
+  AMBIENTE: 'teste',
 };
 
 let app: FastifyInstance;
@@ -47,16 +51,21 @@ afterAll(async () => {
   await owner.end();
 });
 
-describe('saúde e documentação', () => {
+describe('saúde, documentação e cabeçalhos', () => {
   it('GET /health', async () => expect((await req('GET', '/health')).status).toBe(200));
   it('GET /openapi.json descreve as rotas', async () => {
     const r = await req('GET', '/openapi.json');
     expect(r.json.openapi).toBe('3.1.0');
-    expect(Object.keys(r.json.paths)).toEqual(expect.arrayContaining(['/auth/login', '/auth/registro', '/projetos']));
+    expect(Object.keys(r.json.paths)).toEqual(
+      expect.arrayContaining(['/auth/login', '/auth/registro', '/auth/sair', '/projetos', '/membros', '/membros/convites', '/convites/aceitar']),
+    );
   });
-  it('cabeçalhos de segurança (helmet)', async () => {
-    const r = await app.inject({ method: 'GET', url: '/health' });
+  it('helmet e request-id', async () => {
+    const r = await app.inject({ method: 'GET', url: '/health', headers: { 'x-request-id': 'teste-req-12345' } });
     expect(r.headers['x-content-type-options']).toBe('nosniff');
+    expect(r.headers['x-request-id']).toBe('teste-req-12345');
+    const r2 = await app.inject({ method: 'GET', url: '/health' });
+    expect(r2.headers['x-request-id']).toMatch(/^[0-9a-f-]{36}$/);
   });
 });
 
@@ -64,6 +73,7 @@ describe('fluxo multiempresa', () => {
   let tokenA = '';
   let tokenB = '';
   let refreshA = '';
+  let segredoA = '';
 
   it('registra duas empresas e recusa slug repetido', async () => {
     expect((await registrar('empresa-a', 'a@teste.com')).status).toBe(201);
@@ -82,7 +92,6 @@ describe('fluxo multiempresa', () => {
     expect(ok.status).toBe(200);
     expect(ok.json.papel).toBe('admin');
     tokenA = ok.json.acesso;
-    refreshA = ok.json.refresh;
     tokenB = (await login('b@teste.com', 'empresa-b')).json.acesso;
 
     const errados = [
@@ -97,6 +106,40 @@ describe('fluxo multiempresa', () => {
     }
   });
 
+  it('admin SEM MFA lê projetos, mas não cria (403 mfa_requerido)', async () => {
+    expect((await req('GET', '/projetos', undefined, tokenA)).status).toBe(200);
+    const r = await req('POST', '/projetos', { nome: 'Sem MFA' }, tokenA);
+    expect(r.status).toBe(403);
+    expect(r.json.erro).toBe('mfa_requerido');
+    expect((await req('GET', '/me', undefined, tokenA)).json).toMatchObject({ mfa: false, mfaAtivo: false });
+  });
+
+  it('MFA: código errado recusado; certo devolve tokens com mfa:true; segredo fica cifrado no banco', async () => {
+    const at = await req('POST', '/auth/mfa/ativar', {}, tokenA);
+    expect(at.json.otpauth).toMatch(/^otpauth:\/\/totp\//);
+    const certo = codigoTotp(at.json.segredo);
+    const errado = certo === '000000' ? '111111' : '000000';
+    expect((await req('POST', '/auth/mfa/confirmar', { codigo: errado }, tokenA)).status).toBe(400);
+    const ok = await req('POST', '/auth/mfa/confirmar', { codigo: certo }, tokenA);
+    expect(ok.status).toBe(200);
+    tokenA = ok.json.acesso;
+    refreshA = ok.json.refresh;
+    segredoA = at.json.segredo;
+    const salvo = await owner.query<{ mfa_secret: string }>("SELECT mfa_secret FROM users WHERE email = 'a@teste.com'");
+    expect(salvo.rows[0]!.mfa_secret.startsWith('v1.')).toBe(true);
+    expect(salvo.rows[0]!.mfa_secret).not.toContain(segredoA);
+    expect((await req('GET', '/me', undefined, tokenA)).json).toMatchObject({ mfa: true, mfaAtivo: true });
+  });
+
+  it('com MFA ativo o login exige o código', async () => {
+    const sem = await login('a@teste.com', 'empresa-a');
+    expect(sem.status).toBe(401);
+    expect(sem.json.erro).toBe('mfa_obrigatorio');
+    const ruim = await login('a@teste.com', 'empresa-a', { codigoMfa: codigoTotp(segredoA) === '000000' ? '111111' : '000000' });
+    expect(ruim.json.erro).toBe('mfa_invalido');
+    expect((await login('a@teste.com', 'empresa-a', { codigoMfa: codigoTotp(segredoA) })).status).toBe(200);
+  });
+
   it('sem token ou com token inválido → 401', async () => {
     expect((await req('GET', '/projetos')).status).toBe(401);
     expect((await req('GET', '/projetos', undefined, 'abc.def.ghi')).status).toBe(401);
@@ -108,55 +151,74 @@ describe('fluxo multiempresa', () => {
     expect((await req('GET', '/projetos', undefined, tokenB)).json).toHaveLength(0);
   });
 
-  it('RBAC: consultora lê projetos mas não cria', async () => {
-    const t = await owner.query<{ id: string }>("SELECT id FROM tenants WHERE slug = 'empresa-a'");
-    const u = await owner.query<{ id: string }>(
-      "INSERT INTO users (nome, email, senha_hash) VALUES ('Consultora', 'c@teste.com', $1) RETURNING id",
-      [await hashSenha(SENHA)],
-    );
-    await owner.query("INSERT INTO memberships (tenant_id, user_id, papel) VALUES ($1, $2, 'consultora')", [t.rows[0]!.id, u.rows[0]!.id]);
-    const c = await login('c@teste.com', 'empresa-a');
-    expect(c.json.papel).toBe('consultora');
-    expect((await req('POST', '/projetos', { nome: 'Proibido' }, c.json.acesso)).status).toBe(403);
-    expect((await req('GET', '/projetos', undefined, c.json.acesso)).json).toHaveLength(1);
-    expect((await req('GET', '/auditoria', undefined, c.json.acesso)).status).toBe(403);
-  });
-
-  it('/me lista só as empresas do usuário', async () => {
-    const r = await req('GET', '/me', undefined, tokenA);
-    expect(r.json.empresas.map((e: { slug: string }) => e.slug)).toEqual(['empresa-a']);
-  });
-
-  it('auditoria registra as ações e respeita a empresa', async () => {
-    const a = (await req('GET', '/auditoria', undefined, tokenA)).json.map((e: { acao: string }) => e.acao);
-    expect(a).toEqual(expect.arrayContaining(['empresa.registrar', 'projeto.criar']));
-    const b = (await req('GET', '/auditoria', undefined, tokenB)).json.map((e: { acao: string }) => e.acao);
-    expect(b).not.toContain('projeto.criar');
-  });
-
-  it('refresh rotativo: reuso revoga a família inteira', async () => {
+  it('refresh mantém o MFA; reuso revoga a família inteira', async () => {
     const r1 = await req('POST', '/auth/refresh', { refresh: refreshA });
     expect(r1.status).toBe(200);
-    expect((await req('GET', '/projetos', undefined, r1.json.acesso)).status).toBe(200);
+    expect((await req('POST', '/projetos', { nome: 'Depois do refresh' }, r1.json.acesso)).status).toBe(201);
     const reuso = await req('POST', '/auth/refresh', { refresh: refreshA });
     expect(reuso.status).toBe(401);
     expect(reuso.json.erro).toBe('refresh_reutilizado');
     expect((await req('POST', '/auth/refresh', { refresh: r1.json.refresh })).status).toBe(401);
   });
 
-  it('MFA TOTP: ativa, confirma e passa a ser exigido no login', async () => {
-    const at = await req('POST', '/auth/mfa/ativar', {}, tokenB);
-    expect(at.status).toBe(200);
-    expect(at.json.otpauth).toMatch(/^otpauth:\/\/totp\//);
-    const certo = codigoTotp(at.json.segredo);
-    const errado = certo === '000000' ? '111111' : '000000';
-    expect((await req('POST', '/auth/mfa/confirmar', { codigo: errado }, tokenB)).status).toBe(400);
-    expect((await req('POST', '/auth/mfa/confirmar', { codigo: certo }, tokenB)).status).toBe(204);
+  it('sair revoga o refresh', async () => {
+    const l = await login('a@teste.com', 'empresa-a', { codigoMfa: codigoTotp(segredoA) });
+    expect((await req('POST', '/auth/sair', { refresh: l.json.refresh })).status).toBe(204);
+    expect((await req('POST', '/auth/refresh', { refresh: l.json.refresh })).status).toBe(401);
+  });
 
-    const sem = await login('b@teste.com', 'empresa-b');
-    expect(sem.status).toBe(401);
-    expect(sem.json.erro).toBe('mfa_obrigatorio');
-    const com = await login('b@teste.com', 'empresa-b', { codigoMfa: codigoTotp(at.json.segredo) });
-    expect(com.status).toBe(200);
+  it('convite: criar, consultar, aceitar com conta nova, entrar como consultora', async () => {
+    const c = await req('POST', '/membros/convites', { email: 'c@teste.com', papel: 'consultora' }, tokenA);
+    expect(c.status).toBe(201);
+    expect(c.json.link).toBe(`http://localhost:3000/convite/${c.json.token}`);
+
+    const info = await req('GET', `/convites/${c.json.token}`);
+    expect(info.json).toEqual({ email: 'c@teste.com', papel: 'consultora', empresa: 'Empresa empresa-a', temConta: false });
+
+    expect((await req('POST', '/convites/aceitar', { token: c.json.token, senha: SENHA })).json.erro).toBe('nome_obrigatorio');
+    const ok = await req('POST', '/convites/aceitar', { token: c.json.token, senha: SENHA, nome: 'Consultora' });
+    expect(ok.status).toBe(201);
+    expect(ok.json.empresa).toBe('empresa-a');
+    expect((await req('POST', '/convites/aceitar', { token: c.json.token, senha: SENHA, nome: 'De novo' })).status).toBe(404);
+
+    const lc = await login('c@teste.com', 'empresa-a');
+    expect(lc.json.papel).toBe('consultora');
+    expect((await req('GET', '/projetos', undefined, lc.json.acesso)).json).toHaveLength(2);
+    expect((await req('POST', '/projetos', { nome: 'Proibido' }, lc.json.acesso)).status).toBe(403);
+    expect((await req('GET', '/membros', undefined, lc.json.acesso)).status).toBe(403);
+  });
+
+  it('convite para quem já tem conta exige a senha dessa conta', async () => {
+    const c = await req('POST', '/membros/convites', { email: 'b@teste.com', papel: 'viewer' }, tokenA);
+    expect((await req('GET', `/convites/${c.json.token}`)).json.temConta).toBe(true);
+    expect((await req('POST', '/convites/aceitar', { token: c.json.token, senha: 'senha-errada-99' })).status).toBe(401);
+    expect((await req('POST', '/convites/aceitar', { token: c.json.token, senha: SENHA })).status).toBe(201);
+    const me = await req('GET', '/me', undefined, tokenB);
+    expect(me.json.empresas.map((e: { slug: string }) => e.slug).sort()).toEqual(['empresa-a', 'empresa-b']);
+  });
+
+  it('convite: token inválido e papel super_admin recusados; lista de membros correta', async () => {
+    expect((await req('GET', `/convites/${'x'.repeat(43)}`)).status).toBe(404);
+    expect((await req('POST', '/membros/convites', { email: 'z@teste.com', papel: 'super_admin' }, tokenA)).status).toBe(400);
+    const m = await req('GET', '/membros', undefined, tokenA);
+    expect(m.json.membros.map((x: { email: string }) => x.email).sort()).toEqual(['a@teste.com', 'b@teste.com', 'c@teste.com']);
+  });
+
+  it('auditoria registra as ações e respeita a empresa', async () => {
+    const a = (await req('GET', '/auditoria', undefined, tokenA)).json.map((e: { acao: string }) => e.acao);
+    expect(a).toEqual(expect.arrayContaining(['empresa.registrar', 'mfa.ativar', 'projeto.criar', 'convite.criar', 'convite.aceitar']));
+  });
+});
+
+describe('erros internos', () => {
+  it('não vazam detalhes e são reportados com o request-id', async () => {
+    const reportar = vi.fn();
+    const quebrado = { query: async () => Promise.reject(new Error('banco caiu: senha xyz')) } as unknown as pg.Pool;
+    const a = await construirApp({ pool: quebrado, config, reportarErro: reportar });
+    const r = await a.inject({ method: 'GET', url: '/health', headers: { 'x-request-id': 'req-com-erro-1' } });
+    expect(r.statusCode).toBe(500);
+    expect(r.json()).toEqual({ erro: 'erro_interno' });
+    expect(reportar).toHaveBeenCalledWith(expect.any(Error), 'req-com-erro-1');
+    await a.close();
   });
 });

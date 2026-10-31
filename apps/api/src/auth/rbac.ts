@@ -5,6 +5,7 @@ export type Acao = 'projeto:ler' | 'projeto:criar' | 'membro:convidar' | 'audito
 
 const TODOS: readonly Papel[] = PAPEIS;
 const GESTAO: readonly Papel[] = ['super_admin', 'admin'];
+const SENSIVEIS: readonly Acao[] = ['projeto:criar', 'membro:convidar', 'auditoria:ler'];
 
 const MATRIZ: Record<Acao, readonly Papel[]> = {
   'projeto:ler': TODOS,
@@ -14,3 +15,6 @@ const MATRIZ: Record<Acao, readonly Papel[]> = {
 };
 
 export const pode = (papel: Papel, acao: Acao): boolean => MATRIZ[acao].includes(papel);
+
+/** Gestão só faz ação sensível com sessão que passou por MFA. */
+export const exigeMfa = (papel: Papel, acao: Acao): boolean => GESTAO.includes(papel) && SENSIVEIS.includes(acao);
