@@ -7,6 +7,8 @@
     "db:down": "docker compose down",
     "db:migrate": "pnpm --filter @imersa/db migrate",
     "dev:api": "pnpm --filter @imersa/api dev",
+    "dev:web": "pnpm --filter @imersa/web dev",
+    "e2e": "pnpm --filter @imersa/web e2e",
     "test": "turbo run test",
     "typecheck": "turbo run typecheck"
   },

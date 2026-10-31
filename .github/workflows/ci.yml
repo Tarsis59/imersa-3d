@@ -30,6 +30,18 @@ jobs:
         run: psql -h localhost -p 55432 -U imersa_owner -d imersa -v ON_ERROR_STOP=1 -f infra/docker/initdb/01-roles.sql
         env:
           PGPASSWORD: imersa_owner_dev
+      - name: .env de CI com segredos descartáveis
+        run: |
+          cp .env.example .env
+          sed -i "s#^JWT_SECRET=.*#JWT_SECRET=$(openssl rand -base64 48 | tr '+/' '-_' | tr -d '=')#" .env
+          sed -i "s#^TOTP_KEY=.*#TOTP_KEY=$(openssl rand -base64 32 | tr '+/' '-_' | tr -d '=')#" .env
       - run: pnpm install --frozen-lockfile
       - run: pnpm typecheck
       - run: pnpm test
+      - run: pnpm --filter @imersa/web exec playwright install --with-deps chromium
+      - run: pnpm e2e
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-traces
+          path: apps/web/test-results
