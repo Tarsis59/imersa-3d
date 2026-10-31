@@ -28,6 +28,8 @@ export interface Armazenamento {
   lerInicio(chave: string, bytes: number): Promise<Buffer>;
   tamanho(chave: string): Promise<number | null>;
   abrirLeitura(chave: string): Promise<Readable>;
+  /** Grava um arquivo produzido pelo próprio servidor (ex.: o splat gerado pelo worker de capturas). */
+  salvar(chave: string, dados: Buffer, tipoConteudo: string): Promise<void>;
   apagar(chave: string): Promise<void>;
 }
 
@@ -130,6 +132,10 @@ export class ArmazenamentoLocal implements Armazenamento {
     return createReadStream(this.caminho(chave));
   }
 
+  async salvar(chave: string, dados: Buffer, _tipoConteudo?: string): Promise<void> {
+    await this.gravar(chave, Readable.from([dados]), dados.length);
+  }
+
   async apagar(chave: string): Promise<void> {
     await rm(this.caminho(chave), { force: true });
   }
@@ -185,6 +191,10 @@ export class ArmazenamentoS3 implements Armazenamento {
   async abrirLeitura(chave: string): Promise<Readable> {
     const r = await this.s3.send(new GetObjectCommand({ Bucket: this.cfg.bucket, Key: chave }));
     return r.Body as Readable;
+  }
+
+  async salvar(chave: string, dados: Buffer, tipoConteudo: string): Promise<void> {
+    await this.s3.send(new PutObjectCommand({ Bucket: this.cfg.bucket, Key: chave, Body: dados, ContentType: tipoConteudo, ContentLength: dados.length }));
   }
 
   async apagar(chave: string): Promise<void> {

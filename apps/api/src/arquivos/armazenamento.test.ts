@@ -32,6 +32,16 @@ describe('armazenamento local', () => {
     expect(await readdir(join(pasta, 'emp', 'x'))).toEqual([]);
   });
 
+  it('o servidor grava um arquivo pronto (resultado do worker) e lê de volta igual', async () => {
+    const dados = Buffer.from('splat gerado pelo worker');
+    await local.salvar('t/p/capturas/c1/resultado.sog', dados, 'application/octet-stream');
+    expect(await local.tamanho('t/p/capturas/c1/resultado.sog')).toBe(dados.length);
+    const lido: Buffer[] = [];
+    for await (const parte of await local.abrirLeitura('t/p/capturas/c1/resultado.sog')) lido.push(parte as Buffer);
+    expect(Buffer.concat(lido).equals(dados)).toBe(true);
+    await expect(local.salvar('../fora.sog', dados, 'application/octet-stream')).rejects.toThrow();
+  });
+
   it('recusa chave que sai da pasta', async () => {
     await expect(local.gravar('../fora.txt', Readable.from([Buffer.from('x')]), 10)).rejects.toThrow(/fora da pasta/);
   });

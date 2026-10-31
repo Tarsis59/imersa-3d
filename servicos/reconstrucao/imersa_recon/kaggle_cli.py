@@ -27,6 +27,13 @@ class KaggleCli:
     def dataset_pronto(self, id_dataset: str) -> bool:
         return "ready" in self._rodar("datasets", "status", id_dataset).lower()
 
+    def dataset_existe(self, id_dataset: str) -> bool:
+        try:
+            self._rodar("datasets", "status", id_dataset)
+            return True
+        except RuntimeError:
+            return False
+
     def enviar_kernel(self, pasta: Path) -> None:
         self._rodar("kernels", "push", "-p", str(pasta), "--accelerator", ACELERADOR, "-t", str(self.limite_kernel_s))
 

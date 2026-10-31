@@ -53,8 +53,18 @@ def instalar() -> None:
 
     from imersa_recon.treino_util import indice_gsplat
 
-    indice = indice_gsplat(torch.__version__, torch.version.cuda)
+    if not torch.cuda.is_available():
+        falhar(
+            "sem_gpu",
+            "O notebook rodou sem GPU. Na conta do Kaggle, confirme o celular (Settings → Phone Verification): "
+            "é o que libera a GPU gratuita e a internet dos notebooks.",
+        )
     pip = [sys.executable, "-m", "pip", "install", "-q"]
+    # 1º: pacotes offline do dataset imersa-pacotes (versões fixas, sem depender do PyPI)
+    rodas = sorted(str(p) for p in Path("/kaggle/input").rglob("rodas/*.whl"))
+    if rodas and subprocess.run([*pip, "--no-index", "--no-deps", *rodas]).returncode == 0:
+        return
+    indice = indice_gsplat(torch.__version__, torch.version.cuda)
     subprocess.run([*pip, "pycolmap==4.2.1"], check=True)
     if indice and subprocess.run([*pip, "gsplat==1.5.3", "--index-url", indice, "--extra-index-url", "https://pypi.org/simple"]).returncode == 0:
         return

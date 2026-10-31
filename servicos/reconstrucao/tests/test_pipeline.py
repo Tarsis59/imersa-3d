@@ -28,6 +28,9 @@ class KaggleFalso:
     def dataset_pronto(self, id_dataset: str) -> bool:
         return True
 
+    def dataset_existe(self, id_dataset: str) -> bool:
+        return any(json.loads((d / "dataset-metadata.json").read_text())["id"] == id_dataset for d in self.datasets)
+
     def enviar_kernel(self, pasta: Path) -> None:
         self.kernels.append(Path(shutil.copytree(pasta, pasta.parent / f"_kernel_{id(self)}_{len(self.kernels)}")))
 
@@ -69,7 +72,10 @@ def test_pipeline_completo_valida_desfoca_envia_privado_com_gpu_e_comprime(fotos
     assert r.metricas["gaussianas"] == 3000
     assert r.rostos_desfocados == 1
 
-    dataset = kaggle.datasets[0]
+    # 1º envio: os pacotes (offline, reaproveitáveis) e depois as fotos da captura
+    pacotes, dataset = kaggle.datasets
+    assert json.loads((pacotes / "dataset-metadata.json").read_text())["id"] == "imersa/imersa-pacotes-py313-v1"
+    assert any(p.name.startswith("pycolmap-4.2.1-cp313") for p in (pacotes / "rodas").iterdir())
     meta = json.loads((dataset / "dataset-metadata.json").read_text())
     assert meta["id"] == "imersa/imersa-cap-123"
     assert meta.get("isPrivate", True) is True
@@ -84,7 +90,7 @@ def test_pipeline_completo_valida_desfoca_envia_privado_com_gpu_e_comprime(fotos
     km = json.loads((kernel / "kernel-metadata.json").read_text())
     assert km["id"] == "imersa/imersa-treino-cap-123"
     assert km["is_private"] is True and km["enable_gpu"] is True and km["enable_internet"] is True
-    assert km["dataset_sources"] == ["imersa/imersa-cap-123"]
+    assert km["dataset_sources"] == ["imersa/imersa-cap-123", "imersa/imersa-pacotes-py313-v1"]
     assert (kernel / km["code_file"]).read_text(encoding="utf-8").startswith('"""\nFotos → 3D')
 
 
@@ -128,4 +134,14 @@ def test_cameras_ja_calculadas_vao_junto_e_a_nuvem_pula_o_colmap(fotos: Path, tm
     t.sparse = sparse
     kaggle = KaggleFalso({"etapa": "pronto"})
     executar(fotos, t, kaggle)
-    assert (kaggle.datasets[0] / "sparse" / "0" / "cameras.bin").read_bytes() == b"x"
+    assert (kaggle.datasets[-1] / "sparse" / "0" / "cameras.bin").read_bytes() == b"x"
+
+
+def test_pacotes_sao_enviados_uma_vez_so(fotos: Path, tmp_path: Path):
+    kaggle = KaggleFalso({"etapa": "pronto"})
+    executar(fotos, _trabalho(tmp_path), kaggle)
+    t2 = _trabalho(tmp_path)
+    t2.id = "cap-456"
+    executar(fotos, t2, kaggle)
+    ids = [json.loads((d / "dataset-metadata.json").read_text())["id"] for d in kaggle.datasets]
+    assert ids == ["imersa/imersa-pacotes-py313-v1", "imersa/imersa-cap-123", "imersa/imersa-cap-456"]

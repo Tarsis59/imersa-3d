@@ -13,6 +13,7 @@ from typing import Protocol
 import cv2
 
 from .compressao import comprimir
+from .pacotes import id_pacotes, preparar_pacotes
 from .rostos import EXTENSOES, processar_pasta
 from .validador import avaliar
 
@@ -23,6 +24,7 @@ CONFIG_PADRAO = {"iteracoes": 7000, "lado_maximo": 1600, "grau_sh": 3}
 class Nuvem(Protocol):
     def criar_dataset(self, pasta: Path) -> None: ...
     def dataset_pronto(self, id_dataset: str) -> bool: ...
+    def dataset_existe(self, id_dataset: str) -> bool: ...
     def enviar_kernel(self, pasta: Path) -> None: ...
     def status(self, id_kernel: str) -> str: ...
     def baixar_saida(self, id_kernel: str, destino: Path) -> None: ...
@@ -98,7 +100,7 @@ def preparar_kernel(t: Trabalho) -> Path:
         "enable_gpu": True,
         "enable_tpu": False,
         "enable_internet": True,  # instala gsplat e pycolmap
-        "dataset_sources": [t.id_dataset],
+        "dataset_sources": [t.id_dataset, id_pacotes(t.usuario)],
         "competition_sources": [],
         "kernel_sources": [],
         "model_sources": [],
@@ -107,9 +109,15 @@ def preparar_kernel(t: Trabalho) -> Path:
     return destino
 
 
+def _garantir_pacotes(nuvem: Nuvem, t: Trabalho) -> None:
+    """Pacotes do treino (pycolmap, gsplat...) num dataset reaproveitável: enviado só na 1ª captura."""
+    if not nuvem.dataset_existe(id_pacotes(t.usuario)):
+        nuvem.criar_dataset(preparar_pacotes(t.usuario, t.pasta.parent / "_pacotes"))
+
+
 def _esperar(nuvem: Nuvem, t: Trabalho) -> None:
     inicio = time.monotonic()
-    while not nuvem.dataset_pronto(t.id_dataset):
+    while not (nuvem.dataset_pronto(t.id_dataset) and nuvem.dataset_pronto(id_pacotes(t.usuario))):
         if time.monotonic() - inicio > t.limite_s:
             raise ErroPipeline("tempo_esgotado", "O envio das fotos para a nuvem não terminou a tempo.")
         time.sleep(t.intervalo_s)
@@ -136,6 +144,7 @@ def executar(fotos: Path, t: Trabalho, nuvem: Nuvem) -> Resultado:
         raise ErroPipeline("fotos_reprovadas", "As fotos não passaram na verificação de qualidade.", relatorio.problemas)
 
     t.pasta.mkdir(parents=True, exist_ok=True)
+    _garantir_pacotes(nuvem, t)
     dataset, rostos = preparar_dataset(fotos, t)
     nuvem.criar_dataset(dataset)
     _esperar(nuvem, t)
