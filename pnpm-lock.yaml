@@ -158,6 +158,9 @@ importers:
 
   packages/viewer:
     dependencies:
+      '@sparkjsdev/spark':
+        specifier: ^2.4.0
+        version: 2.4.0(three@0.187.0)
       suncalc:
         specifier: ^2.1.1
         version: 2.1.1
@@ -1073,6 +1076,11 @@ packages:
   '@smithy/types@4.19.0':
     resolution: {integrity: sha512-r7jh49VJxGerfAcTQA6gXcKc+98zOp/tqRwzYjgOE+iSQsP6cEU1hq2QzbuipmP68QtYdY9wKEhiCQZIzHgZ4Q==}
     engines: {node: '>=18.0.0'}
+
+  '@sparkjsdev/spark@2.4.0':
+    resolution: {integrity: sha512-aUjgBfhwDRcF3nUwiAD6Nh7IwvxEmW9liz2qrAXIm2BlPYBmn81QbXIpGFLBSr/o0TKGvEXbNIsKujgPGV/7QQ==}
+    peerDependencies:
+      three: '>=0.180.0'
 
   '@swc/helpers@0.5.23':
     resolution: {integrity: sha512-5lSsMOTXURePglDfvuAQUqkGek9Hg2kksOYay2m0+XR++b2NWYL/4sWyuvVBIs8oKnJaxkdi9whaL/sqN13afw==}
@@ -2797,6 +2805,10 @@ snapshots:
   '@smithy/types@4.19.0':
     dependencies:
       tslib: 2.8.1
+
+  '@sparkjsdev/spark@2.4.0(three@0.187.0)':
+    dependencies:
+      three: 0.187.0
 
   '@swc/helpers@0.5.23':
     dependencies:

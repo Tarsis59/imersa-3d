@@ -2,7 +2,7 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import type { UnidadeViewer } from '@imersa/viewer';
 import { apiNaPagina } from '@/lib/sessao';
-import type { DetalheProjeto, Espelho } from '@/lib/tipos';
+import type { Arquivo, DetalheProjeto, Espelho } from '@/lib/tipos';
 import { Vitrine } from './vitrine';
 
 export default async function PaginaVitrine({ params }: { params: Promise<{ id: string }> }) {
@@ -17,6 +17,8 @@ export default async function PaginaVitrine({ params }: { params: Promise<{ id: 
     const download = await apiNaPagina<{ url: string }>(`/arquivos/${predio.modeloArquivoId}/download`, volta);
     if (download.status === 200) modeloUrl = download.dados.url;
   }
+  const arquivos = (await apiNaPagina<Arquivo[]>(`/projetos/${encodeURIComponent(predio.projetoId)}/arquivos`, volta)).dados;
+  const interiores = arquivos.filter((a) => a.tipo === 'splat' && a.status === 'pronto').map((a) => ({ id: a.id, nome: a.nome }));
   const unidades: UnidadeViewer[] = andares.flatMap((a) =>
     a.unidades.map((u) => ({ id: u.id, codigo: u.codigo, andar: a.numero, status: u.status, areaM2: u.areaM2, quartos: u.quartos, preco: u.preco, meshNodeId: u.meshNodeId })),
   );
@@ -43,6 +45,7 @@ export default async function PaginaVitrine({ params }: { params: Promise<{ id: 
         rotacaoGraus={projeto.rotacaoGraus}
         lat={projeto.lat}
         lon={projeto.lon}
+        interiores={interiores}
       />
     </>
   );

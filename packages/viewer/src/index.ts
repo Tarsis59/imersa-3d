@@ -6,3 +6,5 @@ export { vetorJoystick, type Entrada } from './cameras/primeiraPessoa';
 export { pontoCardeal, rumoDaCamera } from './sun/bussola';
 export { NIVEIS, type NivelQualidade } from './quality/adaptativa';
 export { entornoParaLocal, type Entorno, type PredioEntorno } from './city/entorno';
+export { abrirInterior, type Interior } from './interior/interior';
+export { tipoDoSplat } from './interior/tipo';

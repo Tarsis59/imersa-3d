@@ -5,6 +5,7 @@ import { Botao, Campo, Cartao, Selecao } from '@/components/ui';
 import { alternarFavorito, lerFavoritos, salvarFavoritos } from '@/lib/favoritos';
 import { brl, COR_STATUS, ROTULO_STATUS, STATUS_UNIDADE } from '@/lib/tipos';
 import { carregarEntorno } from './actions';
+import { InteriorSplat } from './interior';
 
 const ROTULO_NIVEL = { alto: 'alta', medio: 'média', baixo: 'baixa' } as const;
 const hoje = () => new Date().toISOString().slice(0, 10);
@@ -27,6 +28,7 @@ export function Vitrine({
   rotacaoGraus,
   lat,
   lon,
+  interiores,
 }: {
   predioId: string;
   projetoId: string;
@@ -38,6 +40,8 @@ export function Vitrine({
   rotacaoGraus: number;
   lat: number | null;
   lon: number | null;
+  /** Splats prontos do projeto (interiores reais). */
+  interiores: Array<{ id: string; nome: string }>;
 }) {
   const canvas = useRef<HTMLCanvasElement>(null);
   const viewer = useRef<Viewer | null>(null);
@@ -53,6 +57,7 @@ export function Vitrine({
   const [dataSol, setDataSol] = useState(hoje);
   const [horaSol, setHoraSol] = useState(10);
   const [entorno, setEntorno] = useState<EstadoEntorno>({ tipo: 'carregando' });
+  const [interiorAberto, setInteriorAberto] = useState<{ id: string; nome: string } | null>(null);
 
   // depois da hidratação: o servidor não conhece o navegador de quem vê
   useEffect(() => setFavoritos(lerFavoritos(predioId)), [predioId]);
@@ -156,6 +161,7 @@ export function Vitrine({
             {entorno.atribuicao}
           </a>
         )}
+        {interiorAberto && <InteriorSplat arquivo={interiorAberto} aoFechar={() => setInteriorAberto(null)} />}
         {modo === 'primeira-pessoa' && <Joystick aoMover={(e) => viewer.current?.definirEntrada(e)} />}
       </div>
 
@@ -257,6 +263,20 @@ export function Vitrine({
             ))}
           </ul>
         </Cartao>
+
+        {interiores.length > 0 && (
+          <Cartao titulo="Interior real">
+            <ul className="grid gap-2">
+              {interiores.map((i) => (
+                <li key={i.id}>
+                  <Botao type="button" variante="secundario" className="w-full" onClick={() => setInteriorAberto(i)}>
+                    Ver interior: {i.nome}
+                  </Botao>
+                </li>
+              ))}
+            </ul>
+          </Cartao>
+        )}
 
         <Cartao titulo="Vista">
           <div className="grid gap-4 text-sm">

@@ -15,3 +15,9 @@ export async function carregarEntorno(projetoId: string): Promise<ResultadoEntor
   if (r.dados.semLocalizacao || !r.dados.centro) return { entorno: null, motivo: 'sem_localizacao' };
   return { entorno: { centro: r.dados.centro, predios: r.dados.predios, atribuicao: r.dados.atribuicao } };
 }
+
+/** Link assinado novo para abrir um arquivo (os links vencem; pedir só na hora de usar). */
+export async function linkDoArquivo(arquivoId: string): Promise<string | null> {
+  const r = await api<{ url: string }>(`/arquivos/${encodeURIComponent(arquivoId)}/download`, { token: await tokenParaAcao() });
+  return r.status === 200 ? r.dados.url : null;
+}
