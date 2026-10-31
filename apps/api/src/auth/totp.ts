@@ -48,14 +48,19 @@ export function codigoTotp(segredo: string, momentoMs = Date.now(), digitos = 6,
   return String(binario % 10 ** digitos).padStart(digitos, '0');
 }
 
-/** Aceita o código da janela atual e das vizinhas (tolera relógio do celular ±30 s). */
-export function conferirTotp(segredo: string, codigo: string, momentoMs = Date.now()): boolean {
+/** Contador (janela de 30 s) em que o código bate, olhando a atual e as vizinhas (relógio do celular ±30 s); null se não bate. */
+export function contadorTotp(segredo: string, codigo: string, momentoMs = Date.now()): number | null {
   const alvo = Buffer.from(codigo);
-  return [-1, 0, 1].some((j) => {
-    const c = Buffer.from(codigoTotp(segredo, momentoMs + j * 30_000));
-    return c.length === alvo.length && timingSafeEqual(c, alvo);
-  });
+  const base = Math.floor(momentoMs / 30_000);
+  for (const j of [-1, 0, 1]) {
+    const c = Buffer.from(codigoTotp(segredo, (base + j) * 30_000));
+    if (c.length === alvo.length && timingSafeEqual(c, alvo)) return base + j;
+  }
+  return null;
 }
+
+/** Aceita o código da janela atual e das vizinhas (tolera relógio do celular ±30 s). */
+export const conferirTotp = (segredo: string, codigo: string, momentoMs = Date.now()): boolean => contadorTotp(segredo, codigo, momentoMs) !== null;
 
 export function urlOtpauth(segredo: string, conta: string): string {
   const emissor = encodeURIComponent('Imersa 3D');

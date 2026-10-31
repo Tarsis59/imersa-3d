@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { base32Codificar, base32Decodificar, codigoTotp, conferirTotp, gerarSegredoTotp, urlOtpauth } from './totp';
+import { base32Codificar, base32Decodificar, codigoTotp, conferirTotp, contadorTotp, gerarSegredoTotp, urlOtpauth } from './totp';
 
 // Vetores oficiais da RFC 6238 (SHA-1): segredo ASCII "12345678901234567890"
 const RFC = base32Codificar(Buffer.from('12345678901234567890'));
@@ -28,6 +28,15 @@ describe('TOTP (RFC 6238)', () => {
     const c = codigoTotp(RFC, t);
     expect(conferirTotp(RFC, c, t + 30_000)).toBe(true);
     expect(conferirTotp(RFC, c, t + 90_000)).toBe(false);
+  });
+
+  it('devolve o contador da janela aceita (para bloquear reuso) ou null', () => {
+    const t = 1_700_000_000_000;
+    const atual = Math.floor(t / 30_000);
+    expect(contadorTotp(RFC, codigoTotp(RFC, t), t)).toBe(atual);
+    expect(contadorTotp(RFC, codigoTotp(RFC, t - 30_000), t)).toBe(atual - 1);
+    expect(contadorTotp(RFC, codigoTotp(RFC, t + 30_000), t)).toBe(atual + 1);
+    expect(contadorTotp(RFC, codigoTotp(RFC, t + 90_000), t)).toBeNull();
   });
 
   it('gera segredo de 160 bits', () => expect(gerarSegredoTotp()).toMatch(/^[A-Z2-7]{32}$/));

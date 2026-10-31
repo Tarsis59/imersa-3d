@@ -137,7 +137,19 @@ describe('fluxo multiempresa', () => {
     expect(sem.json.erro).toBe('mfa_obrigatorio');
     const ruim = await login('a@teste.com', 'empresa-a', { codigoMfa: codigoTotp(segredoA) === '000000' ? '111111' : '000000' });
     expect(ruim.json.erro).toBe('mfa_invalido');
-    expect((await login('a@teste.com', 'empresa-a', { codigoMfa: codigoTotp(segredoA) })).status).toBe(200);
+    // o código usado para ativar não serve de novo: usa o da próxima janela (aceita por tolerância de relógio)
+    expect((await login('a@teste.com', 'empresa-a', { codigoMfa: codigoTotp(segredoA, Date.now() + 30_000) })).status).toBe(200);
+  });
+
+  it('MFA: o mesmo código não entra duas vezes (bloqueio de reuso)', async () => {
+    await owner.query("UPDATE users SET mfa_ultimo_contador = NULL WHERE email = 'a@teste.com'");
+    const codigo = codigoTotp(segredoA);
+    expect((await login('a@teste.com', 'empresa-a', { codigoMfa: codigo })).status).toBe(200);
+    const reuso = await login('a@teste.com', 'empresa-a', { codigoMfa: codigo });
+    expect(reuso.status).toBe(401);
+    expect(reuso.json.erro).toBe('mfa_invalido');
+    // código de uma janela anterior à já usada também é recusado
+    expect((await login('a@teste.com', 'empresa-a', { codigoMfa: codigoTotp(segredoA, Date.now() - 30_000) })).status).toBe(401);
   });
 
   it('sem token ou com token inválido → 401', async () => {
@@ -162,6 +174,7 @@ describe('fluxo multiempresa', () => {
   });
 
   it('sair revoga o refresh', async () => {
+    await owner.query("UPDATE users SET mfa_ultimo_contador = NULL WHERE email = 'a@teste.com'");
     const l = await login('a@teste.com', 'empresa-a', { codigoMfa: codigoTotp(segredoA) });
     expect((await req('POST', '/auth/sair', { refresh: l.json.refresh })).status).toBe(204);
     expect((await req('POST', '/auth/refresh', { refresh: l.json.refresh })).status).toBe(401);

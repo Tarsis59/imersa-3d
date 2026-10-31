@@ -14,7 +14,7 @@ import { pode, exigeMfa, type Acao, type Papel } from './auth/rbac';
 import { hashSenha, conferirSenha } from './auth/senha';
 import { hashToken } from './auth/hash';
 import { criarRefresh, girarRefresh, revogarFamilia } from './auth/refresh';
-import { gerarSegredoTotp, conferirTotp, urlOtpauth } from './auth/totp';
+import { gerarSegredoTotp, contadorTotp, urlOtpauth } from './auth/totp';
 import { Registro, Login, Refresh, Sair, NovoProjeto, MfaConfirmar, NovoConvite, TokenConvite, AceitarConvite } from './esquemas';
 import { registrarAuditoria } from './auditoria';
 import { documentoOpenApi } from './openapi';
@@ -142,6 +142,12 @@ export async function construirApp({ pool, config, logger = false, reportarErro,
     }
   });
 
+  /** Cada código TOTP vale uma vez: grava a janela usada e recusa a mesma ou anteriores (atômico, sem corrida entre logins). */
+  const gastarJanelaTotp = async (userId: string, janela: number) =>
+    Boolean(
+      (await pool.query('UPDATE users SET mfa_ultimo_contador = $1 WHERE id = $2 AND (mfa_ultimo_contador IS NULL OR mfa_ultimo_contador < $1)', [janela, userId])).rowCount,
+    );
+
   app.post('/auth/login', limiteAuth, async (req) => {
     const d = Login.parse(req.body);
     const r = await pool.query<{ id: string; senha_hash: string; mfa_secret: string | null }>(
@@ -160,7 +166,8 @@ export async function construirApp({ pool, config, logger = false, reportarErro,
       if (!papel) throw new ErroHttp(401, 'credenciais_invalidas');
       if (user.mfa_secret) {
         if (!d.codigoMfa) throw new ErroHttp(401, 'mfa_obrigatorio');
-        if (!conferirTotp(decifrar(user.mfa_secret, config.TOTP_KEY), d.codigoMfa)) throw new ErroHttp(401, 'mfa_invalido');
+        const janela = contadorTotp(decifrar(user.mfa_secret, config.TOTP_KEY), d.codigoMfa);
+        if (janela === null || !(await gastarJanelaTotp(user.id, janela))) throw new ErroHttp(401, 'mfa_invalido');
       }
       return tokens(c, { userId: user.id, tenantId, papel, mfa: Boolean(user.mfa_secret) });
     });
@@ -198,7 +205,8 @@ export async function construirApp({ pool, config, logger = false, reportarErro,
     const d = MfaConfirmar.parse(req.body);
     const r = await pool.query<{ mfa_pendente: string | null }>('SELECT mfa_pendente FROM users WHERE id = $1', [s.userId]);
     const pendente = r.rows[0]?.mfa_pendente;
-    if (!pendente || !conferirTotp(decifrar(pendente, config.TOTP_KEY), d.codigo)) throw new ErroHttp(400, 'codigo_invalido');
+    const janela = pendente ? contadorTotp(decifrar(pendente, config.TOTP_KEY), d.codigo) : null;
+    if (janela === null || !(await gastarJanelaTotp(s.userId, janela))) throw new ErroHttp(400, 'codigo_invalido');
     return withTenant(pool, ctx(s), async (c) => {
       await c.query('UPDATE users SET mfa_secret = mfa_pendente, mfa_pendente = NULL WHERE id = $1', [s.userId]);
       await registrarAuditoria(c, { userId: s.userId, acao: 'mfa.ativar', entidade: 'user', entidadeId: s.userId });
