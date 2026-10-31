@@ -72,23 +72,32 @@ export class ArmazenamentoLocal implements Armazenamento {
     return this.link('get', p.assetId, p.tenantId, p.expiraS);
   }
 
-  /** Grava num arquivo temporário e só renomeia no fim: nunca sobra arquivo pela metade. */
+  /**
+   * Grava num arquivo temporário e só renomeia no fim: nunca sobra arquivo pela metade.
+   * Passou do limite: continua LENDO até o fim (descartando), para a requisição HTTP terminar e receber 413;
+   * interromper a leitura no meio deixaria o cliente sem resposta.
+   */
   async gravar(chave: string, origem: Readable, limite: number): Promise<{ tamanho: number; sha256: string }> {
     const final = this.caminho(chave);
     const temporario = `${final}.parcial`;
     await mkdir(dirname(final), { recursive: true });
     const hash = createHash('sha256');
     let tamanho = 0;
+    let excedeu = false;
     const contador = new Transform({
       transform(pedaco: Buffer, _codificacao, pronto) {
         tamanho += pedaco.length;
-        if (tamanho > limite) return pronto(new ErroLimite());
+        if (excedeu || tamanho > limite) {
+          excedeu = true;
+          return pronto();
+        }
         hash.update(pedaco);
         pronto(null, pedaco);
       },
     });
     try {
       await pipeline(origem, contador, createWriteStream(temporario));
+      if (excedeu) throw new ErroLimite();
       await rename(temporario, final);
     } catch (e) {
       await rm(temporario, { force: true });

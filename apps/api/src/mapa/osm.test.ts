@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { categorizar, consultaOverpass, espacar, interpretarNominatim, interpretarOverpass } from './osm';
 
 describe('categorias de pontos de interesse', () => {
@@ -57,11 +57,22 @@ describe('Nominatim', () => {
 });
 
 describe('fila com intervalo mínimo (regra de uso do Nominatim)', () => {
-  it('espaça as chamadas', async () => {
-    const fila = espacar(50);
-    const inicio = Date.now();
-    const tempos = await Promise.all([1, 2, 3].map(() => fila(async () => Date.now() - inicio)));
-    expect(tempos[1]! - tempos[0]!).toBeGreaterThanOrEqual(45);
-    expect(tempos[2]! - tempos[1]!).toBeGreaterThanOrEqual(45);
+  it('espaça as chamadas (relógio simulado: determinístico mesmo com a máquina carregada)', async () => {
+    vi.useFakeTimers();
+    try {
+      const fila = espacar(50);
+      const feitas: number[] = [];
+      for (const n of [1, 2, 3]) void fila(async () => feitas.push(n));
+      await vi.advanceTimersByTimeAsync(0);
+      expect(feitas).toEqual([1]);
+      await vi.advanceTimersByTimeAsync(49);
+      expect(feitas).toEqual([1]);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(feitas).toEqual([1, 2]);
+      await vi.advanceTimersByTimeAsync(50);
+      expect(feitas).toEqual([1, 2, 3]);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

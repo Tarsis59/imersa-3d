@@ -152,13 +152,13 @@ export function rotasEmpreendimentos(app: FastifyInstance, { pool, exigir }: Dep
     return withTenant(pool, ctx(s), async (c) => {
       const predio = await exigirLinha(
         c,
-        'SELECT b.id, b.nome, p.id AS "projetoId", p.nome AS "projetoNome" FROM buildings b JOIN projects p ON p.id = b.project_id WHERE b.id = $1',
+        'SELECT b.id, b.nome, b.modelo_asset_id AS "modeloArquivoId", p.id AS "projetoId", p.nome AS "projetoNome" FROM buildings b JOIN projects p ON p.id = b.project_id WHERE b.id = $1',
         [id],
       );
       const andares = (await c.query<{ id: string; numero: number; nome: string }>('SELECT id, numero, nome FROM floors WHERE building_id = $1 ORDER BY numero DESC', [id])).rows;
       const unidades = (
         await c.query<{ id: string; floor_id: string; codigo: string; status: StatusUnidade; preco: number | null; tipologia: string | null; areaM2: number | null; quartos: number | null }>(
-          `SELECT u.id, u.floor_id, u.codigo, u.status, u.preco::float8 AS preco,
+          `SELECT u.id, u.floor_id, u.codigo, u.status, u.preco::float8 AS preco, u.mesh_node_id AS "meshNodeId",
                   t.nome AS tipologia, t.area_m2::float8 AS "areaM2", t.quartos
              FROM units u LEFT JOIN unit_types t ON t.id = u.unit_type_id
             WHERE u.building_id = $1 ORDER BY u.codigo`,
@@ -225,6 +225,13 @@ export function rotasEmpreendimentos(app: FastifyInstance, { pool, exigir }: Dep
         [id],
       );
       if (d.tipologiaId) await exigirTipologiaDoProjeto(c, d.tipologiaId, atual.project_id);
+      if (d.meshNodeId) {
+        const ocupado = await c.query(
+          'SELECT 1 FROM units WHERE mesh_node_id = $2 AND id <> $1 AND building_id = (SELECT building_id FROM units WHERE id = $1)',
+          [id, d.meshNodeId],
+        );
+        if (ocupado.rowCount) throw new ErroHttp(409, 'no_3d_em_uso');
+      }
       const r = (
         await c.query(`UPDATE units SET ${sets.join(', ')} WHERE id = $1 RETURNING id, codigo, status, preco::float8 AS preco, unit_type_id AS "tipologiaId", mesh_node_id AS "meshNodeId"`, valores)
       ).rows[0];

@@ -19,6 +19,11 @@ import { Registro, Login, Refresh, Sair, NovoProjeto, MfaConfirmar, NovoConvite,
 import { registrarAuditoria } from './auditoria';
 import { documentoOpenApi } from './openapi';
 import { rotasEmpreendimentos } from './rotas/empreendimentos';
+import { rotasArquivos } from './rotas/arquivos';
+import { rotasMapa } from './rotas/mapa';
+import { ArmazenamentoLocal, ArmazenamentoS3, type Armazenamento } from './arquivos/armazenamento';
+import { clamav, semAntivirus, type Antivirus } from './arquivos/antivirus';
+import { servicosMapaReais, type ServicosMapa } from './mapa/osm';
 
 export interface Deps {
   pool: pg.Pool;
@@ -26,6 +31,19 @@ export interface Deps {
   logger?: boolean;
   /** Chamado em todo erro 500 (ex.: Sentry). */
   reportarErro?: (erro: unknown, requestId: string) => void;
+  /** Substituíveis nos testes; por padrão vêm da configuração. */
+  armazenamento?: Armazenamento;
+  antivirus?: Antivirus;
+  mapa?: ServicosMapa;
+}
+
+function armazenamentoDaConfig(config: Config): Armazenamento {
+  if (config.ARMAZENAMENTO === 's3') {
+    const { S3_BUCKET, S3_REGIAO, S3_ACCESS_KEY, S3_SECRET_KEY } = config;
+    if (!S3_BUCKET || !S3_REGIAO || !S3_ACCESS_KEY || !S3_SECRET_KEY) throw new Error('ARMAZENAMENTO=s3 exige S3_BUCKET, S3_REGIAO, S3_ACCESS_KEY e S3_SECRET_KEY');
+    return new ArmazenamentoS3({ bucket: S3_BUCKET, regiao: S3_REGIAO, endpoint: config.S3_ENDPOINT, accessKeyId: S3_ACCESS_KEY, secretAccessKey: S3_SECRET_KEY });
+  }
+  return new ArmazenamentoLocal(config.ARMAZENAMENTO_PASTA ?? 'armazenamento', config.API_URL_PUBLICA ?? 'http://localhost:3333', config.JWT_SECRET);
 }
 
 // Hash real de uma senha qualquer: login de e-mail inexistente gasta o mesmo tempo (evita descobrir e-mails pelo tempo).
@@ -34,7 +52,7 @@ const obterHashFalso = () => (hashFalso ??= hashSenha('senha-falsa-apenas-para-i
 
 const ID_VALIDO = /^[\w-]{8,64}$/;
 
-export async function construirApp({ pool, config, logger = false, reportarErro }: Deps): Promise<FastifyInstance> {
+export async function construirApp({ pool, config, logger = false, reportarErro, armazenamento, antivirus, mapa }: Deps): Promise<FastifyInstance> {
   const app = Fastify({
     logger: logger ? { level: 'info', redact: ['req.headers.authorization'] } : false,
     trustProxy: config.TRUST_PROXY,
@@ -56,6 +74,8 @@ export async function construirApp({ pool, config, logger = false, reportarErro 
       return reply.status(400).send({ erro: 'dados_invalidos', detalhes: erro.issues.map((i) => ({ campo: i.path.join('.'), mensagem: i.message })) });
     }
     if (erro instanceof ErroHttp) return reply.status(erro.status).send({ erro: erro.codigo });
+    // Rede de segurança: corrida que viola uma chave única no banco vira 409, não 500.
+    if ((erro as { code?: string }).code === '23505') return reply.status(409).send({ erro: 'ja_existe' });
     const status = (erro as { statusCode?: number }).statusCode;
     if (status && status >= 400 && status < 500) return reply.status(status).send({ erro: (erro as Error).message });
     req.log.error(erro);
@@ -313,6 +333,15 @@ export async function construirApp({ pool, config, logger = false, reportarErro 
   });
 
   rotasEmpreendimentos(app, { pool, exigir });
+  rotasArquivos(app, {
+    pool,
+    exigir,
+    armazenamento: armazenamento ?? armazenamentoDaConfig(config),
+    antivirus: antivirus ?? (config.CLAMAV_HOST ? clamav(config.CLAMAV_HOST, config.CLAMAV_PORTA ?? 3310) : semAntivirus),
+    segredo: config.JWT_SECRET,
+    limiteBytes: (config.LIMITE_ARMAZENAMENTO_GB ?? 50) * 1024 ** 3,
+  });
+  rotasMapa(app, { pool, exigir, mapa: mapa ?? servicosMapaReais(config.OSM_USER_AGENT ?? 'Imersa3D-dev/0.1 (ambiente de desenvolvimento)') });
 
   return app;
 }
