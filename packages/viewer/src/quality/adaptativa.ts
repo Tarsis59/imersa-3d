@@ -25,6 +25,8 @@ export interface OpcoesQualidade {
   esperaMs?: number;
   /** Quadro mais longo que isso é ignorado (aba em segundo plano, travada pontual). */
   quadroMaxMs?: number;
+  /** Só mede, nunca troca de nível (testes visuais, comparação entre aparelhos). */
+  fixo?: boolean;
 }
 
 /** Mede o FPS e decide o nível de qualidade, com histerese para não ficar trocando. */
@@ -45,6 +47,7 @@ export class QualidadeAdaptativa {
       sustentarMs: opcoes.sustentarMs ?? 5_000,
       esperaMs: opcoes.esperaMs ?? 3_000,
       quadroMaxMs: opcoes.quadroMaxMs ?? 250,
+      fixo: opcoes.fixo ?? false,
     };
   }
 
@@ -70,6 +73,7 @@ export class QualidadeAdaptativa {
     this.desdeTroca += dtMs;
     if (this.soma < this.o.janelaMs) return null;
 
+    if (this.o.fixo) return null;
     const fps = this.fps;
     this.acimaMs = fps > this.o.folgaFps ? this.acimaMs + dtMs : 0;
     if (this.desdeTroca < this.o.esperaMs) return null;

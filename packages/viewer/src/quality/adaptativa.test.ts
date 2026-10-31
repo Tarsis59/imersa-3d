@@ -61,4 +61,12 @@ describe('qualidade adaptativa', () => {
     expect(new QualidadeAdaptativa().pixelRatio(1)).toBe(1);
     expect(new QualidadeAdaptativa({ inicial: 2 }).pixelRatio(3)).toBe(1);
   });
+
+  it('fixo (testes visuais, comparação): mede o FPS mas nunca troca de nível', () => {
+    const q = new QualidadeAdaptativa({ inicial: 1, fixo: true });
+    expect(rodar(q, 10, 30_000)).toEqual([]);
+    expect(rodar(q, 120, 30_000)).toEqual([]);
+    expect(q.nivel.nome).toBe('medio');
+    expect(q.fps).toBeCloseTo(120, 0);
+  });
 });

@@ -27,6 +27,8 @@ export interface ConfigViewer {
   lon?: number;
   /** Índice do nível de qualidade inicial (0 = alto). */
   qualidadeInicial?: number;
+  /** Mantém o nível inicial (só mede o FPS). Para testes visuais. */
+  qualidadeFixa?: boolean;
   /** Pastas dos decodificadores Draco/KTX2 (Meshopt já vem embutido). */
   decodificadores?: Decodificadores;
 }
@@ -95,7 +97,7 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
   const rotacao = config.rotacaoGraus ?? 0;
   const lat = config.lat ?? ORIGEM_PAULISTA.lat;
   const lon = config.lon ?? ORIGEM_PAULISTA.lon;
-  const qualidade = new QualidadeAdaptativa({ inicial: config.qualidadeInicial ?? 0 });
+  const qualidade = new QualidadeAdaptativa({ inicial: config.qualidadeInicial ?? 0, fixo: config.qualidadeFixa ?? false });
   const criadoEm = performance.now();
   let cargaMs: number | null = null;
   let erros = 0;
@@ -159,6 +161,35 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
   let atribuicaoEntorno: string | null = null;
   const materialCidade = new THREE.MeshStandardMaterial({ color: 0xeceae4, roughness: 0.9 });
   prepararMaterial(materialCidade);
+
+  /**
+   * Raio-x de visão: recorta os prédios da cidade que ficam entre a câmera e o empreendimento (cilindro em volta
+   * da linha de visão), como em visualização de arquitetura. As sombras deles continuam (o mapa de sombra usa
+   * outro material). Só na vista de cima; na primeira pessoa a cidade fica inteira.
+   */
+  const raioX = { camera: { value: new THREE.Vector3() }, alvo: { value: new THREE.Vector3() }, raio: { value: 0 } };
+  const compilarCsm = materialCidade.onBeforeCompile;
+  materialCidade.onBeforeCompile = (shader, r) => {
+    compilarCsm.call(materialCidade, shader, r);
+    shader.uniforms.uRaioXCamera = raioX.camera;
+    shader.uniforms.uRaioXAlvo = raioX.alvo;
+    shader.uniforms.uRaioXRaio = raioX.raio;
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <common>', '#include <common>\nvarying vec3 vRaioXMundo;')
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\nvRaioXMundo = (modelMatrix * vec4(transformed, 1.0)).xyz;');
+    shader.fragmentShader = shader.fragmentShader
+      .replace('#include <common>', '#include <common>\nvarying vec3 vRaioXMundo;\nuniform vec3 uRaioXCamera;\nuniform vec3 uRaioXAlvo;\nuniform float uRaioXRaio;')
+      .replace(
+        '#include <clipping_planes_fragment>',
+        `#include <clipping_planes_fragment>
+        if (uRaioXRaio > 0.0) {
+          vec3 linha = uRaioXAlvo - uRaioXCamera;
+          float t = clamp(dot(vRaioXMundo - uRaioXCamera, linha) / dot(linha, linha), 0.0, 1.0);
+          if (t < 0.98 && distance(vRaioXMundo, uRaioXCamera + t * linha) < uRaioXRaio) discard;
+        }`,
+      );
+  };
+  materialCidade.customProgramCacheKey = () => 'imersa-cidade-raiox';
 
   /** Bloqueio por raio horizontal na altura da cintura contra malhas reais (paredes com portas, prédios da cidade). */
   function bloqueioPorRaio(objetos: THREE.Object3D[]): OpcoesPasso['bloqueado'] {
@@ -405,6 +436,14 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
       camera.rotation.set(pessoa.pitch, pessoa.yaw, 0, 'YXZ');
     }
 
+    if (modo === 'orbita' && cidade) {
+      const c = caixaDoPredio();
+      raioX.camera.value.copy(camera.position);
+      raioX.alvo.value.copy(orbita.target);
+      raioX.raio.value = Math.max(15, Math.hypot(c.maxX - c.minX, c.maxZ - c.minZ) / 2 + 6);
+    } else {
+      raioX.raio.value = 0;
+    }
     csm.update();
     renderer.render(cena, camera);
 

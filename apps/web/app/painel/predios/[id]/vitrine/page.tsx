@@ -5,8 +5,12 @@ import { apiNaPagina } from '@/lib/sessao';
 import type { Arquivo, DetalheProjeto, Espelho, Me } from '@/lib/tipos';
 import { Vitrine } from './vitrine';
 
-export default async function PaginaVitrine({ params }: { params: Promise<{ id: string }> }) {
+const NIVEIS_FIXOS = ['alto', 'medio', 'baixo'] as const;
+
+export default async function PaginaVitrine({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ qualidade?: string }> }) {
   const { id } = await params;
+  // ?qualidade=alto|medio|baixo fixa o nível (testes visuais, comparação entre aparelhos)
+  const fixa = NIVEIS_FIXOS.indexOf((await searchParams).qualidade as (typeof NIVEIS_FIXOS)[number]);
   const volta = `/painel/predios/${id}/vitrine`;
   const r = await apiNaPagina<Espelho>(`/predios/${encodeURIComponent(id)}`, volta);
   if (r.status !== 200) notFound();
@@ -51,6 +55,7 @@ export default async function PaginaVitrine({ params }: { params: Promise<{ id: 
         lat={projeto.lat}
         lon={projeto.lon}
         interiores={interiores}
+        qualidadeFixa={fixa >= 0 ? fixa : null}
       />
     </>
   );

@@ -32,6 +32,7 @@ export function Vitrine({
   lat,
   lon,
   interiores,
+  qualidadeFixa = null,
 }: {
   predioId: string;
   projetoId: string;
@@ -48,11 +49,13 @@ export function Vitrine({
   lon: number | null;
   /** Splats prontos do projeto (interiores reais). */
   interiores: Array<{ id: string; nome: string }>;
+  /** Índice do nível de qualidade a manter fixo; `null` = automático. */
+  qualidadeFixa?: number | null;
 }) {
   const canvas = useRef<HTMLCanvasElement>(null);
   const viewer = useRef<Viewer | null>(null);
-  const inicial = useRef({ modeloUrl, unidades, rotacaoGraus, lat, lon, projetoId, predioId });
-  inicial.current = { modeloUrl, unidades, rotacaoGraus, lat, lon, projetoId, predioId };
+  const inicial = useRef({ modeloUrl, unidades, rotacaoGraus, lat, lon, projetoId, predioId, qualidadeFixa });
+  inicial.current = { modeloUrl, unidades, rotacaoGraus, lat, lon, projetoId, predioId, qualidadeFixa };
   const [estado, setEstado] = useState<'carregando' | 'pronto' | 'erro'>('carregando');
   const [telemetria, setTelemetria] = useState<EstadoViewer | null>(null);
   const [filtro, setFiltro] = useState<Filtro>(filtroVazio);
@@ -74,7 +77,9 @@ export function Vitrine({
     if (!el) return;
     const c = inicial.current;
     setEstado('carregando');
-    const v = criarViewer(el, { unidades: c.unidades, modeloUrl: c.modeloUrl, rotacaoGraus: c.rotacaoGraus, lat: c.lat ?? undefined, lon: c.lon ?? undefined, decodificadores: DECODIFICADORES });
+    const v = criarViewer(el, { unidades: c.unidades, modeloUrl: c.modeloUrl, rotacaoGraus: c.rotacaoGraus, lat: c.lat ?? undefined, lon: c.lon ?? undefined, decodificadores: DECODIFICADORES,
+      ...(c.qualidadeFixa !== null ? { qualidadeInicial: c.qualidadeFixa, qualidadeFixa: true } : {}),
+    });
     viewer.current = v;
     let vivo = true;
     v.aoSelecionar((id) => setSelecionada(id));
