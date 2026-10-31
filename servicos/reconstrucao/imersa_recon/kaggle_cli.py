@@ -25,7 +25,10 @@ class KaggleCli:
         self._rodar("datasets", "create", "-p", str(pasta), "-r", "zip", "-q", limite_s=3 * 3600)
 
     def dataset_pronto(self, id_dataset: str) -> bool:
-        return "ready" in self._rodar("datasets", "status", id_dataset).lower()
+        try:
+            return "ready" in self._rodar("datasets", "status", id_dataset).lower()
+        except RuntimeError:
+            return False  # recém-criado: o Kaggle ainda não o mostra; é só esperar
 
     def dataset_existe(self, id_dataset: str) -> bool:
         try:

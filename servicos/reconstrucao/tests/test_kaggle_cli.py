@@ -41,3 +41,10 @@ def test_falha_do_comando_vira_erro_claro_sem_vazar_credencial(tmp_path: Path):
     with pytest.raises(RuntimeError, match="Kaggle recusou") as e:
         k.criar_dataset(tmp_path)
     assert "abc123" not in str(e.value)
+
+
+def test_dataset_recem_criado_ainda_nao_aparece_e_isso_e_so_esperar(tmp_path: Path):
+    def ainda_nao(comando, **_):
+        return subprocess.CompletedProcess(comando, 1, "", "404 Not Found")
+
+    assert KaggleCli("kaggle", executar=ainda_nao).dataset_pronto("imersa/imersa-x") is False

@@ -37,3 +37,18 @@ def test_zip_invalido_vira_resultado_com_mensagem(tmp_path: Path):
     assert principal(["--zip", str(z), "--usuario", "imersa", "--trabalho", str(tmp_path / "t"), "--resultado", str(saida)], nuvem=KaggleFalso({})) == 2
     r = json.loads(saida.read_text(encoding="utf-8"))
     assert r == {"ok": False, "erro": "entrada_invalida", "mensagem": "o arquivo enviado não é um ZIP válido", "detalhes": []}
+
+
+def test_falha_do_cliente_kaggle_vira_resultado_legivel_e_nao_traceback(tmp_path: Path):
+    class KaggleQuebrado(KaggleFalso):
+        def criar_dataset(self, pasta):
+            raise RuntimeError("Kaggle recusou `datasets create`: código 1")
+
+    z = tmp_path / "fotos.zip"
+    with zipfile.ZipFile(z, "w") as arq:
+        for i in range(24):
+            arq.writestr(f"IMG_{i:03d}.jpg", cv2.imencode(".jpg", _foto(i))[1].tobytes())
+    saida = tmp_path / "res.json"
+    assert principal(["--zip", str(z), "--usuario", "imersa", "--trabalho", str(tmp_path / "t"), "--resultado", str(saida)], nuvem=KaggleQuebrado({})) == 2
+    r = json.loads(saida.read_text(encoding="utf-8"))
+    assert r["ok"] is False and r["erro"] == "falha_na_gpu" and "Kaggle recusou" in r["mensagem"]

@@ -91,6 +91,8 @@ def principal(argv: list[str] | None = None, nuvem: Nuvem | None = None) -> int:
         r = executar(fotos, t, nuvem)
     except ErroPipeline as e:
         return responder({"ok": False, "erro": e.codigo, "mensagem": str(e), "detalhes": e.detalhes}, 2)
+    except RuntimeError as e:  # cliente do Kaggle recusou/caiu: transitório (o worker tenta de novo)
+        return responder({"ok": False, "erro": "falha_na_gpu", "mensagem": str(e)[:500], "detalhes": []}, 2)
     return responder(
         {
             "ok": True,

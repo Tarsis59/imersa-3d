@@ -1,10 +1,11 @@
 import { fileURLToPath } from 'node:url';
-import { defineConfig } from '@playwright/test';
+import { defineConfig, devices } from '@playwright/test';
 
 const DB_APP = 'postgres://imersa_app:imersa_app_dev@localhost:55432/imersa_e2e';
 /** Prédios reais da Av. Paulista já baixados: o entorno funciona sem internet e sem usar o Overpass público. */
 /** E2E_PRODUCAO=1: site em modo de produção (build otimizado), para medir desempenho como a cliente vai ver. */
 const PRODUCAO = process.env.E2E_PRODUCAO === '1';
+const CHROMIUM_3D = ['--use-angle=swiftshader', '--enable-unsafe-swiftshader'];
 /** Worker de capturas sem GPU: devolve esta esfera (gerada pelo pipeline real: PLY → SOG). */
 const SPLAT_SIMULADO = fileURLToPath(new URL('./e2e/fixtures/esfera.sog', import.meta.url));
 const PREDIOS_PAULISTA = fileURLToPath(new URL('../../../exemplos/cidade-real/sao-paulo-paulista-osm.json', import.meta.url));
@@ -18,9 +19,14 @@ export default defineConfig({
   use: {
     baseURL: 'http://localhost:3100',
     trace: 'retain-on-failure',
-    // WebGL por software no Chromium sem tela (para o visualizador 3D)
-    launchOptions: { args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader'] },
   },
+  projects: [
+    // WebGL por software no Chromium sem tela (para o visualizador 3D)
+    { name: 'chromium', testIgnore: /tablets\.spec\.ts/, use: { launchOptions: { args: CHROMIUM_3D } } },
+    // iPad de verdade = motor do Safari (WebKit), com toque, tela retina e modo móvel
+    { name: 'ipad', testMatch: /tablets\.spec\.ts/, use: { ...devices['iPad Pro 11'] } },
+    { name: 'tablet-android', testMatch: /tablets\.spec\.ts/, use: { ...devices['Galaxy Tab S4'], launchOptions: { args: CHROMIUM_3D } } },
+  ],
   globalSetup: './e2e/preparar.ts',
   webServer: [
     {
