@@ -18,6 +18,7 @@ import { gerarSegredoTotp, conferirTotp, urlOtpauth } from './auth/totp';
 import { Registro, Login, Refresh, Sair, NovoProjeto, MfaConfirmar, NovoConvite, TokenConvite, AceitarConvite } from './esquemas';
 import { registrarAuditoria } from './auditoria';
 import { documentoOpenApi } from './openapi';
+import { rotasEmpreendimentos } from './rotas/empreendimentos';
 
 export interface Deps {
   pool: pg.Pool;
@@ -201,7 +202,9 @@ export async function construirApp({ pool, config, logger = false, reportarErro 
   // ------------------------------------------------------------------ projetos
   app.get('/projetos', async (req) => {
     const s = await exigir(req, 'projeto:ler');
-    return withTenant(pool, ctx(s), async (c) => (await c.query('SELECT id, nome, criado_em FROM projects ORDER BY criado_em')).rows);
+    return withTenant(pool, ctx(s), async (c) =>
+      (await c.query('SELECT id, nome, status, cidade, uf, criado_em FROM projects ORDER BY criado_em')).rows,
+    );
   });
 
   app.post('/projetos', async (req, reply) => {
@@ -308,6 +311,8 @@ export async function construirApp({ pool, config, logger = false, reportarErro 
       (await c.query('SELECT acao, entidade, entidade_id, user_id, criado_em FROM audit_logs ORDER BY id DESC LIMIT 100')).rows,
     );
   });
+
+  rotasEmpreendimentos(app, { pool, exigir });
 
   return app;
 }

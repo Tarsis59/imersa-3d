@@ -1,5 +1,21 @@
 import { z } from 'zod';
-import { Registro, Login, Refresh, Sair, NovoProjeto, MfaConfirmar, NovoConvite, AceitarConvite } from './esquemas';
+import {
+  Registro,
+  Login,
+  Refresh,
+  Sair,
+  NovoProjeto,
+  MfaConfirmar,
+  NovoConvite,
+  AceitarConvite,
+  AtualizarProjeto,
+  NovoPredio,
+  NovaTipologia,
+  NovaUnidade,
+  AtualizarUnidade,
+  MudarStatus,
+  Importacao,
+} from './esquemas';
 
 const esquema = (s: z.ZodType) => z.toJSONSchema(s, { io: 'input', unrepresentable: 'any' });
 const corpo = (s: z.ZodType) => ({ required: true, content: { 'application/json': { schema: esquema(s) } } });
@@ -29,6 +45,22 @@ export function documentoOpenApi() {
       '/membros/convites': { post: { summary: 'Cria convite (gestão + MFA)', security: auth, requestBody: corpo(NovoConvite), responses: r({ 201: 'link do convite', 403: 'sem permissão' }) } },
       '/convites/{token}': { get: { summary: 'Dados públicos do convite', responses: r({ 200: 'convite', 404: 'inválido ou expirado' }) } },
       '/convites/aceitar': { post: { summary: 'Aceita convite (cria conta ou usa a existente)', requestBody: corpo(AceitarConvite), responses: r({ 201: 'membro', 401: 'senha errada', 404: 'inválido', 409: 'já é membro' }) } },
+      '/projetos/{id}': {
+        get: { summary: 'Empreendimento: dados, prédios, tipologias e resumo de status', security: auth, responses: r({ 200: 'detalhe', 404: 'não encontrado' }) },
+        patch: { summary: 'Edita dados e localização (gestão + MFA)', security: auth, requestBody: corpo(AtualizarProjeto), responses: r({ 200: 'ok', 400: 'dados inválidos', 404: 'não encontrado' }) },
+      },
+      '/projetos/{id}/predios': { post: { summary: 'Cria prédio com andares (gestão + MFA)', security: auth, requestBody: corpo(NovoPredio), responses: r({ 201: 'criado', 409: 'nome repetido' }) } },
+      '/projetos/{id}/tipologias': { post: { summary: 'Cria tipologia (gestão + MFA)', security: auth, requestBody: corpo(NovaTipologia), responses: r({ 201: 'criada', 409: 'nome repetido' }) } },
+      '/projetos/{id}/importacao': {
+        post: { summary: 'Importa unidades por CSV: prévia (aplicar=false) ou gravação (aplicar=true)', security: auth, requestBody: corpo(Importacao), responses: r({ 200: 'resumo e erros', 400: 'erros: nada foi gravado' }) },
+      },
+      '/predios/{id}': { get: { summary: 'Espelho de vendas: andares e unidades com transições permitidas', security: auth, responses: r({ 200: 'espelho', 404: 'não encontrado' }) } },
+      '/predios/{id}/unidades': { post: { summary: 'Cria unidade (gestão + MFA)', security: auth, requestBody: corpo(NovaUnidade), responses: r({ 201: 'criada', 400: 'andar inexistente', 409: 'código repetido' }) } },
+      '/unidades/{id}': { patch: { summary: 'Edita preço, tipologia ou nó 3D (gestão + MFA)', security: auth, requestBody: corpo(AtualizarUnidade), responses: r({ 200: 'ok' }) } },
+      '/unidades/{id}/status': {
+        post: { summary: 'Muda status seguindo as regras', security: auth, requestBody: corpo(MudarStatus), responses: r({ 200: 'ok', 400: 'motivo obrigatório', 403: 'sem permissão', 409: 'transição inválida' }) },
+      },
+      '/unidades/{id}/historico': { get: { summary: 'Histórico de status', security: auth, responses: r({ 200: 'lista' }) } },
       '/auditoria': { get: { summary: 'Últimas 100 ações da empresa (gestão + MFA)', security: auth, responses: r({ 200: 'lista', 403: 'sem permissão' }) } },
     },
   };
