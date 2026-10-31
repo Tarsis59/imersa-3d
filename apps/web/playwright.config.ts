@@ -1,6 +1,9 @@
+import { fileURLToPath } from 'node:url';
 import { defineConfig } from '@playwright/test';
 
 const DB_APP = 'postgres://imersa_app:imersa_app_dev@localhost:55432/imersa_e2e';
+/** Prédios reais da Av. Paulista já baixados: o entorno funciona sem internet e sem usar o Overpass público. */
+const PREDIOS_PAULISTA = fileURLToPath(new URL('../../../exemplos/cidade-real/sao-paulo-paulista-osm.json', import.meta.url));
 
 export default defineConfig({
   testDir: './e2e',
@@ -21,7 +24,7 @@ export default defineConfig({
       url: 'http://localhost:3334/health',
       reuseExistingServer: false,
       timeout: 60_000,
-      env: { DATABASE_URL: DB_APP, PORT: '3334', WEB_URL: 'http://localhost:3100', CORS_ORIGIN: 'http://localhost:3100', RATE_LIMIT_AUTH: '1000', API_URL_PUBLICA: 'http://localhost:3334', ARMAZENAMENTO_PASTA: 'armazenamento-e2e' },
+      env: { DATABASE_URL: DB_APP, PORT: '3334', WEB_URL: 'http://localhost:3100', CORS_ORIGIN: 'http://localhost:3100', RATE_LIMIT_AUTH: '1000', API_URL_PUBLICA: 'http://localhost:3334', ARMAZENAMENTO_PASTA: 'armazenamento-e2e', MAPA_ARQUIVO_PREDIOS: PREDIOS_PAULISTA },
     },
     {
       command: 'pnpm exec next dev -p 3100',

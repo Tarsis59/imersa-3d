@@ -23,7 +23,7 @@ import { rotasArquivos } from './rotas/arquivos';
 import { rotasMapa } from './rotas/mapa';
 import { ArmazenamentoLocal, ArmazenamentoS3, type Armazenamento } from './arquivos/armazenamento';
 import { clamav, semAntivirus, type Antivirus } from './arquivos/antivirus';
-import { servicosMapaReais, type ServicosMapa } from './mapa/osm';
+import { comPrediosDeArquivo, servicosMapaReais, type ServicosMapa } from './mapa/osm';
 
 export interface Deps {
   pool: pg.Pool;
@@ -342,7 +342,8 @@ export async function construirApp({ pool, config, logger = false, reportarErro,
     segredo: config.JWT_SECRET,
     limiteBytes: (config.LIMITE_ARMAZENAMENTO_GB ?? 50) * 1024 ** 3,
   });
-  rotasMapa(app, { pool, exigir, mapa: mapa ?? servicosMapaReais(config.OSM_USER_AGENT ?? 'Imersa3D-dev/0.1 (ambiente de desenvolvimento)') });
+  const mapaReal = servicosMapaReais(config.OSM_USER_AGENT ?? 'Imersa3D-dev/0.1 (ambiente de desenvolvimento)');
+  rotasMapa(app, { pool, exigir, mapa: mapa ?? (config.MAPA_ARQUIVO_PREDIOS ? comPrediosDeArquivo(mapaReal, config.MAPA_ARQUIVO_PREDIOS) : mapaReal) });
 
   return app;
 }

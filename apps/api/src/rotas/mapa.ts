@@ -7,7 +7,7 @@ import type { Acao } from '../auth/rbac';
 import type { Sessao } from '../auth/tokens';
 import { registrarAuditoria } from '../auditoria';
 import { IdParam } from '../esquemas';
-import type { ServicosMapa } from '../mapa/osm';
+import type { PredioOsm, ServicosMapa } from '../mapa/osm';
 
 interface Dependencias {
   pool: pg.Pool;
@@ -31,7 +31,62 @@ async function localizacao(c: pg.PoolClient, projetoId: string): Promise<{ lat: 
   return lat === null || lon === null ? null : { lat, lon };
 }
 
+/** Raio do entorno em volta do empreendimento. */
+const RAIO_ENTORNO_M = 500;
+/** Se o projeto mudou de lugar mais que isso, o cache do entorno não vale mais. */
+const DESVIO_MAX_CACHE_M = 50;
+const ATRIBUICAO_OSM = '© colaboradores do OpenStreetMap (ODbL)';
+
 export function rotasMapa(app: FastifyInstance, { pool, exigir, mapa }: Dependencias): void {
+  async function buscarPredios(centro: { lat: number; lon: number }): Promise<PredioOsm[]> {
+    try {
+      return await mapa.buscarPredios(centro.lat, centro.lon, RAIO_ENTORNO_M);
+    } catch {
+      throw new ErroHttp(502, 'servico_mapa_indisponivel');
+    }
+  }
+  const gravarEntorno = (c: pg.PoolClient, id: string, centro: { lat: number; lon: number }, predios: PredioOsm[]) =>
+    c.query(
+      `INSERT INTO entornos (project_id, centro, raio_m, predios) VALUES ($1, ST_SetSRID(ST_MakePoint($3, $2), 4326), $4, $5::jsonb)
+       ON CONFLICT (project_id) DO UPDATE SET centro = EXCLUDED.centro, raio_m = EXCLUDED.raio_m, predios = EXCLUDED.predios, atualizado_em = now()`,
+      [id, centro.lat, centro.lon, RAIO_ENTORNO_M, JSON.stringify(predios)],
+    );
+
+  app.get('/projetos/:id/entorno', async (req) => {
+    const s = await exigir(req, 'projeto:ler');
+    const { id } = IdParam.parse(req.params);
+    const { centro, cache } = await withTenant(pool, ctx(s), async (c) => {
+      const centro = await localizacao(c, id);
+      if (!centro) return { centro, cache: undefined };
+      const r = await c.query<{ predios: PredioOsm[]; atualizadoEm: Date; desvio: number; raio: number }>(
+        `SELECT e.predios, e.atualizado_em AS "atualizadoEm", e.raio_m AS raio, ST_Distance(e.centro::geography, p.geom::geography) AS desvio
+           FROM entornos e JOIN projects p ON p.id = e.project_id WHERE e.project_id = $1`,
+        [id],
+      );
+      return { centro, cache: r.rows[0] };
+    });
+    if (!centro) return { semLocalizacao: true, centro: null, predios: [], atualizadoEm: null, atribuicao: ATRIBUICAO_OSM };
+    if (cache && cache.raio === RAIO_ENTORNO_M && cache.desvio <= DESVIO_MAX_CACHE_M) {
+      return { semLocalizacao: false, centro, predios: cache.predios, atualizadoEm: cache.atualizadoEm, atribuicao: ATRIBUICAO_OSM };
+    }
+    const predios = await buscarPredios(centro);
+    await withTenant(pool, ctx(s), (c) => gravarEntorno(c, id, centro, predios));
+    return { semLocalizacao: false, centro, predios, atualizadoEm: new Date(), atribuicao: ATRIBUICAO_OSM };
+  });
+
+  app.post('/projetos/:id/entorno/atualizar', async (req) => {
+    const s = await exigir(req, 'empreendimento:editar');
+    const { id } = IdParam.parse(req.params);
+    const centro = await withTenant(pool, ctx(s), (c) => localizacao(c, id));
+    if (!centro) throw new ErroHttp(400, 'sem_localizacao');
+    const predios = await buscarPredios(centro);
+    await withTenant(pool, ctx(s), async (c) => {
+      await gravarEntorno(c, id, centro, predios);
+      await registrarAuditoria(c, { userId: s.userId, acao: 'entorno.atualizar', entidade: 'project', entidadeId: id, depois: { predios: predios.length } });
+    });
+    return { predios: predios.length };
+  });
+
   app.get('/geocodificar', async (req) => {
     await exigir(req, 'empreendimento:editar');
     const { q } = Busca.parse(req.query);

@@ -4,6 +4,7 @@ import { criarViewer, filtrar, filtroVazio, pontoCardeal, vetorJoystick, type Es
 import { Botao, Campo, Cartao, Selecao } from '@/components/ui';
 import { alternarFavorito, lerFavoritos, salvarFavoritos } from '@/lib/favoritos';
 import { brl, COR_STATUS, ROTULO_STATUS, STATUS_UNIDADE } from '@/lib/tipos';
+import { carregarEntorno } from './actions';
 
 const ROTULO_NIVEL = { alto: 'alta', medio: 'média', baixo: 'baixa' } as const;
 const hoje = () => new Date().toISOString().slice(0, 10);
@@ -14,8 +15,11 @@ function alternar<T>(lista: T[], x: T): T[] {
   return lista.includes(x) ? lista.filter((y) => y !== x) : [...lista, x];
 }
 
+type EstadoEntorno = { tipo: 'carregando' } | { tipo: 'pronto'; predios: number; atribuicao: string } | { tipo: 'sem_localizacao' } | { tipo: 'indisponivel' };
+
 export function Vitrine({
   predioId,
+  projetoId,
   chaveModelo,
   modeloUrl,
   unidades,
@@ -25,6 +29,7 @@ export function Vitrine({
   lon,
 }: {
   predioId: string;
+  projetoId: string;
   /** Identidade estável do modelo (o link assinado muda a cada atualização da página). */
   chaveModelo: string;
   modeloUrl: string | null;
@@ -36,8 +41,8 @@ export function Vitrine({
 }) {
   const canvas = useRef<HTMLCanvasElement>(null);
   const viewer = useRef<Viewer | null>(null);
-  const inicial = useRef({ modeloUrl, unidades, rotacaoGraus, lat, lon });
-  inicial.current = { modeloUrl, unidades, rotacaoGraus, lat, lon };
+  const inicial = useRef({ modeloUrl, unidades, rotacaoGraus, lat, lon, projetoId });
+  inicial.current = { modeloUrl, unidades, rotacaoGraus, lat, lon, projetoId };
   const [estado, setEstado] = useState<'carregando' | 'pronto' | 'erro'>('carregando');
   const [telemetria, setTelemetria] = useState<EstadoViewer | null>(null);
   const [filtro, setFiltro] = useState<Filtro>(filtroVazio);
@@ -47,6 +52,7 @@ export function Vitrine({
   const [comCorte, setComCorte] = useState<number[]>([]);
   const [dataSol, setDataSol] = useState(hoje);
   const [horaSol, setHoraSol] = useState(10);
+  const [entorno, setEntorno] = useState<EstadoEntorno>({ tipo: 'carregando' });
 
   // depois da hidratação: o servidor não conhece o navegador de quem vê
   useEffect(() => setFavoritos(lerFavoritos(predioId)), [predioId]);
@@ -67,6 +73,15 @@ export function Vitrine({
         if (!vivo) return;
         setComCorte(v.andaresComCorte());
         setEstado('pronto');
+        // entorno depois do prédio: a primeira imagem não espera o OSM
+        carregarEntorno(c.projetoId)
+          .then(async (r) => {
+            if (!vivo) return;
+            if (!r.entorno) return setEntorno({ tipo: r.motivo });
+            const n = await v.definirEntorno(r.entorno);
+            if (vivo) setEntorno({ tipo: 'pronto', predios: n, atribuicao: r.entorno.atribuicao });
+          })
+          .catch(() => vivo && setEntorno({ tipo: 'indisponivel' }));
       },
       () => vivo && setEstado('erro'),
     );
@@ -113,6 +128,7 @@ export function Vitrine({
         data-modo={modo}
         data-corte={andarCorte || 'nenhum'}
         data-posicao={telemetria ? `${telemetria.posicao.x.toFixed(1)},${telemetria.posicao.z.toFixed(1)}` : ''}
+        data-entorno={entorno.tipo === 'pronto' ? String(entorno.predios) : entorno.tipo}
         className="relative h-[70vh] min-h-96 overflow-hidden rounded-2xl border border-borda bg-fundo lg:sticky lg:top-6"
       >
         <canvas
@@ -129,6 +145,16 @@ export function Vitrine({
               {telemetria.fps} FPS · qualidade {ROTULO_NIVEL[telemetria.nivel]}
             </p>
           </>
+        )}
+        {entorno.tipo === 'pronto' && entorno.predios > 0 && (
+          <a
+            href="https://www.openstreetmap.org/copyright"
+            target="_blank"
+            rel="noreferrer"
+            className="absolute bottom-2 right-2 rounded bg-white/85 px-2 py-0.5 text-[11px] text-slate-800 hover:underline"
+          >
+            {entorno.atribuicao}
+          </a>
         )}
         {modo === 'primeira-pessoa' && <Joystick aoMover={(e) => viewer.current?.definirEntrada(e)} />}
       </div>
@@ -234,6 +260,12 @@ export function Vitrine({
 
         <Cartao titulo="Vista">
           <div className="grid gap-4 text-sm">
+            <p data-testid="aviso-entorno" className="text-suave">
+              {entorno.tipo === 'carregando' && 'Carregando os prédios reais em volta…'}
+              {entorno.tipo === 'pronto' && `${entorno.predios} prédios reais em volta (OpenStreetMap).`}
+              {entorno.tipo === 'sem_localizacao' && 'Informe a localização do empreendimento para ver os prédios reais em volta.'}
+              {entorno.tipo === 'indisponivel' && 'Os prédios em volta não puderam ser carregados agora. O empreendimento funciona normalmente.'}
+            </p>
             <Selecao id="andar-corte" rotulo="Ver até o andar (corte)" value={andarCorte} onChange={(e) => setAndarCorte(e.target.value)} disabled={estado !== 'pronto'}>
               <option value="">Prédio inteiro</option>
               {comCorte.map((n) => (

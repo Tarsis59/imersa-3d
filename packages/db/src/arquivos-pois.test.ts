@@ -101,3 +101,45 @@ describe('arquivos e pontos de interesse no banco', () => {
     expect(await comoB(async (c) => (await c.query('SELECT * FROM pois')).rowCount)).toBe(0);
   });
 });
+
+describe('entorno (cache do OSM) e telemetria do viewer no banco', () => {
+  const PREDIOS = JSON.stringify([{ osmId: 'way/1', alturaM: 30, contorno: [{ lat: -23.56, lon: -46.65 }] }]);
+  const gravarEntorno = (c: pg.PoolClient, projeto: string) =>
+    c.query(
+      `INSERT INTO entornos (project_id, centro, raio_m, predios) VALUES ($1, ST_SetSRID(ST_MakePoint(-46.65, -23.56), 4326), 500, $2::jsonb)
+       ON CONFLICT (project_id) DO UPDATE SET predios = EXCLUDED.predios, atualizado_em = now()`,
+      [projeto, PREDIOS],
+    );
+
+  it('um entorno por projeto, isolado por empresa', async () => {
+    await comoA((c) => gravarEntorno(c, projA));
+    await comoA((c) => gravarEntorno(c, projA)); // atualizar não duplica
+    expect(await comoA(async (c) => (await c.query('SELECT raio_m, jsonb_array_length(predios) AS n FROM entornos')).rows)).toEqual([{ raio_m: 500, n: 1 }]);
+    expect(await comoB(async (c) => (await c.query('SELECT * FROM entornos')).rowCount)).toBe(0);
+  });
+
+  it('BLINDAGEM: não grava entorno no projeto de outra empresa; prédios precisam ser uma lista', async () => {
+    await expect(comoA((c) => gravarEntorno(c, projB))).rejects.toThrow(/foreign key/);
+    await expect(
+      comoB((c) => c.query("INSERT INTO entornos (project_id, centro, raio_m, predios) VALUES ($1, ST_SetSRID(ST_MakePoint(0, 0), 4326), 500, '{}')", [projB])),
+    ).rejects.toThrow(/check/);
+  });
+
+  const telemetria = (c: pg.PoolClient, predio: string, fps = 58.5) =>
+    c.query("INSERT INTO telemetria_viewer (building_id, carga_ms, fps_medio, nivel, erros, celular) VALUES ($1, 1800, $2, 'alto', 0, false)", [predio, fps]);
+
+  it('telemetria: grava, só a própria empresa lê, e não aceita valores absurdos', async () => {
+    await comoA((c) => telemetria(c, predioA));
+    expect(await comoA(async (c) => (await c.query('SELECT carga_ms, fps_medio::float AS fps, nivel FROM telemetria_viewer')).rows)).toEqual([
+      { carga_ms: 1800, fps: 58.5, nivel: 'alto' },
+    ]);
+    expect(await comoB(async (c) => (await c.query('SELECT * FROM telemetria_viewer')).rowCount)).toBe(0);
+    await expect(comoA((c) => telemetria(c, predioA, 9999))).rejects.toThrow(/check/);
+    await expect(comoB((c) => telemetria(c, predioA))).rejects.toThrow(/foreign key/);
+  });
+
+  it('telemetria é só de anotar: a aplicação não altera nem apaga', async () => {
+    await expect(comoA((c) => c.query('UPDATE telemetria_viewer SET erros = 5'))).rejects.toThrow(/permission denied/);
+    await expect(comoA((c) => c.query('DELETE FROM telemetria_viewer'))).rejects.toThrow(/permission denied/);
+  });
+});

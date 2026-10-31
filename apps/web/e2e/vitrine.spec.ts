@@ -18,6 +18,10 @@ test('vitrine 3D: volumes do prédio, filtros, favoritos, voo até a unidade, co
   await page.getByLabel('Nome do projeto').fill('Residencial Vitrine');
   await page.getByRole('button', { name: 'Criar projeto' }).click();
   await page.getByRole('link', { name: /Residencial Vitrine/ }).click();
+  await page.getByLabel('Latitude').fill('-23.56175');
+  await page.getByLabel('Longitude').fill('-46.6545');
+  await page.getByRole('button', { name: 'Salvar dados' }).click();
+  await expect(page.getByText('Dados salvos.')).toBeVisible();
   await page.getByLabel('Nome do prédio').fill('Torre V');
   await page.getByLabel('Andares').fill('2');
   await page.getByRole('button', { name: 'Criar prédio' }).click();
@@ -34,6 +38,12 @@ test('vitrine 3D: volumes do prédio, filtros, favoritos, voo até a unidade, co
   await expect(vitrine).toHaveAttribute('data-estado', 'pronto', { timeout: 45_000 });
   await expect(page.getByText('as unidades aparecem como volumes por andar')).toBeVisible();
   await expect(page.getByTestId('contagem-filtro')).toHaveText('6 de 6 unidades');
+
+  // entorno: prédios reais da Av. Paulista em volta (do OSM), com a atribuição exigida pela licença
+  await expect(vitrine).toHaveAttribute('data-entorno', /^\d+$/, { timeout: 30_000 });
+  expect(Number(await vitrine.getAttribute('data-entorno'))).toBeGreaterThan(300);
+  await expect(page.getByRole('link', { name: /OpenStreetMap/ })).toHaveAttribute('href', 'https://www.openstreetmap.org/copyright');
+  await expect(page.getByTestId('aviso-entorno')).toContainText('prédios reais em volta');
 
   // telemetria: bússola e qualidade
   await expect(page.getByTestId('bussola')).toHaveAttribute('aria-label', /^Olhando para (N|NE|L|SE|S|SO|O|NO) \(\d+°\)$/);

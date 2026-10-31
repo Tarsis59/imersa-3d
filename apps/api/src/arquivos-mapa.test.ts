@@ -53,7 +53,13 @@ const mapaFalso: ServicosMapa = {
       { osmId: 'node/3', categoria: 'escola', nome: 'Colégio Dante Alighieri', lat: -23.5672, lon: -46.6555 },
     ];
   },
+  async buscarPredios(lat, lon) {
+    chamadasPredios++;
+    if (mapaFora) throw new Error('fora do ar');
+    return [{ osmId: 'way/7', alturaM: 60, contorno: [[lon, lat], [lon + 0.0001, lat], [lon + 0.0001, lat + 0.0001]] }];
+  },
 };
+let chamadasPredios = 0;
 
 let app: FastifyInstance;
 let pool: pg.Pool;
@@ -241,5 +247,71 @@ describe('localização e arredores', () => {
     expect((await req('DELETE', `/pois/${m.json.id}`, undefined, outra)).status).toBe(404);
     expect((await req('DELETE', `/pois/${m.json.id}`, undefined, admin)).status).toBe(204);
     expect((await req('GET', `/projetos/${projeto}/pois`, undefined, outra)).status).toBe(404);
+  });
+});
+
+describe('entorno: prédios reais do OSM em volta (com cache)', () => {
+  let p = '';
+  beforeAll(async () => {
+    p = (await req('POST', '/projetos', { nome: 'Torre com entorno' }, admin)).json.id;
+  });
+
+  it('sem localização: avisa e não consulta o OSM', async () => {
+    const antes = chamadasPredios;
+    const r = await req('GET', `/projetos/${p}/entorno`, undefined, consultora);
+    expect(r.status).toBe(200);
+    expect(r.json).toMatchObject({ semLocalizacao: true, predios: [] });
+    expect(chamadasPredios).toBe(antes);
+  });
+
+  it('primeira visita consulta o OSM uma vez; as seguintes usam o cache; traz a atribuição da licença', async () => {
+    await req('PATCH', `/projetos/${p}`, { lat: -23.56175, lon: -46.6545 }, admin);
+    const antes = chamadasPredios;
+    const r1 = await req('GET', `/projetos/${p}/entorno`, undefined, consultora);
+    expect(r1.status).toBe(200);
+    expect(r1.json.semLocalizacao).toBe(false);
+    expect(r1.json.centro).toEqual({ lat: -23.56175, lon: -46.6545 });
+    expect(r1.json.predios).toHaveLength(1);
+    expect(r1.json.predios[0].alturaM).toBe(60);
+    expect(r1.json.atribuicao).toMatch(/OpenStreetMap/);
+    const r2 = await req('GET', `/projetos/${p}/entorno`, undefined, consultora);
+    expect(r2.json.predios).toEqual(r1.json.predios);
+    expect(chamadasPredios).toBe(antes + 1);
+  });
+
+  it('mudar a localização menos de 50 m mantém o cache; mais que isso consulta de novo', async () => {
+    const antes = chamadasPredios;
+    await req('PATCH', `/projetos/${p}`, { lat: -23.5618, lon: -46.6545 }, admin); // ~6 m
+    await req('GET', `/projetos/${p}/entorno`, undefined, admin);
+    expect(chamadasPredios).toBe(antes);
+    await req('PATCH', `/projetos/${p}`, { lat: -23.5630, lon: -46.6545 }, admin); // ~140 m
+    const r = await req('GET', `/projetos/${p}/entorno`, undefined, admin);
+    expect(chamadasPredios).toBe(antes + 1);
+    expect(r.json.centro).toEqual({ lat: -23.563, lon: -46.6545 });
+  });
+
+  it('OSM fora do ar: com cache válido serve o cache; sem cache, 502', async () => {
+    mapaFora = true;
+    try {
+      expect((await req('GET', `/projetos/${p}/entorno`, undefined, admin)).status).toBe(200);
+      const outro = (await req('POST', '/projetos', { nome: 'Sem cache' }, admin)).json.id;
+      await req('PATCH', `/projetos/${outro}`, { lat: -23.56, lon: -46.65 }, admin);
+      const r = await req('GET', `/projetos/${outro}/entorno`, undefined, admin);
+      expect(r.status).toBe(502);
+      expect(r.json.erro).toBe('servico_mapa_indisponivel');
+    } finally {
+      mapaFora = false;
+    }
+  });
+
+  it('forçar atualização: só a gestão; outra empresa não vê', async () => {
+    expect((await req('POST', `/projetos/${p}/entorno/atualizar`, {}, consultora)).status).toBe(403);
+    const antes = chamadasPredios;
+    const r = await req('POST', `/projetos/${p}/entorno/atualizar`, {}, admin);
+    expect(r.status).toBe(200);
+    expect(r.json.predios).toBe(1);
+    expect(chamadasPredios).toBe(antes + 1);
+    expect((await req('GET', `/projetos/${p}/entorno`, undefined, outra)).status).toBe(404);
+    expect((await req('POST', `/projetos/${p}/entorno/atualizar`, {}, outra)).status).toBe(404);
   });
 });

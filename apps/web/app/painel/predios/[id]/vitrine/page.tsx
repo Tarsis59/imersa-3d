@@ -35,6 +35,7 @@ export default async function PaginaVitrine({ params }: { params: Promise<{ id: 
       </div>
       <Vitrine
         predioId={predio.id}
+        projetoId={predio.projetoId}
         chaveModelo={predio.modeloArquivoId ?? 'volumes'}
         modeloUrl={modeloUrl}
         unidades={unidades}

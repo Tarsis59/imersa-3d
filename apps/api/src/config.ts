@@ -34,6 +34,8 @@ const Esquema = z.object({
   LIMITE_ARMAZENAMENTO_GB: z.coerce.number().positive().optional(),
   /** Identificação exigida pelo Nominatim/Overpass (em produção: nome e contato reais). */
   OSM_USER_AGENT: z.string().optional(),
+  /** Arquivo do Overpass já baixado: prédios do entorno sem internet (testes e demonstração). */
+  MAPA_ARQUIVO_PREDIOS: z.string().optional(),
 });
 
 export type Config = z.infer<typeof Esquema>;

@@ -6,6 +6,8 @@ import { ORIGEM_PAULISTA } from './geo/project';
 import { sunDirection, horaSaoPauloParaUtc } from './sun/sun';
 import { rumoDaCamera, paraReferenciaDoProjeto } from './sun/bussola';
 import { massaDoPredio } from './units/massa';
+import { buildCityMesh } from './city/cityMesh';
+import { entornoParaLocal, type Entorno } from './city/entorno';
 import { alturaDoCorte, planoDeCorte } from './units/corte';
 import { COR_UNIDADE, type Caixa, type UnidadeViewer } from './units/tipos';
 import { planejarVoo, enquadrar, type Pose } from './cameras/voo';
@@ -48,6 +50,8 @@ export interface Viewer {
   /** Entrada do joystick de toque (soma com o teclado). */
   definirEntrada(entrada: Entrada): void;
   definirSol(dataISO: string, hora: number): void;
+  /** Prédios reais em volta (OSM). Devolve quantos foram desenhados. `null` tira o entorno. */
+  definirEntorno(entorno: Entorno | null): Promise<number>;
   aoSelecionar(cb: (unidadeId: string | null) => void): void;
   aoMudar(cb: (estado: EstadoViewer) => void): void;
   destruir(): void;
@@ -80,9 +84,11 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
   renderer.shadowMap.enabled = qualidade.nivel.sombras;
   renderer.shadowMap.type = THREE.PCFShadowMap;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  renderer.localClippingEnabled = true; // o corte por andar vale só para o prédio, não para a cidade em volta
 
   const cena = new THREE.Scene();
   cena.background = new THREE.Color(0xbfd9f2);
+  cena.fog = new THREE.Fog(0xbfd9f2, 700, 1800);
   const ceu = new THREE.HemisphereLight(0xffffff, 0x8a8f99, 0.9);
   cena.add(ceu);
 
@@ -102,7 +108,10 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
     lightDirection: new THREE.Vector3(-1, -1, -1).normalize(),
   });
   const materiais = new Set<THREE.Material>();
-  const prepararMaterial = (m: THREE.Material) => {
+  /** Materiais do empreendimento (recebem o corte por andar). */
+  const materiaisPredio = new Set<THREE.Material>();
+  const prepararMaterial = (m: THREE.Material, doPredio = false) => {
+    if (doPredio) materiaisPredio.add(m);
     if (materiais.has(m)) return;
     materiais.add(m);
     csm.setupMaterial(m);
@@ -122,6 +131,26 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
   let selecionada: string | null = null;
   let corteY: number | null = null;
   let bloqueado: OpcoesPasso['bloqueado'] = () => false;
+  let bloqueadoCidade: OpcoesPasso['bloqueado'] = () => false;
+  let cidade: THREE.Mesh | null = null;
+  const materialCidade = new THREE.MeshStandardMaterial({ color: 0xeceae4, roughness: 0.9 });
+  prepararMaterial(materialCidade);
+
+  /** Bloqueio por raio horizontal na altura da cintura contra malhas reais (paredes com portas, prédios da cidade). */
+  function bloqueioPorRaio(objetos: THREE.Object3D[]): OpcoesPasso['bloqueado'] {
+    const raio = new THREE.Raycaster();
+    const origem = new THREE.Vector3();
+    const direcao = new THREE.Vector3();
+    return (de, para) => {
+      const distancia = Math.hypot(para.x - de.x, para.z - de.z);
+      if (distancia === 0) return false;
+      origem.set(de.x, ALTURA_OLHOS_M - 0.6, de.z);
+      direcao.set(para.x - de.x, 0, para.z - de.z).normalize();
+      raio.set(origem, direcao);
+      raio.far = distancia + 0.3;
+      return raio.intersectObjects(objetos, false).length > 0;
+    };
+  }
 
   function pintar(): void {
     for (const [id, p] of pecas) {
@@ -144,7 +173,7 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
       const c = caixas.get(u.id);
       if (!c) continue;
       const material = new THREE.MeshStandardMaterial({ roughness: 0.7 });
-      prepararMaterial(material);
+      prepararMaterial(material, true);
       const malha = new THREE.Mesh(new THREE.BoxGeometry(c.maxX - c.minX, c.maxY - c.minY, c.maxZ - c.minZ), material);
       malha.position.set((c.minX + c.maxX) / 2, (c.minY + c.maxY) / 2, (c.minZ + c.maxZ) / 2);
       malha.castShadow = true;
@@ -176,24 +205,13 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
         const original = Array.isArray(o.material) ? o.material[0] : o.material;
         const material = original instanceof THREE.MeshStandardMaterial ? original.clone() : new THREE.MeshStandardMaterial();
         o.material = material;
-        prepararMaterial(material);
+        prepararMaterial(material, true);
         pecas.set(unidade.id, { unidade, malha: o, material, caixa: caixaDe(new THREE.Box3().setFromObject(o)) });
       } else {
-        for (const m of Array.isArray(o.material) ? o.material : [o.material]) prepararMaterial(m);
+        for (const m of Array.isArray(o.material) ? o.material : [o.material]) prepararMaterial(m, true);
       }
     });
-    const raio = new THREE.Raycaster();
-    const origem = new THREE.Vector3();
-    const direcao = new THREE.Vector3();
-    bloqueado = (de, para) => {
-      const distancia = Math.hypot(para.x - de.x, para.z - de.z);
-      if (distancia === 0) return false;
-      origem.set(de.x, ALTURA_OLHOS_M - 0.6, de.z);
-      direcao.set(para.x - de.x, 0, para.z - de.z).normalize();
-      raio.set(origem, direcao);
-      raio.far = distancia + 0.3;
-      return raio.intersectObjects(solidos, false).length > 0;
-    };
+    bloqueado = bloqueioPorRaio(solidos);
   }
 
   function caixaDoPredio(): Caixa {
@@ -353,7 +371,7 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
     } else if (modo === 'orbita') {
       orbita.update();
     } else {
-      Object.assign(pessoa, passoPrimeiraPessoa(pessoa, entradaAtual(), Math.min(dtMs, 100) / 1000, { velocidade: VELOCIDADE_M_S, bloqueado }));
+      Object.assign(pessoa, passoPrimeiraPessoa(pessoa, entradaAtual(), Math.min(dtMs, 100) / 1000, { velocidade: VELOCIDADE_M_S, bloqueado: (de, para) => bloqueado(de, para) || bloqueadoCidade(de, para) }));
       camera.position.set(pessoa.x, ALTURA_OLHOS_M, pessoa.z);
       camera.rotation.set(pessoa.pitch, pessoa.yaw, 0, 'YXZ');
     }
@@ -390,7 +408,11 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
     cortarNoAndar(andar) {
       const y = andar === null ? null : alturaDoCorte([...pecas.values()].map((p) => ({ andar: p.unidade.andar, caixa: p.caixa })), andar);
       corteY = y;
-      renderer.clippingPlanes = y === null ? [] : [planoDeCorte(y + 0.01)];
+      const planos = y === null ? [] : [planoDeCorte(y + 0.01)];
+      for (const m of materiaisPredio) {
+        m.clippingPlanes = planos;
+        m.needsUpdate = true;
+      }
       return andar === null || y !== null;
     },
     andaresComCorte() {
@@ -414,6 +436,24 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
       joystick = e;
     },
     definirSol,
+    async definirEntorno(entorno) {
+      await pronto;
+      if (cidade) {
+        cena.remove(cidade);
+        cidade.geometry.dispose();
+        cidade = null;
+      }
+      bloqueadoCidade = () => false;
+      if (!entorno) return 0;
+      const predios = entornoParaLocal(entorno.predios, entorno.centro, rotacao, caixaDoPredio());
+      if (predios.length === 0) return 0;
+      cidade = buildCityMesh(predios, materialCidade);
+      cidade.castShadow = true;
+      cidade.receiveShadow = true;
+      cena.add(cidade);
+      bloqueadoCidade = bloqueioPorRaio([cidade]);
+      return predios.length;
+    },
     aoSelecionar(cb) {
       cbSelecao = cb;
     },
