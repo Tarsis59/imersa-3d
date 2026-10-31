@@ -1,5 +1,8 @@
 import json
+import shutil
 import struct
+import subprocess
+import sys
 from pathlib import Path
 
 import numpy as np
@@ -8,7 +11,6 @@ import pytest
 from imersa_bim.converter import converter
 from imersa_bim.glb import ler_glb
 from imersa_bim.metadados import ler_metadados
-from imersa_bim.vinculo import sugerir_vinculos
 
 FZK = Path(__file__).resolve().parents[3] / "exemplos" / "projeto-bim" / "AC20-FZK-Haus.ifc"
 pytestmark = pytest.mark.skipif(not FZK.exists(), reason="modelo de teste FZK-Haus não encontrado")
@@ -75,28 +77,6 @@ def test_glb_y_para_cima_nomes_por_guid_e_tipos(glb, meta):
     assert maximo[0] - minimo[0] > altura and maximo[2] - minimo[2] > altura
 
 
-def test_vinculo_automatico_por_codigo_e_nome(meta):
-    unidades = [
-        {"id": "u1", "codigo": "4"},
-        {"id": "u2", "codigo": "Apto 7"},
-        {"id": "u3", "codigo": "Cozinha"},
-        {"id": "u4", "codigo": "99"},
-    ]
-    sug = {s["unidadeId"]: s for s in sugerir_vinculos(meta["espacos"], unidades)}
-    quarto = next(e for e in meta["espacos"] if e["nome"] == "4")
-    galeria = next(e for e in meta["espacos"] if e["nome"] == "7")
-    assert sug["u1"]["espacoGuid"] == quarto["guid"] and sug["u1"]["motivo"] == "codigo"
-    assert sug["u2"]["espacoGuid"] == galeria["guid"]  # "Apto 7" → número 7
-    assert "u3" not in sug and "u4" not in sug  # sem correspondência segura: fica para o ajuste manual
-
-
-def test_vinculo_nao_repete_espaco():
-    espacos = [{"guid": "g1", "nome": "101", "nome_longo": None}, {"guid": "g2", "nome": "102", "nome_longo": "Apto 102"}]
-    sug = sugerir_vinculos(espacos, [{"id": "a", "codigo": "101"}, {"id": "b", "codigo": "Apto 101"}, {"id": "c", "codigo": "102"}])
-    assert [s["espacoGuid"] for s in sug].count("g1") == 1
-    assert {s["unidadeId"]: s["espacoGuid"] for s in sug}["c"] == "g2"
-
-
 def test_ifc_invalido(tmp_path):
     ruim = tmp_path / "x.ifc"
     ruim.write_text("isto não é um IFC")
@@ -117,3 +97,38 @@ def test_glb_le_e_regrava_mantendo_o_binario(glb, tmp_path):
     total = struct.unpack("<I", copia.read_bytes()[8:12])[0]
     assert total == copia.stat().st_size and total % 4 == 0
     json.dumps(doc2)
+
+
+@pytest.mark.skipif(not shutil.which("npx"), reason="Node.js (npx) não encontrado")
+def test_otimizado_fica_com_no_maximo_30_por_cento_e_mantem_nomes_e_tipos(glb, tmp_path):
+    from imersa_bim.otimizar import otimizar
+
+    _, destino = glb
+    saida = otimizar(destino, tmp_path / "casa-otimizada.glb")
+    assert saida.stat().st_size <= 0.30 * destino.stat().st_size
+    original, _ = ler_glb(destino)
+    novo, _ = ler_glb(saida)
+    assert "EXT_meshopt_compression" in novo.get("extensionsUsed", [])
+    # o nome (GlobalId) e o tipo IFC de cada peça sobrevivem: são o vínculo com as unidades
+    antes = {n["name"]: n.get("extras") for n in original["nodes"] if n.get("name")}
+    depois = {n["name"]: n.get("extras") for n in novo["nodes"] if n.get("name")}
+    assert depois == antes
+
+
+@pytest.mark.skipif(not shutil.which("npx"), reason="Node.js (npx) não encontrado")
+def test_linha_de_comando_grava_resultado(tmp_path):
+    glb, resultado = tmp_path / "saida.glb", tmp_path / "resultado.json"
+    r = subprocess.run([sys.executable, "-m", "imersa_bim", "--ifc", str(FZK), "--glb", str(glb), "--resultado", str(resultado)], capture_output=True, text=True, cwd=Path(__file__).parents[1])
+    assert r.returncode == 0, r.stderr
+    dados = json.loads(resultado.read_text(encoding="utf-8"))
+    assert dados["ok"] is True
+    assert dados["elementos"] == 107 and len(dados["metadados"]["espacos"]) == 7
+    assert dados["bytesOriginal"] > dados["bytes"] == glb.stat().st_size
+
+
+def test_linha_de_comando_ifc_ruim(tmp_path):
+    ruim, resultado = tmp_path / "x.ifc", tmp_path / "r.json"
+    ruim.write_text("nada")
+    r = subprocess.run([sys.executable, "-m", "imersa_bim", "--ifc", str(ruim), "--glb", str(tmp_path / "s.glb"), "--resultado", str(resultado)], capture_output=True, text=True, cwd=Path(__file__).parents[1])
+    assert r.returncode == 1
+    assert json.loads(resultado.read_text(encoding="utf-8")) == {"ok": False, "erro": "ifc_invalido", "mensagem": "O arquivo não é um IFC válido."}

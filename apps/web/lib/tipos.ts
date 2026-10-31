@@ -228,3 +228,18 @@ export interface Portal {
   /** Transmissão do status das unidades ao vivo (EventSource direto na API). */
   aoVivoUrl: string;
 }
+
+// ------------------------------------------------------------------ BIM
+export interface ConversaoBim {
+  id: string;
+  status: 'na_fila' | 'processando' | 'pronto' | 'erro';
+  mensagem: string | null;
+  glbArquivoId: string | null;
+  arquivoId: string;
+  arquivoNome: string;
+  criadoEm: string;
+  andares: number;
+  ambientes: number;
+  bytesOriginal: number | null;
+  bytes: number | null;
+}

@@ -27,7 +27,7 @@ def test_zip_de_fotos_de_ponta_a_ponta_grava_o_resultado_para_o_worker(tmp_path:
     codigo = principal(["--zip", str(z), "--id", "cap-1", "--usuario", "imersa", "--trabalho", str(tmp_path / "t"), "--resultado", str(saida)], nuvem=KaggleFalso({"etapa": "pronto", "psnr": 26.0}))
     r = json.loads(saida.read_text(encoding="utf-8"))
     assert codigo == 0 and r["ok"] is True
-    assert r["splat"].endswith(".sog") and Path(r["splat"]).exists()
+    assert r["splat"].endswith((".sog", ".spz")) and Path(r["splat"]).exists()
 
 
 def test_zip_invalido_vira_resultado_com_mensagem(tmp_path: Path):

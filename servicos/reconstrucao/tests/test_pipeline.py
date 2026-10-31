@@ -68,7 +68,8 @@ def _trabalho(tmp_path: Path) -> Trabalho:
 def test_pipeline_completo_valida_desfoca_envia_privado_com_gpu_e_comprime(fotos: Path, tmp_path: Path):
     kaggle = KaggleFalso({"etapa": "pronto", "fotos": 25, "registradas": 25, "gaussianas": 3000, "psnr": 27.1, "tempos_s": {"treino": 600}})
     r = executar(fotos, _trabalho(tmp_path), kaggle)
-    assert r.splat is not None and r.splat.suffix == ".sog" and r.splat.exists()
+    # .sog com GPU local; sem GPU (servidor, CI) sai .spz do mesmo tamanho
+    assert r.splat is not None and r.splat.suffix in {".sog", ".spz"} and r.splat.exists()
     assert r.metricas["gaussianas"] == 3000
     assert r.rostos_desfocados == 1
 

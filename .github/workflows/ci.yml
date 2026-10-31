@@ -38,9 +38,16 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm typecheck
       - run: pnpm test
+      # conversor BIM (IFC → 3D) usado pelo worker nos testes de navegador
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install "ifcopenshell>=0.8" "numpy>=2.0"
       # chromium (computador, celular, tablet Android) e webkit (motor do Safari: iPad)
       - run: pnpm --filter @imersa/web exec playwright install --with-deps chromium webkit
       - run: pnpm e2e
+        env:
+          BIM_PYTHON: python
       - uses: actions/upload-artifact@v4
         if: failure()
         with:

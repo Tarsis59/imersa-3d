@@ -1,0 +1,17 @@
+{
+  "detector": {
+    "ignoreRules": [],
+    "ignoreFiles": [],
+    "ignoreValues": [
+      {
+        "rule": "gray-on-color",
+        "value": "*",
+        "files": [
+          "app/painel/projetos/[id]/bim.tsx"
+        ],
+        "createdAt": "2026-10-31T20:18:27.038Z",
+        "reason": "Claude: text-slate-800 sobre bg-slate-200 tem contraste ~10:1; mesma paleta de status de capturas.tsx"
+      }
+    ]
+  }
+}

@@ -100,3 +100,11 @@ export async function importar(projetoId: string, aplicar: boolean, _: EstadoImp
   const semErros = (r.dados.erros ?? []).length === 0;
   return { aplicado: r.dados.aplicado, resumo: r.dados.resumo, erros: r.dados.erros ?? [], conferido: !aplicar && semErros ? csv : undefined };
 }
+
+/** IFC do projeto → fila de conversão para 3D (pavimentos, ambientes e áreas). */
+export async function converterBim(projetoId: string, arquivoId: string): Promise<{ erro?: string }> {
+  const r = await api(`/projetos/${encodeURIComponent(projetoId)}/conversoes`, { metodo: 'POST', corpo: { arquivoId }, token: await tokenParaAcao() });
+  if (r.status !== 201) return { erro: mensagem(r.status, r.dados) };
+  revalidatePath(`/painel/projetos/${projetoId}`);
+  return {};
+}

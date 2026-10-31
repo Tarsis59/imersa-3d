@@ -27,6 +27,7 @@ import { rotasVendas } from './rotas/vendas';
 import { rotasPublicas } from './rotas/publico';
 import { rotasAoVivo } from './rotas/ao-vivo';
 import { rotasIntegracoes } from './rotas/integracoes';
+import { rotasBim } from './rotas/bim';
 import { CanalUnidades } from './tempo-real/canal';
 import { ArmazenamentoLocal, ArmazenamentoS3, type Armazenamento } from './arquivos/armazenamento';
 import { clamav, semAntivirus, type Antivirus } from './arquivos/antivirus';
@@ -363,6 +364,7 @@ export async function construirApp({ pool, config, logger = false, reportarErro,
   rotasMapa(app, { pool, exigir, mapa: servicosMapa });
   rotasTelemetria(app, { pool, exigir });
   rotasCapturas(app, { pool, exigir, armazenamento: arm });
+  rotasBim(app, { pool, exigir });
   rotasVendas(app, { pool, exigir, webUrl: config.WEB_URL });
   // status ao vivo: uma conexão LISTEN por instância; as transmissões abertas fecham antes de a API parar
   const canal = new CanalUnidades(config.DATABASE_URL);

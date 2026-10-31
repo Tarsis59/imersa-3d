@@ -1,5 +1,6 @@
 """IFC → GLB para a web: Y para cima (padrão glTF), nós com o GlobalId do IFC e o tipo IFC em `extras`."""
 
+import gc
 import multiprocessing
 from pathlib import Path
 
@@ -30,6 +31,9 @@ def converter(entrada: Path, saida: Path) -> dict:
             if not it.next():
                 break
     ser.finalize()
+    # o serializador (C++) só termina de gravar o arquivo quando é destruído: ler antes disso pega o GLB pela metade
+    del ser, it
+    gc.collect()
     if elementos == 0:
         raise ValueError("o IFC não tem geometria para mostrar em 3D")
 

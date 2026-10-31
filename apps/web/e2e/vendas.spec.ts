@@ -105,7 +105,8 @@ test('vendas: link pelo WhatsApp → cliente no celular (sem login) → pedido d
   // fechar a aba: o tempo de visita e a unidade vista saem pelo sendBeacon (pagehide)
   await cliente.close({ runBeforeUnload: true });
 
-  // painel: lead com a unidade e a mensagem
+  // painel: lead com a unidade e a mensagem (espera a atualização da página depois da mudança de status)
+  await page.waitForLoadState('networkidle');
   await page.goto('/painel/leads');
   const lead = page.getByTestId('lista-leads').getByRole('listitem').filter({ hasText: 'Carla Mendes' });
   await expect(lead).toContainText('unidade 102');

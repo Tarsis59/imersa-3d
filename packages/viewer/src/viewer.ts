@@ -95,12 +95,17 @@ interface PecaUnidade {
   malha: THREE.Mesh;
   material: THREE.MeshStandardMaterial;
   caixa: Caixa;
+  /** Ambiente do BIM (IfcSpace): volume de ar, mostrado translúcido por cima das paredes. */
+  ambiente?: boolean;
 }
 
 const ALTURA_OLHOS_M = 1.6;
 const VELOCIDADE_M_S = 2.2;
 const DURACAO_VOO_MS = 1200;
 const OPACIDADE_ESMAECIDA = 0.12;
+const OPACIDADE_AMBIENTE = 0.45;
+/** Tipo IFC que o conversor BIM grava em cada peça (extras do glTF → userData). */
+const tipoIfc = (o: THREE.Object3D): string | undefined => (o.userData.ifc ?? o.parent?.userData.ifc) as string | undefined;
 const COR_SELECAO = 0x0369a1;
 const COR_FAVORITA = 0x8a6d00;
 
@@ -225,8 +230,8 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
       const passa = destaque === null || destaque.has(id);
       p.material.color.setHex(COR_UNIDADE[p.unidade.status]);
       p.material.transparent = true;
-      p.material.opacity = passa ? 0.92 : OPACIDADE_ESMAECIDA;
-      p.material.depthWrite = passa;
+      p.material.opacity = passa ? (p.ambiente ? OPACIDADE_AMBIENTE : 0.92) : OPACIDADE_ESMAECIDA;
+      p.material.depthWrite = passa && !p.ambiente;
       p.material.emissive.setHex(id === selecionada ? COR_SELECAO : favoritos.has(id) ? COR_FAVORITA : 0x000000);
       p.malha.castShadow = passa;
     }
@@ -265,17 +270,23 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
     const porNo = new Map(config.unidades.filter((u) => u.meshNodeId).map((u) => [u.meshNodeId!, u]));
     modelo.traverse((o) => {
       if (!(o instanceof THREE.Mesh)) return;
-      o.castShadow = true;
-      o.receiveShadow = true;
-      solidos.push(o);
       const unidade = o.name ? porNo.get(o.name) : undefined;
+      const ambiente = tipoIfc(o) === 'IfcSpace';
+      if (ambiente && !unidade) {
+        // ambiente sem unidade: é só ar; não aparece nem bloqueia quem anda a pé
+        o.visible = false;
+        return;
+      }
+      o.castShadow = !ambiente;
+      o.receiveShadow = true;
+      if (!ambiente) solidos.push(o);
       if (unidade) {
         // material próprio: pintar uma unidade não pinta as outras peças que dividiam o material
         const original = Array.isArray(o.material) ? o.material[0] : o.material;
         const material = original instanceof THREE.MeshStandardMaterial ? original.clone() : new THREE.MeshStandardMaterial();
         o.material = material;
         prepararMaterial(material, true);
-        pecas.set(unidade.id, { unidade, malha: o, material, caixa: caixaDe(new THREE.Box3().setFromObject(o)) });
+        pecas.set(unidade.id, { unidade, malha: o, material, caixa: caixaDe(new THREE.Box3().setFromObject(o)), ambiente });
       } else {
         for (const m of Array.isArray(o.material) ? o.material : [o.material]) prepararMaterial(m, true);
       }

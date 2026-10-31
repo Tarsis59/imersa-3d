@@ -12,6 +12,7 @@ import { hashSenha } from './auth/senha';
 import { ArmazenamentoLocal } from './arquivos/armazenamento';
 import type { Antivirus } from './arquivos/antivirus';
 import { processarProxima, type Reconstrutor } from './capturas/worker';
+import { processarProximaConversao, type ConversorBim } from './bim/worker';
 import type { ServicosMapa } from './mapa/osm';
 import type { Config } from './config';
 
@@ -474,5 +475,97 @@ describe('capturas: fotos/vídeo → 3D (fila, worker, revisão e publicação)'
     expect(lista.json.length).toBeGreaterThanOrEqual(4);
     expect((await req('GET', `/projetos/${p}/capturas`, undefined, outra)).status).toBe(404);
     expect((await req('GET', `/capturas/${lista.json[0].id}`, undefined, outra)).status).toBe(404);
+  });
+});
+
+describe('BIM: IFC → 3D, ambientes e vínculo com as unidades', () => {
+  const IFC = Buffer.from(['ISO-10303-21;', 'HEADER;', 'ENDSEC;', 'DATA;', 'ENDSEC;', 'END-ISO-10303-21;', ''].join(String.fromCharCode(10)));
+  const GLB_BIM = Buffer.concat([Buffer.from('glTF'), Buffer.alloc(40, 2)]);
+  const G101 = '2eyxpyOx95m90jmsXLOuR1';
+  const G102 = '273g3wqLzDtfYIl7qqkgc2';
+  const META = {
+    schema: 'IFC4',
+    andares: [{ guid: '2eyxpyOx95m90jmsXLOuR0', nome: 'Térreo', elevacao_m: 0 }],
+    espacos: [
+      { guid: G101, nome: '101', nome_longo: 'Apto 101', andar_guid: '2eyxpyOx95m90jmsXLOuR0', area_m2: 72.5 },
+      { guid: G102, nome: 'Loja', nome_longo: null, andar_guid: '2eyxpyOx95m90jmsXLOuR0', area_m2: 40 },
+    ],
+    portas: 3,
+    janelas: 6,
+  };
+  let p = '';
+  let predio = '';
+  let pastaWorker = '';
+  let falhar: string | null = null;
+  const conversor: ConversorBim = async (_ifc, pasta) => {
+    if (falhar) return { ok: false, erro: falhar, mensagem: 'O arquivo não é um IFC válido.' };
+    const glb = join(pasta, 'modelo.glb');
+    await writeFile(glb, GLB_BIM);
+    return { ok: true, glb, metadados: META, elementos: 12, bytesOriginal: 1000, bytes: GLB_BIM.length };
+  };
+  const deps = () => ({ pool, armazenamento: new ArmazenamentoLocal(pasta, 'http://api.teste', SEGREDO), conversor, pastaTrabalho: pastaWorker });
+
+  beforeAll(async () => {
+    p = (await req('POST', '/projetos', { nome: 'Residencial BIM' }, admin)).json.id;
+    expect((await req('POST', `/projetos/${p}/importacao`, { csv: ['predio;andar;codigo', 'Torre;1;101', 'Torre;1;102'].join(String.fromCharCode(10)), aplicar: true }, admin)).status).toBe(200);
+    predio = (await req('GET', `/projetos/${p}`, undefined, admin)).json.predios[0].id;
+    pastaWorker = await mkdtemp(join(tmpdir(), 'imersa-bim-'));
+  });
+  afterAll(() => rm(pastaWorker, { recursive: true, force: true }));
+
+  async function enviarIfc(): Promise<string> {
+    const d = await req('POST', `/projetos/${p}/arquivos`, { nome: 'projeto.ifc', tipo: 'ifc', tamanho: IFC.length }, admin);
+    expect(d.status).toBe(201);
+    expect((await enviar(d.json.envio.url, IFC)).json.status).toBe('pronto');
+    return d.json.id;
+  }
+
+  it('converte, guarda o 3D otimizado e os ambientes; sugere e grava os vínculos; liga o modelo ao prédio', async () => {
+    const ifc = await enviarIfc();
+    expect((await req('POST', `/projetos/${p}/conversoes`, { arquivoId: ifc }, consultora)).status).toBe(403);
+    const c = await req('POST', `/projetos/${p}/conversoes`, { arquivoId: ifc }, admin);
+    expect(c.status).toBe(201);
+    expect((await req('POST', `/projetos/${p}/conversoes`, { arquivoId: ifc }, admin)).json.erro).toBe('conversao_em_andamento');
+    expect((await req('GET', `/predios/${predio}/vinculos-bim?conversaoId=${c.json.id}`, undefined, admin)).json.erro).toBe('conversao_nao_pronta');
+
+    expect(await processarProximaConversao(deps())).toBe('ok');
+    expect(await processarProximaConversao(deps())).toBe('vazia');
+    const lista = (await req('GET', `/projetos/${p}/conversoes`, undefined, consultora)).json;
+    expect(lista[0]).toMatchObject({ id: c.json.id, status: 'pronto', arquivoNome: 'projeto.ifc', andares: 1, ambientes: 2 });
+    const modelo = (await req('GET', `/projetos/${p}/arquivos`, undefined, admin)).json.find((a: { id: string }) => a.id === lista[0].glbArquivoId);
+    expect(modelo).toMatchObject({ nome: 'projeto.glb', tipo: 'modelo_3d', status: 'pronto' });
+
+    const tela = (await req('GET', `/predios/${predio}/vinculos-bim?conversaoId=${c.json.id}`, undefined, admin)).json;
+    expect(tela.espacos).toEqual(expect.arrayContaining([expect.objectContaining({ guid: G101, nomeLongo: 'Apto 101', andar: 'Térreo', areaM2: 72.5 })]));
+    const u101 = tela.unidades.find((u: { codigo: string }) => u.codigo === '101').id;
+    const u102 = tela.unidades.find((u: { codigo: string }) => u.codigo === '102').id;
+    expect(tela.sugestoes).toEqual([{ unidadeId: u101, espacoGuid: G101, motivo: 'codigo' }]);
+
+    // ajuste manual: a 102 fica com a "Loja"
+    const ruim = await req('POST', `/predios/${predio}/vinculos-bim`, { conversaoId: c.json.id, vinculos: [{ unidadeId: u101, espacoGuid: G101 }, { unidadeId: u102, espacoGuid: G101 }] }, admin);
+    expect(ruim.json.erro).toBe('ambiente_repetido');
+    const inexistente = await req('POST', `/predios/${predio}/vinculos-bim`, { conversaoId: c.json.id, vinculos: [{ unidadeId: u101, espacoGuid: 'X'.repeat(22) }] }, admin);
+    expect(inexistente.json.erro).toBe('ambiente_inexistente');
+    const ok = await req('POST', `/predios/${predio}/vinculos-bim`, { conversaoId: c.json.id, vinculos: [{ unidadeId: u101, espacoGuid: G101 }, { unidadeId: u102, espacoGuid: G102 }] }, admin);
+    expect(ok.json).toEqual({ vinculadas: 2, modeloArquivoId: lista[0].glbArquivoId });
+    const espelho = (await req('GET', `/predios/${predio}`, undefined, admin)).json;
+    expect(espelho.predio.modeloArquivoId).toBe(lista[0].glbArquivoId);
+    expect(espelho.andares[0].unidades.map((u: { meshNodeId: string }) => u.meshNodeId).sort()).toEqual([G101, G102].sort());
+    expect((await req('GET', `/predios/${predio}/vinculos-bim?conversaoId=${c.json.id}`, undefined, outra)).status).toBe(404);
+  });
+
+  it('IFC recusado vira erro sem nova tentativa; arquivo que não é IFC não entra na fila', async () => {
+    const ifc = await enviarIfc();
+    const c = (await req('POST', `/projetos/${p}/conversoes`, { arquivoId: ifc }, admin)).json;
+    falhar = 'ifc_invalido';
+    try {
+      expect(await processarProximaConversao(deps())).toBe('erro');
+    } finally {
+      falhar = null;
+    }
+    const lista = (await req('GET', `/projetos/${p}/conversoes`, undefined, admin)).json;
+    expect(lista.find((x: { id: string }) => x.id === c.id)).toMatchObject({ status: 'erro', mensagem: 'O arquivo não é um IFC válido.' });
+    const glb = (await req('GET', `/projetos/${p}/arquivos`, undefined, admin)).json.find((a: { tipo: string }) => a.tipo === 'modelo_3d');
+    expect((await req('POST', `/projetos/${p}/conversoes`, { arquivoId: glb.id }, admin)).json.erro).toBe('arquivo_invalido_para_bim');
   });
 });

@@ -1,6 +1,7 @@
 # Imersa 3D em produção num serviço só (hospedagem grátis): API + worker (capturas, webhooks, retenção) + motor Python.
 # Build a partir da raiz do monorepo:  docker build -f infra/producao/Dockerfile -t imersa-servidor .
-# O treino 3D roda na GPU grátis do Kaggle; aqui ficam só a validação das fotos, o desfoque de rostos e a compressão.
+# O treino 3D roda na GPU grátis do Kaggle; aqui ficam a validação das fotos, o desfoque de rostos, a compressão
+# e a conversão BIM (IFC → 3D com IfcOpenShell + gltf-transform).
 
 FROM node:22-bookworm-slim AS build
 WORKDIR /repo
@@ -12,20 +13,23 @@ FROM node:22-bookworm-slim
 ENV NODE_ENV=production \
     RECONSTRUCAO_DIR=/app/reconstrucao \
     RECONSTRUCAO_PYTHON=/app/reconstrucao/.venv/bin/python \
+    BIM_DIR=/app/bim \
+    BIM_PYTHON=/app/reconstrucao/.venv/bin/python \
     WORKER_PASTA=/tmp/imersa-trabalho \
     PYTHONUNBUFFERED=1
 WORKDIR /app
-# Python só para o motor de reconstrução (numpy + OpenCV sem interface + cliente do Kaggle)
+# Python: motor de reconstrução (numpy + OpenCV sem interface + cliente do Kaggle) e conversor BIM (IfcOpenShell)
 RUN apt-get update && apt-get install -y --no-install-recommends python3 python3-venv ca-certificates wget && rm -rf /var/lib/apt/lists/*
 COPY servicos/reconstrucao/pyproject.toml /app/reconstrucao/pyproject.toml
 RUN python3 -m venv /app/reconstrucao/.venv \
- && /app/reconstrucao/.venv/bin/pip install --no-cache-dir "numpy>=2.0" "opencv-python-headless>=4.10" "kaggle>=2.2"
+ && /app/reconstrucao/.venv/bin/pip install --no-cache-dir "numpy>=2.0" "opencv-python-headless>=4.10" "kaggle>=2.2" "ifcopenshell>=0.8"
 ENV PATH="/app/reconstrucao/.venv/bin:${PATH}"
 COPY servicos/reconstrucao/imersa_recon /app/reconstrucao/imersa_recon
 COPY servicos/reconstrucao/kaggle /app/reconstrucao/kaggle
 COPY servicos/reconstrucao/modelos /app/reconstrucao/modelos
-# compressão dos splats (versão fixa, já instalada: o npx não baixa nada na hora)
-RUN npm install -g --no-audit --no-fund @playcanvas/splat-transform@3.10.3 \
+COPY servicos/bim/imersa_bim /app/bim/imersa_bim
+# compressão dos splats e do 3D do BIM (versões fixas, já instaladas: o npx não baixa nada na hora)
+RUN npm install -g --no-audit --no-fund @playcanvas/splat-transform@3.10.3 @gltf-transform/cli@4.5.1 \
  && npm install --omit=dev --no-save --no-audit --no-fund @node-rs/argon2@2.2.2 @sentry/node@11.10.0 \
  && npm cache clean --force
 COPY --from=build /repo/apps/api/dist ./dist

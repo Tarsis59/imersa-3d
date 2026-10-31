@@ -25,6 +25,12 @@ const MENSAGENS: Record<string, string> = {
   servico_mapa_indisponivel: 'O serviço de mapas não respondeu. Tente de novo em instantes.',
   antivirus_indisponivel: 'O antivírus não respondeu. Tente concluir de novo.',
   arquivo_ainda_nao_enviado: 'O arquivo ainda não chegou ao armazenamento.',
+  conversao_em_andamento: 'Esse IFC já está sendo convertido.',
+  arquivo_invalido_para_bim: 'Escolha um arquivo IFC já verificado deste empreendimento.',
+  conversao_nao_pronta: 'A conversão ainda não terminou.',
+  ambiente_repetido: 'Cada ambiente só pode ir para uma unidade.',
+  ambiente_inexistente: 'Ambiente não encontrado no modelo.',
+  unidade_de_outro_predio: 'Unidade de outro prédio.',
   destino_invalido: 'Use um endereço https público (rede interna e http não são aceitos).',
 };
 
