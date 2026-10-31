@@ -34,19 +34,33 @@ jobs:
       RECONSTRUCAO_PYTHON: python
       AMBIENTE: producao
     steps:
+      # checagem de segundos (psql já vem no runner): sem captura na fila, termina sem instalar nada e
+      # gasta ~1 min dos 2.000 grátis por mês do repositório privado
+      - name: Há captura na fila?
+        id: fila
+        run: |
+          pendente=$(psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -tAc 'SELECT ha_captura_pendente()')
+          echo "Captura na fila: $pendente"
+          echo "pendente=$pendente" >> "$GITHUB_OUTPUT"
       - uses: actions/checkout@v4
+        if: steps.fila.outputs.pendente == 't'
       - uses: pnpm/action-setup@v4
+        if: steps.fila.outputs.pendente == 't'
       - uses: actions/setup-node@v4
+        if: steps.fila.outputs.pendente == 't'
         with:
           node-version: 22
           cache: pnpm
       - uses: actions/setup-python@v5
+        if: steps.fila.outputs.pendente == 't'
         with:
           python-version: '3.12'
       - name: Dependências
+        if: steps.fila.outputs.pendente == 't'
         run: |
           pnpm install --frozen-lockfile --filter "@imersa/api..."
           pip install "numpy>=2.0" "opencv-python-headless>=4.10" "kaggle>=2.2"
           npm install -g --no-audit --no-fund @playcanvas/splat-transform@3.10.3
       - name: Processar a fila
+        if: steps.fila.outputs.pendente == 't'
         run: pnpm --filter @imersa/api exec tsx src/worker.ts --uma-vez

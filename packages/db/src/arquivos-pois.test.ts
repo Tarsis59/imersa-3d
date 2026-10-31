@@ -167,11 +167,15 @@ describe('capturas (fotos/vídeo → 3D) e fila do worker', () => {
   });
 
   it('o worker pega a mais antiga de qualquer empresa, marca processando e conta a tentativa; fila vazia devolve nada', async () => {
+    // checagem barata do GitHub Actions: enxerga a fila de todas as empresas sem contexto de empresa
+    const pendente = () => app.query<{ p: boolean }>('SELECT ha_captura_pendente() AS p').then((r) => r.rows[0]!.p);
+    expect(await pendente()).toBe(true);
     const p1 = await pegar(app);
     expect(p1).toEqual({ id: capA, tenant_id: A });
     const p2 = await pegar(app);
     expect(p2).toEqual({ id: capB, tenant_id: B });
     expect(await pegar(app)).toBeNull();
+    expect(await pendente()).toBe(false);
     expect(await comoA(async (c) => (await c.query('SELECT status, tentativas FROM capturas')).rows)).toEqual([{ status: 'processando', tentativas: 1 }]);
   });
 
