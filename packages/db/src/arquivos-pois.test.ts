@@ -192,3 +192,48 @@ describe('capturas (fotos/vídeo → 3D) e fila do worker', () => {
     expect(x && y && x.id !== y.id).toBe(true);
   });
 });
+
+describe('configurador: catálogo de materiais e móveis, combinações salvas', () => {
+  const material = (c: pg.PoolClient, nome: string, extra = '') =>
+    c.query<{ id: string }>(`INSERT INTO materiais (nome, categoria, padrao, cor${extra ? ', preco_m2' : ''}) VALUES ($1, 'piso', 'porcelanato', '#d9d4c7'${extra ? `, ${extra}` : ''}) RETURNING id`, [nome]).then((r) => r.rows[0]!.id);
+
+  it('material nasce na empresa, com nome único por empresa e só valores válidos', async () => {
+    await comoA((c) => material(c, 'Porcelanato Areia', '89.90'));
+    expect(await comoB(async (c) => (await c.query('SELECT * FROM materiais')).rowCount)).toBe(0);
+    // outra empresa pode ter um material com o mesmo nome
+    await comoB((c) => material(c, 'Porcelanato Areia'));
+    await expect(comoA((c) => material(c, 'Porcelanato Areia'))).rejects.toThrow(/unique/);
+    await expect(comoA((c) => c.query("INSERT INTO materiais (nome, categoria, cor) VALUES ('Cor ruim', 'piso', 'vermelho')"))).rejects.toThrow(/check/);
+    await expect(comoA((c) => c.query("INSERT INTO materiais (nome, categoria, cor, rugosidade) VALUES ('Brilho demais', 'piso', '#ffffff', 1.5)"))).rejects.toThrow(/check|overflow/);
+    await expect(comoA((c) => c.query("INSERT INTO materiais (nome, categoria, cor) VALUES ('Sem categoria', 'carro', '#ffffff')"))).rejects.toThrow(/check/);
+    // catálogo não se apaga (combinações antigas dependem dele): só desativa
+    await expect(comoA((c) => c.query('DELETE FROM materiais'))).rejects.toThrow(/permission denied/);
+  });
+
+  it('móvel exige licença e autor, e é padrão OU arquivo da própria empresa', async () => {
+    const lic = "'Própria (Imersa 3D)', 'Imersa 3D'";
+    await comoA((c) => c.query(`INSERT INTO moveis (nome, categoria, modelo_padrao, licenca, autor) VALUES ('Sofá 3 lugares', 'sala', 'sofa-3', ${lic})`));
+    await expect(comoA((c) => c.query("INSERT INTO moveis (nome, categoria, modelo_padrao, autor) VALUES ('Sem licença', 'sala', 'sofa-3', 'x')"))).rejects.toThrow(/null value/);
+    await expect(comoA((c) => c.query(`INSERT INTO moveis (nome, categoria, licenca, autor) VALUES ('Sem modelo', 'sala', ${lic})`))).rejects.toThrow(/check/);
+    const glbA = await comoA((c) => c.query<{ id: string }>("INSERT INTO assets (project_id, tipo, nome, chave, tamanho_declarado) VALUES ($1, 'modelo_3d', 'poltrona.glb', 'a/poltrona.glb', 1000) RETURNING id", [projA]).then((r) => r.rows[0]!.id));
+    await expect(comoA((c) => c.query(`INSERT INTO moveis (nome, categoria, modelo_padrao, asset_id, licenca, autor) VALUES ('Os dois', 'sala', 'sofa-3', $1, ${lic})`, [glbA]))).rejects.toThrow(/check/);
+    await comoA((c) => c.query("INSERT INTO moveis (nome, categoria, asset_id, licenca, autor, fonte_url) VALUES ('Poltrona', 'sala', $1, 'CC BY 4.0', 'Estúdio X', 'https://exemplo.com/poltrona')", [glbA]));
+    // BLINDAGEM: arquivo de outra empresa não vira móvel
+    await expect(comoB((c) => c.query(`INSERT INTO moveis (nome, categoria, asset_id, licenca, autor) VALUES ('Roubado', 'sala', $1, ${lic})`, [glbA]))).rejects.toThrow(/foreign key/);
+    await expect(comoA((c) => c.query("INSERT INTO moveis (nome, categoria, modelo_padrao, licenca, autor, fonte_url) VALUES ('Link http', 'sala', 'mesa-4', 'x1', 'x1', 'http://inseguro.com')"))).rejects.toThrow(/check/);
+  });
+
+  it('combinação fica no prédio da empresa; unidade de outra empresa é recusada', async () => {
+    const unidade = await comoA((c) => c.query<{ id: string }>("INSERT INTO units (building_id, floor_id, codigo) VALUES ($1, $2, '901') RETURNING id", [predioA, andarA]).then((r) => r.rows[0]!.id));
+    const nova = (c: pg.PoolClient, predio: string, unidadeId: string | null) =>
+      c.query("INSERT INTO configuracoes (building_id, unit_id, nome, escolhas, orcamento, total) VALUES ($1, $2, 'Opção A', '{}', '{}', 0)", [predio, unidadeId]);
+    await comoA((c) => nova(c, predioA, unidade));
+    expect(await comoB(async (c) => (await c.query('SELECT * FROM configuracoes')).rowCount)).toBe(0);
+    await expect(comoB((c) => nova(c, predioA, null))).rejects.toThrow(/foreign key/);
+    await expect(comoA((c) => c.query("INSERT INTO configuracoes (building_id, nome, escolhas, orcamento, total) VALUES ($1, 'Lista', '[]', '{}', 0)", [predioA]))).rejects.toThrow(/check/);
+    // apagar a unidade não apaga a combinação (só desliga)
+    await owner.query('DELETE FROM units WHERE id = $1', [unidade]);
+    expect(await comoA(async (c) => (await c.query('SELECT unit_id FROM configuracoes')).rows)).toEqual([{ unit_id: null }]);
+    expect(await comoA(async (c) => (await c.query('DELETE FROM configuracoes')).rowCount)).toBe(1);
+  });
+});

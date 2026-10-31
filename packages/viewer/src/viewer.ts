@@ -15,6 +15,9 @@ import { QualidadeAdaptativa, type NivelQualidade } from './quality/adaptativa';
 import { criarCarregadorGltf, type Decodificadores } from './carregador';
 import { layoutMarca, textoDaMarca, type DadosMarca } from './captura/marca';
 import { corDoIndice, poseNoGiro } from './giro/giro';
+import { criarConfigurador, type Configurador, type FonteMovel, type Superficie } from './configurador/cena';
+import type { Acabamento } from './configurador/padroes';
+import { ajustarPose, type PoseMovel } from './configurador/moveis';
 
 export type ModoCamera = 'orbita' | 'primeira-pessoa';
 
@@ -32,6 +35,8 @@ export interface ConfigViewer {
   qualidadeFixa?: boolean;
   /** Pastas dos decodificadores Draco/KTX2 (Meshopt já vem embutido). */
   decodificadores?: Decodificadores;
+  /** Liga o configurador (acabamentos por superfície e móveis). Só com modelo GLB. */
+  configurador?: boolean;
 }
 
 export interface EstadoViewer {
@@ -85,6 +90,29 @@ export interface Viewer {
   gerarGiro(opcoes?: { quadros?: number; aoProgredir?: (feitos: number, total: number) => void }): Promise<Giro>;
   /** Conta um erro de algo ligado ao 3D (entorno, interior...) na telemetria. */
   registrarErro(): void;
+  /** Configurador: superfícies personalizáveis do modelo (vazio sem modelo GLB ou sem `configurador`). */
+  superficies(): Superficie[];
+  /**
+   * Troca o acabamento de uma superfície (`null` = original). Resolve com os tempos em ms: `trabalhoMs` = o que a
+   * troca custa (mudar o material), `ateQuadroMs` = até o quadro seguinte já desenhado com ele (inclui esperar e
+   * desenhar o quadro). `null` se a superfície não existe.
+   */
+  definirAcabamento(chave: string, acabamento: Acabamento | null): Promise<{ trabalhoMs: number; ateQuadroMs: number } | null>;
+  /**
+   * Adianta o trabalho das trocas: UV das superfícies e texturas dos acabamentos já desenhadas e enviadas à placa
+   * de vídeo, um pouco por quadro (a tela não trava). Depois disso, trocar só muda números.
+   */
+  prepararAcabamentos(acabamentos: readonly Acabamento[]): Promise<void>;
+  /** Coloca (ou move, se já existe) um móvel; a pose vai para a grade de 5 cm. */
+  colocarMovel(id: string, fonte: FonteMovel, pose: PoseMovel): Promise<PoseMovel>;
+  moverMovel(id: string, pose: PoseMovel): PoseMovel | null;
+  removerMovel(id: string): boolean;
+  /** Enquanto houver callback, o clique num piso devolve o ponto (para colocar móvel) em vez de selecionar unidade. */
+  aoClicarPiso(cb: ((ponto: { x: number; y: number; z: number }) => void) | null): void;
+  /** Clique num móvel já colocado. */
+  aoSelecionarMovel(cb: ((id: string) => void) | null): void;
+  /** Piso logo abaixo de (x, z), procurando a partir de `deY` metros para baixo (colocar móvel sem clicar). */
+  pisoAbaixo(x: number, z: number, deY?: number): { x: number; y: number; z: number } | null;
   aoSelecionar(cb: (unidadeId: string | null) => void): void;
   aoMudar(cb: (estado: EstadoViewer) => void): void;
   destruir(): void;
@@ -258,6 +286,9 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
     bloqueado = bloqueioPorCaixas([...caixas.values()], 0.3, ALTURA_OLHOS_M);
   }
 
+  let configurador: Configurador | null = null;
+  let planosCorte: THREE.Plane[] = [];
+
   async function montarModelo(url: string): Promise<void> {
     const { carregador, liberar } = criarCarregadorGltf(renderer, config.decodificadores);
     const gltf = await carregador.loadAsync(url).finally(liberar);
@@ -292,6 +323,19 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
       }
     });
     bloqueado = bloqueioPorRaio(solidos);
+    if (config.configurador) {
+      configurador = criarConfigurador(modelo, cena, new Set([...pecas.values()].map((p) => p.malha)), {
+        prepararMaterial: (m) => {
+          prepararMaterial(m, true);
+          m.clippingPlanes = planosCorte;
+        },
+        tipoIfc,
+        async carregarGltf(u) {
+          const c = criarCarregadorGltf(renderer, config.decodificadores);
+          return (await c.carregador.loadAsync(u).finally(c.liberar)).scene;
+        },
+      });
+    }
   }
 
   function caixaDoPredio(): Caixa {
@@ -362,12 +406,31 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
     apertado.ultY = e.clientY;
   };
   const raycaster = new THREE.Raycaster();
+  let cbPiso: ((p: { x: number; y: number; z: number }) => void) | null = null;
+  let cbMovel: ((id: string) => void) | null = null;
+  const normalMundo = new THREE.Vector3();
   const aoSoltar = (e: PointerEvent) => {
     const a = apertado;
     apertado = null;
     if (!a || Math.hypot(e.clientX - a.x, e.clientY - a.y) > 6) return; // foi arrasto
     const r = canvas.getBoundingClientRect();
     raycaster.setFromCamera(new THREE.Vector2(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1), camera);
+    if (configurador) {
+      const movel = configurador.movelDoObjeto(raycaster.intersectObjects(configurador.objetosMoveis(), true)[0]?.object ?? null);
+      if (movel && cbMovel) {
+        cbMovel(movel);
+        return;
+      }
+      if (cbPiso) {
+        // primeiro acerto em peça sólida ou no chão; vale se a face estiver virada para cima (piso, laje, terreno)
+        const acerto = raycaster.intersectObjects([...solidos, chao], false).find((h) => !corteY || h.point.y <= corteY + 0.01);
+        if (acerto?.face) {
+          normalMundo.copy(acerto.face.normal).transformDirection(acerto.object.matrixWorld);
+          if (normalMundo.y > 0.7) cbPiso({ x: acerto.point.x, y: acerto.point.y, z: acerto.point.z });
+        }
+        return;
+      }
+    }
     const clicaveis = [...pecas.values()].filter((p) => (destaque === null || destaque.has(p.unidade.id)) && (corteY === null || p.caixa.minY < corteY));
     const alvo = raycaster.intersectObjects(clicaveis.map((p) => p.malha), false)[0];
     const id = alvo ? [...pecas.values()].find((p) => p.malha === alvo.object)?.unidade.id ?? null : null;
@@ -532,6 +595,9 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
   }
 
   let pausado = false; // enquanto gera o giro, o laço não desenha
+  /** Quem espera o próximo quadro desenhado (medir a troca de acabamento de ponta a ponta). */
+  const esperandoQuadro: Array<(agora: number) => void> = [];
+  const proximoQuadro = () => new Promise<number>((ok) => esperandoQuadro.push(ok));
   renderer.setAnimationLoop((agora: number) => {
     if (pausado) return;
     const dtMs = agora - ultimoQuadro;
@@ -564,6 +630,7 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
     atualizarRaioX(modo === 'orbita' ? orbita.target : null);
     csm.update();
     renderer.render(cena, camera);
+    if (esperandoQuadro.length) for (const ok of esperandoQuadro.splice(0)) ok(performance.now());
 
     if (cbMudanca && agora - ultimoAviso > 250) {
       ultimoAviso = agora;
@@ -606,6 +673,7 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
       const y = andar === null ? null : alturaDoCorte([...pecas.values()].map((p) => ({ andar: p.unidade.andar, caixa: p.caixa })), andar);
       corteY = y;
       const planos = y === null ? [] : [planoDeCorte(y + 0.01)];
+      planosCorte = planos;
       for (const m of materiaisPredio) {
         m.clippingPlanes = planos;
         m.needsUpdate = true;
@@ -660,6 +728,54 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
     registrarErro() {
       erros++;
     },
+    superficies() {
+      return configurador?.superficies() ?? [];
+    },
+    async definirAcabamento(chave, acabamento) {
+      await pronto;
+      const inicio = performance.now();
+      if (!configurador?.definirAcabamento(chave, acabamento)) return null;
+      const trabalhoMs = Math.round((performance.now() - inicio) * 10) / 10;
+      return { trabalhoMs, ateQuadroMs: Math.round((await proximoQuadro()) - inicio) };
+    },
+    async prepararAcabamentos(acabamentos) {
+      await pronto;
+      if (!configurador) return;
+      const texturas = configurador.preparar([]);
+      for (const a of acabamentos) {
+        texturas.push(...configurador.preparar([a]));
+        for (const t of texturas.splice(0)) renderer.initTexture(t);
+        await proximoQuadro();
+      }
+    },
+    async colocarMovel(id, fonte, pose) {
+      await pronto;
+      if (!configurador) throw new Error('Configurador desligado (precisa de modelo GLB e configurador: true)');
+      const p = ajustarPose(pose);
+      await configurador.colocarMovel(id, fonte, p);
+      return p;
+    },
+    moverMovel(id, pose) {
+      const p = ajustarPose(pose);
+      return configurador?.moverMovel(id, p) ? p : null;
+    },
+    removerMovel(id) {
+      return configurador?.removerMovel(id) ?? false;
+    },
+    aoClicarPiso(cb) {
+      cbPiso = cb;
+    },
+    aoSelecionarMovel(cb) {
+      cbMovel = cb;
+    },
+    pisoAbaixo(x, z, deY = ALTURA_OLHOS_M) {
+      const r = new THREE.Raycaster(new THREE.Vector3(x, deY, z), new THREE.Vector3(0, -1, 0));
+      for (const h of r.intersectObjects([...solidos, chao], false)) {
+        if (!h.face) continue;
+        if (normalMundo.copy(h.face.normal).transformDirection(h.object.matrixWorld).y > 0.7) return { x: h.point.x, y: h.point.y, z: h.point.z };
+      }
+      return null;
+    },
     capturar(dados) {
       // desenha e copia na mesma tarefa: depois o navegador pode limpar o buffer do WebGL
       renderer.render(cena, camera);
@@ -708,6 +824,8 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
       window.removeEventListener('keyup', aoSoltarTecla);
       window.removeEventListener('blur', aoPerderFoco);
       orbita.dispose();
+      configurador?.destruir();
+      for (const ok of esperandoQuadro.splice(0)) ok(performance.now());
       csm.dispose();
       cena.traverse((o) => {
         if (o instanceof THREE.Mesh) o.geometry.dispose();

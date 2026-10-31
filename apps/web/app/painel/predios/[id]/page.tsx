@@ -28,9 +28,16 @@ export default async function PaginaPredio({ params }: { params: Promise<{ id: s
         </Link>
         <div className="flex flex-wrap items-center justify-between gap-3">
           <h1 className="text-2xl font-bold">{espelho.predio.nome}</h1>
-          <Link href={`/painel/predios/${espelho.predio.id}/vitrine`} className="rounded-lg bg-acento px-4 py-2 text-sm font-semibold text-acento-texto hover:opacity-90">
-            Abrir Vitrine 3D
-          </Link>
+          <span className="flex flex-wrap gap-2">
+            {podeLinks && espelho.predio.modeloArquivoId && (
+              <Link href={`/painel/predios/${espelho.predio.id}/configurador`} className="rounded-lg border border-borda bg-superficie px-4 py-2 text-sm font-semibold hover:bg-fundo">
+                Configurador
+              </Link>
+            )}
+            <Link href={`/painel/predios/${espelho.predio.id}/vitrine`} className="rounded-lg bg-acento px-4 py-2 text-sm font-semibold text-acento-texto hover:opacity-90">
+              Abrir Vitrine 3D
+            </Link>
+          </span>
         </div>
       </div>
       <EspelhoVendas espelho={espelho} mudarStatus={mudarStatus.bind(null, espelho.predio.id)} />

@@ -47,11 +47,22 @@ def converter(entrada: Path, saida: Path) -> dict:
         if not guid:
             continue
         try:
-            # IfcWallStandardCase/IfcSlabStandardCase (obsoletos no IFC4) viram o tipo base
-            classe = f.by_guid(guid).is_a().removesuffix("StandardCase")
+            elemento = f.by_guid(guid)
         except RuntimeError:
             continue
-        no["extras"] = {"ifc": classe, **({"areaM2": area[guid]} if area.get(guid) else {})}
+        # IfcWallStandardCase/IfcSlabStandardCase (obsoletos no IFC4) viram o tipo base
+        extras: dict = {"ifc": elemento.is_a().removesuffix("StandardCase")}
+        # tipo predefinido (laje ROOF × FLOOR, forro CEILING × FLOORING) e o conjunto ao qual a peça pertence
+        # (lajes do telhado ficam dentro de um IfcRoof): o configurador separa telhado de piso por isso
+        predefinido = getattr(elemento, "PredefinedType", None)
+        if isinstance(predefinido, str) and predefinido not in ("NOTDEFINED", "USERDEFINED"):
+            extras["ifcTipo"] = predefinido
+        for rel in getattr(elemento, "Decomposes", None) or ():
+            if rel.is_a("IfcRelAggregates") and not rel.RelatingObject.is_a("IfcSpatialStructureElement"):
+                extras["ifcPai"] = rel.RelatingObject.is_a().removesuffix("StandardCase")
+        if area.get(guid):
+            extras["areaM2"] = area[guid]
+        no["extras"] = extras
     doc.setdefault("asset", {})["generator"] = "Imersa 3D (IfcOpenShell)"
     gravar_glb(saida, doc, binario)
     return {"elementos": elementos, "bytes": saida.stat().st_size, "metadados": meta}

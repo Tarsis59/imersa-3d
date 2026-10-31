@@ -68,6 +68,10 @@ def test_glb_y_para_cima_nomes_por_guid_e_tipos(glb, meta):
     tipos = {n["extras"]["ifc"] for n in doc["nodes"] if "extras" in n}
     assert {"IfcWall", "IfcSlab", "IfcSpace", "IfcDoor", "IfcWindow"} <= tipos
     assert not any(t.endswith("StandardCase") for t in tipos)
+    # telhado da FZK: lajes ROOF dentro de um IfcRoof (o configurador separa telhado de piso por isso)
+    lajes = [n["extras"] for n in doc["nodes"] if n.get("extras", {}).get("ifc") == "IfcSlab"]
+    assert any(x.get("ifcTipo") == "ROOF" or x.get("ifcPai") == "IfcRoof" for x in lajes)
+    assert any(x.get("ifcTipo") in ("FLOOR", "BASESLAB") and x.get("ifcPai") != "IfcRoof" for x in lajes)
     espaco = next(n for n in doc["nodes"] if n.get("extras", {}).get("ifc") == "IfcSpace")
     assert espaco["extras"]["areaM2"] > 0
     # glTF é Y para cima: a casa tem ~6-9 m de altura em Y e se espalha em X/Z

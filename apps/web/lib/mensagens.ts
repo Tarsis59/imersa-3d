@@ -32,6 +32,12 @@ const MENSAGENS: Record<string, string> = {
   ambiente_inexistente: 'Ambiente não encontrado no modelo.',
   unidade_de_outro_predio: 'Unidade de outro prédio.',
   destino_invalido: 'Use um endereço https público (rede interna e http não são aceitos).',
+  modelo_padrao_inexistente: 'Modelo de móvel padrão desconhecido.',
+  arquivo_invalido_para_movel: 'Escolha um modelo 3D (.glb) já verificado da sua empresa.',
+  material_inexistente: 'Um dos materiais escolhidos não está mais no catálogo.',
+  movel_inexistente: 'Um dos móveis escolhidos não está mais no catálogo.',
+  superficie_repetida: 'A mesma superfície apareceu duas vezes.',
+  movel_repetido: 'O mesmo móvel apareceu duas vezes.',
 };
 
 export function mensagem(status: number, dados: unknown): string {

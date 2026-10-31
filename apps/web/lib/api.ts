@@ -11,7 +11,7 @@ export interface RespostaApi<T> {
 /** Chamada servidor→API. Repassa o IP e o navegador de quem pediu (limite por pessoa e registro do consentimento LGPD). */
 export async function api<T = unknown>(
   caminho: string,
-  opcoes: { metodo?: 'GET' | 'POST' | 'PATCH' | 'DELETE'; corpo?: unknown; token?: string } = {},
+  opcoes: { metodo?: 'GET' | 'POST' | 'PATCH' | 'PUT' | 'DELETE'; corpo?: unknown; token?: string } = {},
 ): Promise<RespostaApi<T>> {
   const h = await headers();
   const ip = h.get('x-forwarded-for') ?? h.get('x-real-ip');

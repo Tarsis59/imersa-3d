@@ -28,6 +28,11 @@ const casos: Array<[Papel, Acao, boolean]> = [
   ['viewer', 'numeros:ler', false],
   ['admin', 'integracao:gerir', true],
   ['consultora', 'integracao:gerir', false],
+  ['admin', 'catalogo:editar', true],
+  ['consultora', 'catalogo:editar', false],
+  ['consultora', 'configuracao:salvar', true],
+  ['produtor', 'configuracao:salvar', false],
+  ['viewer', 'configuracao:salvar', false],
 ];
 
 describe('RBAC', () => {
@@ -49,5 +54,7 @@ describe('MFA obrigatório', () => {
     ['consultora', 'lead:ler', false],
     ['admin', 'link:criar', false],
     ['admin', 'integracao:gerir', true],
+    ['admin', 'catalogo:editar', true],
+    ['admin', 'configuracao:salvar', false],
   ] as Array<[Papel, Acao, boolean]>)('%s em %s → %s', (papel, acao, esperado) => expect(exigeMfa(papel, acao)).toBe(esperado));
 });

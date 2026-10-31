@@ -11,3 +11,7 @@ export { tipoDoSplat } from './interior/tipo';
 export { criarCarregadorGltf, type Decodificadores } from './carregador';
 export { layoutMarca, textoDaMarca, type DadosMarca } from './captura/marca';
 export { corDoIndice, indiceDaCor, quadroPorArrasto, MAX_UNIDADES_GIRO } from './giro/giro';
+export type { Superficie, FonteMovel } from './configurador/cena';
+export { grupoDaPeca, areaVisivel, categoriaPeloNome, type CategoriaMaterial } from './configurador/superficies';
+export { PADROES, desenharPadrao, corDerivada, type Acabamento, type Padrao, type Contexto2D } from './configurador/padroes';
+export { MOVEIS_PADRAO, movelPadrao, ajustarPose, LICENCA_PADRAO, type MovelPadrao, type PoseMovel, type CategoriaMovel } from './configurador/moveis';

@@ -15,6 +15,9 @@ export default function LayoutPainel({ children }: { children: ReactNode }) {
           <Link href="/painel/leads" className="hover:underline">
             Leads
           </Link>
+          <Link href="/painel/catalogo" className="hover:underline">
+            Catálogo
+          </Link>
           <Link href="/painel/membros" className="hover:underline">
             Membros
           </Link>
