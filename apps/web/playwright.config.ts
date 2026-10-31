@@ -5,7 +5,11 @@ const DB_APP = 'postgres://imersa_app:imersa_app_dev@localhost:55432/imersa_e2e'
 /** Prédios reais da Av. Paulista já baixados: o entorno funciona sem internet e sem usar o Overpass público. */
 /** E2E_PRODUCAO=1: site em modo de produção (build otimizado), para medir desempenho como a cliente vai ver. */
 const PRODUCAO = process.env.E2E_PRODUCAO === '1';
-const CHROMIUM_3D = ['--use-angle=swiftshader', '--enable-unsafe-swiftshader'];
+/**
+ * 3D no Chromium sem tela: por padrão desenhado por software (SwiftShader), que roda em qualquer máquina e no CI.
+ * E2E_GPU=1 usa a placa de vídeo da máquina (medir desempenho como num aparelho de verdade).
+ */
+const CHROMIUM_3D = process.env.E2E_GPU === '1' ? ['--ignore-gpu-blocklist', '--enable-gpu-rasterization', '--use-angle=default'] : ['--use-angle=swiftshader', '--enable-unsafe-swiftshader'];
 /** Worker de capturas sem GPU: devolve esta esfera (gerada pelo pipeline real: PLY → SOG). */
 const SPLAT_SIMULADO = fileURLToPath(new URL('./e2e/fixtures/esfera.sog', import.meta.url));
 const PREDIOS_PAULISTA = fileURLToPath(new URL('../../exemplos/cidade-real/sao-paulo-paulista-osm.json', import.meta.url));

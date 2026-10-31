@@ -107,7 +107,10 @@ test('vendas: link pelo WhatsApp → cliente no celular (sem login) → pedido d
 
   // painel: lead com a unidade e a mensagem (espera a atualização da página depois da mudança de status)
   await page.waitForLoadState('networkidle');
-  await page.goto('/painel/leads');
+  // a página do espelho ainda pode estar se atualizando (status ao vivo): uma navegação no meio é abortada; tenta de novo
+  await expect(async () => {
+    await page.goto('/painel/leads', { waitUntil: 'commit', timeout: 15_000 });
+  }).toPass({ timeout: 60_000 });
   const lead = page.getByTestId('lista-leads').getByRole('listitem').filter({ hasText: 'Carla Mendes' });
   await expect(lead).toContainText('unidade 102');
   await expect(lead).toContainText('Posso visitar no sábado?');

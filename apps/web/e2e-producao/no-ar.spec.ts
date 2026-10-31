@@ -3,7 +3,7 @@ import { test, expect, devices } from '@playwright/test';
 import { codigoTotp } from '../../api/src/auth/totp';
 
 // Fluxo completo no ar: cadastro → MFA → projeto → prédio e unidades → IFC enviado direto ao R2 → conversão BIM
-// no Render → Vitrine 3D → link para o cliente → cliente no celular (sem login) → pedido de contato → lead no painel.
+// no Render → Vitrine 3D → configurador → link para o cliente → cliente no celular (sem login) → pedido de contato → lead no painel.
 // Imprime EMPRESA_TESTE=<slug> para a limpeza depois.
 const API = process.env.API_PRODUCAO ?? 'https://imersa-api.onrender.com';
 const SITE = process.env.SITE_PRODUCAO ?? 'https://imersa-3d.vercel.app';
@@ -69,6 +69,22 @@ test('no ar: cadastro → projeto → BIM → Vitrine 3D → link do cliente →
   await expect(vitrine).toHaveAttribute('data-estado', 'pronto', { timeout: 120_000 });
   await expect(page.getByTestId('contagem-filtro')).toHaveText('7 de 7 unidades');
   await page.screenshot({ path: test.info().outputPath('vitrine-no-ar.png') });
+
+  // configurador: telhado separado pelo conversor do Render, troca de acabamento com o modelo do R2
+  await page.goto('/painel/catalogo');
+  await page.getByRole('button', { name: 'Adicionar catálogo inicial' }).click();
+  await expect(page.getByText(/19 materiais e 16 móveis adicionados/)).toBeVisible();
+  await page.goto(projetoUrl);
+  await page.getByRole('link', { name: /ver espelho de vendas/ }).click();
+  await page.getByRole('link', { name: 'Configurador' }).click();
+  const tela = page.getByTestId('configurador-3d');
+  await expect(tela).toHaveAttribute('data-estado', 'pronto', { timeout: 120_000 });
+  await expect(page.getByLabel('Acabamento: Telhado')).toBeVisible();
+  const paredes = page.getByLabel('Acabamento: Paredes');
+  await paredes.selectOption((await paredes.locator('option').filter({ hasText: 'Tijolinho aparente' }).getAttribute('value'))!);
+  await expect(tela).toHaveAttribute('data-trocas', '1');
+  expect(Number(await tela.getAttribute('data-troca-trabalho-ms'))).toBeLessThan(20);
+  await tela.screenshot({ path: test.info().outputPath('configurador-no-ar.png') });
 
   // link para o cliente
   await page.goto(projetoUrl);
