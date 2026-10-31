@@ -315,3 +315,43 @@ describe('entorno: prédios reais do OSM em volta (com cache)', () => {
     expect((await req('POST', `/projetos/${p}/entorno/atualizar`, {}, outra)).status).toBe(404);
   });
 });
+
+describe('telemetria do viewer', () => {
+  let predio = '';
+  beforeAll(async () => {
+    const p = (await req('POST', '/projetos', { nome: 'Projeto telemetria' }, admin)).json.id;
+    predio = (await req('POST', `/projetos/${p}/predios`, { nome: 'Torre T', andares: 2 }, admin)).json.id;
+  });
+  const sessao = (x: object) => ({ predioId: predio, cargaMs: 1500, fpsMedio: 60, nivel: 'alto', erros: 0, celular: false, ...x });
+
+  it('qualquer papel registra uma visita (204); valores absurdos são recusados (400)', async () => {
+    expect((await req('POST', '/telemetria/viewer', sessao({}), consultora)).status).toBe(204);
+    expect((await req('POST', '/telemetria/viewer', sessao({ fpsMedio: 9999 }), consultora)).status).toBe(400);
+    expect((await req('POST', '/telemetria/viewer', sessao({ nivel: 'ultra' }), consultora)).status).toBe(400);
+    expect((await req('POST', '/telemetria/viewer', sessao({ cargaMs: -1 }), consultora)).status).toBe(400);
+    expect((await req('POST', '/telemetria/viewer', sessao({}))).status).toBe(401);
+  });
+
+  it('prédio de outra empresa: 404 (não grava)', async () => {
+    expect((await req('POST', '/telemetria/viewer', sessao({}), outra)).status).toBe(404);
+  });
+
+  it('resumo: p50/p95 de carga, p50 e 5% piores de FPS, erros e celular; só gestão', async () => {
+    const cargas = [1000, 1200, 1400, 1600, 1800, 2000, 2200, 2400, 2600, 9000];
+    for (const [i, cargaMs] of cargas.entries()) {
+      await req('POST', '/telemetria/viewer', sessao({ cargaMs, fpsMedio: 30 + i * 3, erros: i === 9 ? 2 : 0, celular: i % 2 === 0, nivel: i < 8 ? 'alto' : 'baixo' }), consultora);
+    }
+    expect((await req('GET', '/telemetria/viewer/resumo', undefined, consultora)).status).toBe(403);
+    const r = await req('GET', '/telemetria/viewer/resumo?dias=7', undefined, admin);
+    expect(r.status).toBe(200);
+    expect(r.json.sessoes).toBe(11); // 10 + a do primeiro teste
+    expect(r.json.cargaMs.p50).toBe(1800);
+    expect(r.json.cargaMs.p95).toBeGreaterThan(2600);
+    expect(r.json.fps.p50).toBe(45);
+    expect(r.json.fps.p05).toBeLessThan(33);
+    expect(r.json.taxaErro).toBeCloseTo(1 / 11, 3);
+    expect(r.json.porNivel).toEqual({ alto: 9, medio: 0, baixo: 2 });
+    expect(r.json.celular.sessoes).toBe(5);
+    expect((await req('GET', '/telemetria/viewer/resumo', undefined, outra)).json.sessoes).toBe(0);
+  });
+});

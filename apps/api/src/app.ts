@@ -21,6 +21,7 @@ import { documentoOpenApi } from './openapi';
 import { rotasEmpreendimentos } from './rotas/empreendimentos';
 import { rotasArquivos } from './rotas/arquivos';
 import { rotasMapa } from './rotas/mapa';
+import { rotasTelemetria } from './rotas/telemetria';
 import { ArmazenamentoLocal, ArmazenamentoS3, type Armazenamento } from './arquivos/armazenamento';
 import { clamav, semAntivirus, type Antivirus } from './arquivos/antivirus';
 import { comPrediosDeArquivo, servicosMapaReais, type ServicosMapa } from './mapa/osm';
@@ -344,6 +345,7 @@ export async function construirApp({ pool, config, logger = false, reportarErro,
   });
   const mapaReal = servicosMapaReais(config.OSM_USER_AGENT ?? 'Imersa3D-dev/0.1 (ambiente de desenvolvimento)');
   rotasMapa(app, { pool, exigir, mapa: mapa ?? (config.MAPA_ARQUIVO_PREDIOS ? comPrediosDeArquivo(mapaReal, config.MAPA_ARQUIVO_PREDIOS) : mapaReal) });
+  rotasTelemetria(app, { pool, exigir });
 
   return app;
 }

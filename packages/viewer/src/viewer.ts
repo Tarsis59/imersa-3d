@@ -39,6 +39,16 @@ export interface EstadoViewer {
   posicao: { x: number; y: number; z: number };
 }
 
+/** Resumo da visita para a telemetria. */
+export interface MetricasViewer {
+  /** Da criação até o prédio na tela; `null` se ainda não carregou. */
+  cargaMs: number | null;
+  /** Média da visita, sem contar travadas longas (aba em segundo plano). */
+  fpsMedio: number | null;
+  nivel: NivelQualidade['nome'];
+  erros: number;
+}
+
 export interface Viewer {
   /** Resolve quando o prédio está na tela; rejeita se o modelo não carregar. */
   pronto: Promise<void>;
@@ -57,6 +67,9 @@ export interface Viewer {
   definirEntorno(entorno: Entorno | null): Promise<number>;
   /** PNG da vista atual com faixa da marca (empresa, prédio, data, "imagem ilustrativa" e atribuição do OSM). */
   capturar(dados: Omit<DadosMarca, 'atribuicao'>): Promise<Blob>;
+  metricas(): MetricasViewer;
+  /** Conta um erro de algo ligado ao 3D (entorno, interior...) na telemetria. */
+  registrarErro(): void;
   aoSelecionar(cb: (unidadeId: string | null) => void): void;
   aoMudar(cb: (estado: EstadoViewer) => void): void;
   destruir(): void;
@@ -83,6 +96,11 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
   const lat = config.lat ?? ORIGEM_PAULISTA.lat;
   const lon = config.lon ?? ORIGEM_PAULISTA.lon;
   const qualidade = new QualidadeAdaptativa({ inicial: config.qualidadeInicial ?? 0 });
+  const criadoEm = performance.now();
+  let cargaMs: number | null = null;
+  let erros = 0;
+  let somaQuadrosMs = 0;
+  let quadros = 0;
 
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
   renderer.setPixelRatio(qualidade.pixelRatio(window.devicePixelRatio));
@@ -362,6 +380,10 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
   renderer.setAnimationLoop((agora: number) => {
     const dtMs = agora - ultimoQuadro;
     ultimoQuadro = agora;
+    if (dtMs > 0 && dtMs <= 250) {
+      somaQuadrosMs += dtMs;
+      quadros++;
+    }
     const troca = qualidade.registrar(dtMs);
     if (troca) aplicarQualidade(troca);
 
@@ -403,6 +425,10 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
     pintar();
     enquadrarPredio();
   });
+  pronto.then(
+    () => (cargaMs = Math.round(performance.now() - criadoEm)),
+    () => erros++,
+  );
   definirSol(new Date().toISOString().slice(0, 10), 10);
 
   return {
@@ -462,6 +488,12 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
       bloqueadoCidade = bloqueioPorRaio([cidade]);
       atribuicaoEntorno = entorno.atribuicao;
       return predios.length;
+    },
+    metricas() {
+      return { cargaMs, fpsMedio: somaQuadrosMs > 0 ? Math.round((quadros * 10_000) / somaQuadrosMs) / 10 : null, nivel: qualidade.nivel.nome, erros };
+    },
+    registrarErro() {
+      erros++;
     },
     capturar(dados) {
       // desenha e copia na mesma tarefa: depois o navegador pode limpar o buffer do WebGL

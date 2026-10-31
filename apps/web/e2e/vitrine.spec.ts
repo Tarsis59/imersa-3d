@@ -103,4 +103,17 @@ test('vitrine 3D: volumes do prédio, filtros, favoritos, voo até a unidade, co
   await page.keyboard.up('s');
   await page.getByRole('button', { name: 'Voltar para a vista de cima' }).click();
   await expect(vitrine).toHaveAttribute('data-modo', 'orbita');
+
+  // telemetria: ao sair da Vitrine a visita é enviada (sendBeacon) e aparece no painel de desempenho
+  await page.getByRole('link', { name: 'Desempenho 3D' }).click();
+  await expect(page.getByRole('heading', { name: 'Desempenho do 3D' })).toBeVisible();
+  await expect
+    .poll(
+      async () => {
+        await page.reload();
+        return Number(await page.getByTestId('telemetria-visitas').textContent());
+      },
+      { timeout: 20_000 },
+    )
+    .toBeGreaterThanOrEqual(2); // a do recarregamento no meio do teste + a da saída agora
 });

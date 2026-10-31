@@ -18,6 +18,9 @@ export default function LayoutPainel({ children }: { children: ReactNode }) {
           <Link href="/painel/seguranca" className="hover:underline">
             Segurança
           </Link>
+          <Link href="/painel/telemetria" className="hover:underline">
+            Desempenho 3D
+          </Link>
         </nav>
         <form action={sair} className="ml-auto">
           <Botao variante="secundario" type="submit">

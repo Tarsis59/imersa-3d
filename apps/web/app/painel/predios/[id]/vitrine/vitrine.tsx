@@ -51,8 +51,8 @@ export function Vitrine({
 }) {
   const canvas = useRef<HTMLCanvasElement>(null);
   const viewer = useRef<Viewer | null>(null);
-  const inicial = useRef({ modeloUrl, unidades, rotacaoGraus, lat, lon, projetoId });
-  inicial.current = { modeloUrl, unidades, rotacaoGraus, lat, lon, projetoId };
+  const inicial = useRef({ modeloUrl, unidades, rotacaoGraus, lat, lon, projetoId, predioId });
+  inicial.current = { modeloUrl, unidades, rotacaoGraus, lat, lon, projetoId, predioId };
   const [estado, setEstado] = useState<'carregando' | 'pronto' | 'erro'>('carregando');
   const [telemetria, setTelemetria] = useState<EstadoViewer | null>(null);
   const [filtro, setFiltro] = useState<Filtro>(filtroVazio);
@@ -78,6 +78,18 @@ export function Vitrine({
     viewer.current = v;
     let vivo = true;
     v.aoSelecionar((id) => setSelecionada(id));
+    // telemetria: uma vez por visita, ao sair da página (ou trocar de página dentro do site)
+    let enviado = false;
+    const enviarTelemetria = () => {
+      const m = v.metricas();
+      if (enviado || (m.cargaMs === null && m.erros === 0)) return;
+      enviado = true;
+      const corpo = JSON.stringify({ predioId: c.predioId, ...m, celular: window.matchMedia('(pointer: coarse)').matches });
+      navigator.sendBeacon?.('/api/telemetria', new Blob([corpo], { type: 'application/json' }));
+    };
+    const aoEsconder = () => document.visibilityState === 'hidden' && enviarTelemetria();
+    window.addEventListener('pagehide', enviarTelemetria);
+    document.addEventListener('visibilitychange', aoEsconder);
     v.aoMudar((e) => vivo && setTelemetria(e));
     v.pronto.then(
       () => {
@@ -92,12 +104,18 @@ export function Vitrine({
             const n = await v.definirEntorno(r.entorno);
             if (vivo) setEntorno({ tipo: 'pronto', predios: n, atribuicao: r.entorno.atribuicao });
           })
-          .catch(() => vivo && setEntorno({ tipo: 'indisponivel' }));
+          .catch(() => {
+            v.registrarErro();
+            if (vivo) setEntorno({ tipo: 'indisponivel' });
+          });
       },
       () => vivo && setEstado('erro'),
     );
     return () => {
       vivo = false;
+      enviarTelemetria();
+      window.removeEventListener('pagehide', enviarTelemetria);
+      document.removeEventListener('visibilitychange', aoEsconder);
       viewer.current = null;
       v.destruir();
     };
