@@ -164,3 +164,65 @@ export interface Poi {
 
 export const tamanhoLegivel = (bytes: number) =>
   bytes < 1024 * 1024 ? `${Math.max(1, Math.round(bytes / 1024))} KB` : `${(bytes / 1024 / 1024).toLocaleString('pt-BR', { maximumFractionDigits: 1 })} MB`;
+
+// ------------------------------------------------------------------ vendas
+export type StatusLink = 'ativo' | 'vencido' | 'revogado';
+export interface LinkCliente {
+  id: string;
+  titulo: string | null;
+  expiraEm: string;
+  revogadoEm: string | null;
+  criadoEm: string;
+  criadoPor: { id: string; nome: string };
+  status: StatusLink;
+  visitas: number;
+  leads: number;
+}
+
+export type StatusLead = 'novo' | 'em_contato' | 'convertido' | 'descartado';
+export const STATUS_LEAD: readonly StatusLead[] = ['novo', 'em_contato', 'convertido', 'descartado'];
+export const ROTULO_STATUS_LEAD: Record<StatusLead, string> = {
+  novo: 'Novo',
+  em_contato: 'Em contato',
+  convertido: 'Virou venda',
+  descartado: 'Descartado',
+};
+export interface Lead {
+  id: string;
+  nome: string;
+  telefone: string | null;
+  email: string | null;
+  mensagem: string | null;
+  status: StatusLead;
+  criadoEm: string;
+  unidade: string | null;
+  predio: string;
+  predioId: string;
+  projeto: string;
+  projetoId: string;
+  consultora: string;
+  link: string | null;
+}
+
+export interface Numeros {
+  dias: number;
+  visitas: number;
+  interiores: number;
+  tempoMedioS: number | null;
+  leads: number;
+  conversao: number;
+  unidades: Array<{ id: string; codigo: string; vistas: number; favoritos: number }>;
+  porConsultora: Array<{ id: string; nome: string; links: number; visitas: number; leads: number }>;
+}
+
+/** O que o portal público recebe pelo token do link (sem login). */
+export interface Portal {
+  empresa: { nome: string };
+  consultora: { nome: string };
+  projeto: { id: string; nome: string; descricao: string | null; cidade: string | null; uf: string | null; lat: number | null; lon: number | null; rotacaoGraus: number };
+  predio: { id: string; nome: string };
+  andares: Array<{ numero: number; nome: string }>;
+  unidades: Array<{ id: string; codigo: string; andar: number; status: StatusUnidade; preco: number | null; meshNodeId: string | null; tipologia: string | null; areaM2: number | null; quartos: number | null }>;
+  modeloUrl: string | null;
+  interiores: Array<{ id: string; nome: string }>;
+}

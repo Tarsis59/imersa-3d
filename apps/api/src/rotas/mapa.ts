@@ -37,7 +37,10 @@ const RAIO_ENTORNO_M = 500;
 const DESVIO_MAX_CACHE_M = 50;
 const ATRIBUICAO_OSM = '© colaboradores do OpenStreetMap (ODbL)';
 
-export function rotasMapa(app: FastifyInstance, { pool, exigir, mapa }: Dependencias): void {
+type Contexto = { tenantId: string; userId: string | null };
+
+/** Entorno do projeto (cache no banco; consulta o OSM quando falta ou o projeto mudou de lugar). Usado pelo painel e pelo portal público. */
+export function criarEntorno(pool: pg.Pool, mapa: ServicosMapa) {
   async function buscarPredios(centro: { lat: number; lon: number }): Promise<PredioOsm[]> {
     try {
       return await mapa.buscarPredios(centro.lat, centro.lon, RAIO_ENTORNO_M);
@@ -45,17 +48,15 @@ export function rotasMapa(app: FastifyInstance, { pool, exigir, mapa }: Dependen
       throw new ErroHttp(502, 'servico_mapa_indisponivel');
     }
   }
-  const gravarEntorno = (c: pg.PoolClient, id: string, centro: { lat: number; lon: number }, predios: PredioOsm[]) =>
+  const gravar = (c: pg.PoolClient, id: string, centro: { lat: number; lon: number }, predios: PredioOsm[]) =>
     c.query(
       `INSERT INTO entornos (project_id, centro, raio_m, predios) VALUES ($1, ST_SetSRID(ST_MakePoint($3, $2), 4326), $4, $5::jsonb)
        ON CONFLICT (project_id) DO UPDATE SET centro = EXCLUDED.centro, raio_m = EXCLUDED.raio_m, predios = EXCLUDED.predios, atualizado_em = now()`,
       [id, centro.lat, centro.lon, RAIO_ENTORNO_M, JSON.stringify(predios)],
     );
 
-  app.get('/projetos/:id/entorno', async (req) => {
-    const s = await exigir(req, 'projeto:ler');
-    const { id } = IdParam.parse(req.params);
-    const { centro, cache } = await withTenant(pool, ctx(s), async (c) => {
+  async function obter(contexto: Contexto, id: string) {
+    const { centro, cache } = await withTenant(pool, contexto, async (c) => {
       const centro = await localizacao(c, id);
       if (!centro) return { centro, cache: undefined };
       const r = await c.query<{ predios: PredioOsm[]; atualizadoEm: Date; desvio: number; raio: number }>(
@@ -70,8 +71,20 @@ export function rotasMapa(app: FastifyInstance, { pool, exigir, mapa }: Dependen
       return { semLocalizacao: false, centro, predios: cache.predios, atualizadoEm: cache.atualizadoEm, atribuicao: ATRIBUICAO_OSM };
     }
     const predios = await buscarPredios(centro);
-    await withTenant(pool, ctx(s), (c) => gravarEntorno(c, id, centro, predios));
+    await withTenant(pool, contexto, (c) => gravar(c, id, centro, predios));
     return { semLocalizacao: false, centro, predios, atualizadoEm: new Date(), atribuicao: ATRIBUICAO_OSM };
+  }
+
+  return { obter, buscarPredios, gravar };
+}
+
+export function rotasMapa(app: FastifyInstance, { pool, exigir, mapa }: Dependencias): void {
+  const entorno = criarEntorno(pool, mapa);
+
+  app.get('/projetos/:id/entorno', async (req) => {
+    const s = await exigir(req, 'projeto:ler');
+    const { id } = IdParam.parse(req.params);
+    return entorno.obter(ctx(s), id);
   });
 
   app.post('/projetos/:id/entorno/atualizar', async (req) => {
@@ -79,9 +92,9 @@ export function rotasMapa(app: FastifyInstance, { pool, exigir, mapa }: Dependen
     const { id } = IdParam.parse(req.params);
     const centro = await withTenant(pool, ctx(s), (c) => localizacao(c, id));
     if (!centro) throw new ErroHttp(400, 'sem_localizacao');
-    const predios = await buscarPredios(centro);
+    const predios = await entorno.buscarPredios(centro);
     await withTenant(pool, ctx(s), async (c) => {
-      await gravarEntorno(c, id, centro, predios);
+      await entorno.gravar(c, id, centro, predios);
       await registrarAuditoria(c, { userId: s.userId, acao: 'entorno.atualizar', entidade: 'project', entidadeId: id, depois: { predios: predios.length } });
     });
     return { predios: predios.length };

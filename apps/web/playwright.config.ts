@@ -48,7 +48,7 @@ export default defineConfig({
       url: 'http://localhost:3100/login',
       reuseExistingServer: false,
       timeout: PRODUCAO ? 600_000 : 180_000,
-      env: { API_URL: 'http://localhost:3334' },
+      env: { API_URL: 'http://localhost:3334', SITE_URL: 'http://localhost:3100' },
     },
   ],
 });

@@ -1,4 +1,4 @@
-// Worker de capturas (fotos/vídeo → 3D): `pnpm --filter @imersa/api worker`. Pode haver vários (a fila não repete).
+// Worker de capturas (fotos/vídeo → 3D) e da retenção LGPD: `pnpm --filter @imersa/api worker`. Pode haver vários (a fila não repete).
 import { createServer } from 'node:http';
 import { setTimeout as esperar } from 'node:timers/promises';
 import { resolve } from 'node:path';
@@ -7,6 +7,7 @@ import { z } from 'zod';
 import { armazenamentoDaConfig } from './app';
 import { lerConfig } from './config';
 import { processarProxima, reconstrutorPython, reconstrutorSimulado } from './capturas/worker';
+import { anonimizarEventos, periodica } from './vendas/retencao';
 
 const extra = z
   .object({
@@ -18,6 +19,8 @@ const extra = z
     WORKER_PORTA: z.coerce.number().int().positive().optional(),
     WORKER_INTERVALO_S: z.coerce.number().positive().default(15),
     WORKER_PASTA: z.string().default('trabalho-worker'),
+    /** Prazo de retenção do IP/navegador das visitas ao portal (LGPD). */
+    RETENCAO_EVENTOS_DIAS: z.coerce.number().int().min(1).max(3650).default(180),
   })
   .parse(process.env);
 
@@ -37,8 +40,18 @@ if (extra.WORKER_PORTA) createServer((_req, res) => res.writeHead(ativo ? 200 : 
 for (const sinal of ['SIGINT', 'SIGTERM'] as const) process.on(sinal, () => (ativo = false));
 
 console.info(`[worker] capturas: reconstrutor ${extra.RECONSTRUTOR}`);
+const retencao = periodica(6 * 3600 * 1000, async () => {
+  try {
+    const n = await anonimizarEventos(pool, extra.RETENCAO_EVENTOS_DIAS);
+    if (n) console.info(`[worker] retenção: ${n} eventos de visita anonimizados (mais de ${extra.RETENCAO_EVENTOS_DIAS} dias)`);
+  } catch (e) {
+    console.error('[worker] retenção falhou (tenta de novo na próxima volta)', e);
+    throw e;
+  }
+});
 while (ativo) {
   try {
+    await retencao();
     const r = await processarProxima(deps);
     if (r !== 'vazia') console.info(`[worker] captura processada: ${r}`);
     if (r === 'vazia') await esperar(extra.WORKER_INTERVALO_S * 1000);

@@ -2,8 +2,9 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { Cartao } from '@/components/ui';
 import { apiNaPagina } from '@/lib/sessao';
-import { ehGestao, type Arquivo, type Espelho, type Me } from '@/lib/tipos';
-import { mudarStatus, vincularModelo } from './actions';
+import { ehGestao, type Arquivo, type Espelho, type LinkCliente, type Me } from '@/lib/tipos';
+import { criarLink, mudarStatus, revogarLink, vincularModelo } from './actions';
+import { LinksClientes } from './links-clientes';
 import { EspelhoVendas } from './espelho';
 import { ModeloDoPredio } from './modelo-3d';
 
@@ -16,6 +17,9 @@ export default async function PaginaPredio({ params }: { params: Promise<{ id: s
   const me = (await apiNaPagina<Me>('/me', volta)).dados;
   const arquivos = (await apiNaPagina<Arquivo[]>(`/projetos/${espelho.predio.projetoId}/arquivos`, volta)).dados;
   const modelos = arquivos.filter((a) => a.tipo === 'modelo_3d' && a.status === 'pronto');
+  // gestão e consultoras geram links para clientes (cada consultora vê só os dela)
+  const podeLinks = ehGestao(me.papel) || me.papel === 'consultora';
+  const links = podeLinks ? (await apiNaPagina<LinkCliente[]>(`/predios/${encodeURIComponent(id)}/links`, volta)).dados : [];
   return (
     <>
       <div className="grid gap-1">
@@ -30,6 +34,17 @@ export default async function PaginaPredio({ params }: { params: Promise<{ id: s
         </div>
       </div>
       <EspelhoVendas espelho={espelho} mudarStatus={mudarStatus.bind(null, espelho.predio.id)} />
+      {podeLinks && (
+        <Cartao titulo="Links para clientes">
+          <LinksClientes
+            predioNome={espelho.predio.nome}
+            projetoNome={espelho.predio.projetoNome}
+            links={links}
+            criar={criarLink.bind(null, espelho.predio.id)}
+            revogar={revogarLink.bind(null, espelho.predio.id)}
+          />
+        </Cartao>
+      )}
       <Cartao titulo="Modelo 3D">
         <ModeloDoPredio
           predioId={espelho.predio.id}

@@ -2,10 +2,17 @@
 import { useEffect, useRef, useState } from 'react';
 import { abrirInterior, type Interior } from '@imersa/viewer';
 import { Botao } from '@/components/ui';
-import { linkDoArquivo } from './actions';
 
 /** Interior real (splat) por cima do 3D do prédio. A biblioteca de splats só é baixada aqui. */
-export function InteriorSplat({ arquivo, aoFechar }: { arquivo: { id: string; nome: string }; aoFechar: () => void }) {
+export function InteriorSplat({
+  arquivo,
+  linkDoArquivo,
+  aoFechar,
+}: {
+  arquivo: { id: string; nome: string };
+  linkDoArquivo: (arquivoId: string) => Promise<string | null>;
+  aoFechar: () => void;
+}) {
   const canvas = useRef<HTMLCanvasElement>(null);
   const interior = useRef<Interior | null>(null);
   const [estado, setEstado] = useState<'carregando' | 'pronto' | 'erro'>('carregando');
@@ -29,6 +36,8 @@ export function InteriorSplat({ arquivo, aoFechar }: { arquivo: { id: string; no
       aberto?.destruir();
       interior.current = null;
     };
+    // linkDoArquivo fica de fora: muda a cada atualização da página e reabriria o interior
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [arquivo.id, arquivo.nome]);
 
   return (

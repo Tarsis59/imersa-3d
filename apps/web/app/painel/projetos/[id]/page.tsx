@@ -53,7 +53,14 @@ export default async function PaginaProjeto({ params }: { params: Promise<{ id: 
         <Link href="/painel" className="text-sm text-suave hover:underline">
           ← Projetos
         </Link>
-        <h1 className="text-2xl font-bold">{projeto.nome}</h1>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <h1 className="text-2xl font-bold">{projeto.nome}</h1>
+          {(gestao || me.papel === 'consultora') && (
+            <Link href={`/painel/projetos/${projeto.id}/numeros`} className="rounded-lg border border-borda bg-superficie px-4 py-2 text-sm font-semibold hover:bg-fundo">
+              Números de vendas
+            </Link>
+          )}
+        </div>
         <p className="text-sm text-suave">
           {ROTULO_STATUS_PROJETO[projeto.status]}
           {projeto.cidade ? ` · ${projeto.cidade}${projeto.uf ? `/${projeto.uf}` : ''}` : ''}

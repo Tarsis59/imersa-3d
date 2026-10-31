@@ -20,9 +20,11 @@ import { registrarAuditoria } from './auditoria';
 import { documentoOpenApi } from './openapi';
 import { rotasEmpreendimentos } from './rotas/empreendimentos';
 import { rotasArquivos } from './rotas/arquivos';
-import { rotasMapa } from './rotas/mapa';
+import { criarEntorno, rotasMapa } from './rotas/mapa';
 import { rotasTelemetria } from './rotas/telemetria';
 import { rotasCapturas } from './rotas/capturas';
+import { rotasVendas } from './rotas/vendas';
+import { rotasPublicas } from './rotas/publico';
 import { ArmazenamentoLocal, ArmazenamentoS3, type Armazenamento } from './arquivos/armazenamento';
 import { clamav, semAntivirus, type Antivirus } from './arquivos/antivirus';
 import { comPrediosDeArquivo, servicosMapaReais, type ServicosMapa } from './mapa/osm';
@@ -354,9 +356,12 @@ export async function construirApp({ pool, config, logger = false, reportarErro,
     limiteBytes: (config.LIMITE_ARMAZENAMENTO_GB ?? 50) * 1024 ** 3,
   });
   const mapaReal = servicosMapaReais(config.OSM_USER_AGENT ?? 'Imersa3D-dev/0.1 (ambiente de desenvolvimento)');
-  rotasMapa(app, { pool, exigir, mapa: mapa ?? (config.MAPA_ARQUIVO_PREDIOS ? comPrediosDeArquivo(mapaReal, config.MAPA_ARQUIVO_PREDIOS) : mapaReal) });
+  const servicosMapa = mapa ?? (config.MAPA_ARQUIVO_PREDIOS ? comPrediosDeArquivo(mapaReal, config.MAPA_ARQUIVO_PREDIOS) : mapaReal);
+  rotasMapa(app, { pool, exigir, mapa: servicosMapa });
   rotasTelemetria(app, { pool, exigir });
   rotasCapturas(app, { pool, exigir, armazenamento: arm });
+  rotasVendas(app, { pool, exigir, webUrl: config.WEB_URL });
+  rotasPublicas(app, { pool, armazenamento: arm, entorno: criarEntorno(pool, servicosMapa) });
 
   return app;
 }

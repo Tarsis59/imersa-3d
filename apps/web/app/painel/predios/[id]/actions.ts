@@ -46,3 +46,22 @@ export async function vincularPeca(predioId: string, unidadeId: string, meshNode
   revalidatePath(`/painel/predios/${predioId}`);
   return {};
 }
+
+/** Link novo para o cliente. O endereço completo só aparece agora (o banco guarda só o hash do token). */
+export async function criarLink(predioId: string, titulo: string, dias: number): Promise<{ url: string; expiraEm: string } | { erro: string }> {
+  const r = await api<{ url: string; expiraEm: string }>(`/predios/${encodeURIComponent(predioId)}/links`, {
+    metodo: 'POST',
+    corpo: { ...(titulo.trim() ? { titulo: titulo.trim() } : {}), dias },
+    token: await tokenParaAcao(),
+  });
+  if (r.status !== 201) return { erro: mensagem(r.status, r.dados) };
+  revalidatePath(`/painel/predios/${predioId}`);
+  return r.dados;
+}
+
+export async function revogarLink(predioId: string, linkId: string): Promise<{ erro?: string }> {
+  const r = await api(`/links/${encodeURIComponent(linkId)}/revogar`, { metodo: 'POST', corpo: {}, token: await tokenParaAcao() });
+  if (r.status !== 200) return { erro: mensagem(r.status, r.dados) };
+  revalidatePath(`/painel/predios/${predioId}`);
+  return {};
+}

@@ -5,7 +5,7 @@ import { Botao, Campo, Cartao, Selecao } from '@/components/ui';
 import { alternarFavorito, lerFavoritos, salvarFavoritos } from '@/lib/favoritos';
 import { brl, COR_STATUS, ROTULO_STATUS, STATUS_UNIDADE } from '@/lib/tipos';
 import { DECODIFICADORES } from '@/lib/decodificadores';
-import { carregarEntorno } from './actions';
+import type { ResultadoEntorno } from './actions';
 import { InteriorSplat } from './interior';
 import { Giro360 } from './giro';
 
@@ -17,6 +17,9 @@ const numeroOuNulo = (v: string) => (v.trim() === '' || !Number.isFinite(Number(
 function alternar<T>(lista: T[], x: T): T[] {
   return lista.includes(x) ? lista.filter((y) => y !== x) : [...lista, x];
 }
+
+/** O que o visitante fez, para os números de vendas (portal público). */
+export type EventoVitrine = { tipo: 'unidade' | 'favorito'; unidadeId: string } | { tipo: 'interior' };
 
 type EstadoEntorno = { tipo: 'carregando' } | { tipo: 'pronto'; predios: number; atribuicao: string } | { tipo: 'sem_localizacao' } | { tipo: 'indisponivel' };
 
@@ -34,6 +37,10 @@ export function Vitrine({
   lon,
   interiores,
   qualidadeFixa = null,
+  carregarEntorno,
+  linkDoArquivo,
+  telemetria: comTelemetria = true,
+  aoEvento,
 }: {
   predioId: string;
   projetoId: string;
@@ -52,11 +59,19 @@ export function Vitrine({
   interiores: Array<{ id: string; nome: string }>;
   /** Índice do nível de qualidade a manter fixo; `null` = automático. */
   qualidadeFixa?: number | null;
+  /** De onde vêm os dados: no painel, pela sessão; no portal do comprador, pelo token do link. */
+  carregarEntorno: () => Promise<ResultadoEntorno>;
+  linkDoArquivo: (arquivoId: string) => Promise<string | null>;
+  /** Desempenho do 3D (painel interno). */
+  telemetria?: boolean;
+  aoEvento?: (e: EventoVitrine) => void;
 }) {
   const canvas = useRef<HTMLCanvasElement>(null);
   const viewer = useRef<Viewer | null>(null);
-  const inicial = useRef({ modeloUrl, unidades, rotacaoGraus, lat, lon, projetoId, predioId, qualidadeFixa });
-  inicial.current = { modeloUrl, unidades, rotacaoGraus, lat, lon, projetoId, predioId, qualidadeFixa };
+  const inicial = useRef({ modeloUrl, unidades, rotacaoGraus, lat, lon, projetoId, predioId, qualidadeFixa, carregarEntorno, comTelemetria });
+  inicial.current = { modeloUrl, unidades, rotacaoGraus, lat, lon, projetoId, predioId, qualidadeFixa, carregarEntorno, comTelemetria };
+  const evento = useRef(aoEvento);
+  evento.current = aoEvento;
   const [estado, setEstado] = useState<'carregando' | 'pronto' | 'erro'>('carregando');
   const [telemetria, setTelemetria] = useState<EstadoViewer | null>(null);
   const [filtro, setFiltro] = useState<Filtro>(filtroVazio);
@@ -88,7 +103,7 @@ export function Vitrine({
     let enviado = false;
     const enviarTelemetria = () => {
       const m = v.metricas();
-      if (enviado || (m.cargaMs === null && m.erros === 0)) return;
+      if (!c.comTelemetria || enviado || (m.cargaMs === null && m.erros === 0)) return;
       enviado = true;
       const corpo = JSON.stringify({ predioId: c.predioId, ...m, celular: window.matchMedia('(pointer: coarse)').matches });
       navigator.sendBeacon?.('/api/telemetria', new Blob([corpo], { type: 'application/json' }));
@@ -103,7 +118,7 @@ export function Vitrine({
         setComCorte(v.andaresComCorte());
         setEstado('pronto');
         // entorno depois do prédio: a primeira imagem não espera o OSM
-        carregarEntorno(c.projetoId)
+        c.carregarEntorno()
           .then(async (r) => {
             if (!vivo) return;
             if (!r.entorno) return setEntorno({ tipo: r.motivo });
@@ -127,6 +142,10 @@ export function Vitrine({
     };
   }, [chaveModelo]);
 
+  useEffect(() => {
+    if (selecionada) evento.current?.({ tipo: 'unidade', unidadeId: selecionada });
+  }, [selecionada]);
+
   const passam = useMemo(() => filtrar(unidades, filtro, favoritos), [unidades, filtro, favoritos]);
   const ativo = filtroAtivo(filtro);
   useEffect(() => {
@@ -147,6 +166,7 @@ export function Vitrine({
 
   const favoritar = (id: string) => {
     const novo = alternarFavorito(favoritos, id);
+    if (novo.has(id)) aoEvento?.({ tipo: 'favorito', unidadeId: id });
     setFavoritos(novo);
     salvarFavoritos(predioId, novo);
   };
@@ -229,7 +249,7 @@ export function Vitrine({
         )}
         {giro && mostrarGiro && <Giro360 giro={giro} quadro={quadroGiro} aoMudarQuadro={setQuadroGiro} aoSelecionar={setSelecionada} aoFechar={() => setMostrarGiro(false)} />}
         {progressoGiro && <p className="absolute inset-x-0 bottom-12 mx-auto w-fit rounded-md bg-black/70 px-3 py-1 text-sm text-white">{progressoGiro}</p>}
-        {interiorAberto && <InteriorSplat arquivo={interiorAberto} aoFechar={() => setInteriorAberto(null)} />}
+        {interiorAberto && <InteriorSplat arquivo={interiorAberto} linkDoArquivo={linkDoArquivo} aoFechar={() => setInteriorAberto(null)} />}
         {modo === 'primeira-pessoa' && <Joystick aoMover={(e) => viewer.current?.definirEntrada(e)} />}
       </div>
 
@@ -337,7 +357,15 @@ export function Vitrine({
             <ul className="grid gap-2">
               {interiores.map((i) => (
                 <li key={i.id}>
-                  <Botao type="button" variante="secundario" className="w-full" onClick={() => setInteriorAberto(i)}>
+                  <Botao
+                    type="button"
+                    variante="secundario"
+                    className="w-full"
+                    onClick={() => {
+                      setInteriorAberto(i);
+                      aoEvento?.({ tipo: 'interior' });
+                    }}
+                  >
                     Ver interior: {i.nome}
                   </Botao>
                 </li>
@@ -351,7 +379,7 @@ export function Vitrine({
             <p data-testid="aviso-entorno" className="text-suave">
               {entorno.tipo === 'carregando' && 'Carregando os prédios reais em volta…'}
               {entorno.tipo === 'pronto' && `${entorno.predios} prédios reais em volta (OpenStreetMap).`}
-              {entorno.tipo === 'sem_localizacao' && 'Informe a localização do empreendimento para ver os prédios reais em volta.'}
+              {entorno.tipo === 'sem_localizacao' && 'Os prédios reais em volta aparecem quando o empreendimento tiver a localização cadastrada.'}
               {entorno.tipo === 'indisponivel' && 'Os prédios em volta não puderam ser carregados agora. O empreendimento funciona normalmente.'}
             </p>
             <Selecao id="andar-corte" rotulo="Ver até o andar (corte)" value={andarCorte} onChange={(e) => setAndarCorte(e.target.value)} disabled={estado !== 'pronto'}>

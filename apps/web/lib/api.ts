@@ -8,19 +8,21 @@ export interface RespostaApi<T> {
   dados: T;
 }
 
-/** Chamada servidor→API. Repassa o IP do navegador para o limite de tentativas por pessoa. */
+/** Chamada servidor→API. Repassa o IP e o navegador de quem pediu (limite por pessoa e registro do consentimento LGPD). */
 export async function api<T = unknown>(
   caminho: string,
   opcoes: { metodo?: 'GET' | 'POST' | 'PATCH' | 'DELETE'; corpo?: unknown; token?: string } = {},
 ): Promise<RespostaApi<T>> {
   const h = await headers();
   const ip = h.get('x-forwarded-for') ?? h.get('x-real-ip');
+  const navegador = h.get('user-agent');
   const r = await fetch(`${API_URL}${caminho}`, {
     method: opcoes.metodo ?? 'GET',
     headers: {
       ...(opcoes.corpo !== undefined ? { 'content-type': 'application/json' } : {}),
       ...(opcoes.token ? { authorization: `Bearer ${opcoes.token}` } : {}),
       ...(ip ? { 'x-forwarded-for': ip } : {}),
+      ...(navegador ? { 'user-agent': navegador } : {}),
     },
     body: opcoes.corpo !== undefined ? JSON.stringify(opcoes.corpo) : undefined,
     cache: 'no-store',

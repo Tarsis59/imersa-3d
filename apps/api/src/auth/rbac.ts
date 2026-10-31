@@ -10,11 +10,14 @@ export type Acao =
   | 'importacao:executar'
   | 'unidade:status'
   | 'captura:enviar'
-  | 'captura:revisar';
+  | 'captura:revisar'
+  | 'link:criar'
+  | 'lead:ler'
+  | 'numeros:ler';
 
 const TODOS: readonly Papel[] = PAPEIS;
 const GESTAO: readonly Papel[] = ['super_admin', 'admin'];
-const SENSIVEIS: readonly Acao[] = ['projeto:criar', 'membro:convidar', 'auditoria:ler', 'empreendimento:editar', 'importacao:executar', 'unidade:status', 'captura:revisar'];
+const SENSIVEIS: readonly Acao[] = ['projeto:criar', 'membro:convidar', 'auditoria:ler', 'empreendimento:editar', 'importacao:executar', 'unidade:status', 'captura:revisar', 'lead:ler'];
 
 const MATRIZ: Record<Acao, readonly Papel[]> = {
   'projeto:ler': TODOS,
@@ -28,6 +31,10 @@ const MATRIZ: Record<Acao, readonly Papel[]> = {
   // quem está no imóvel envia as fotos/vídeo; só a gestão publica o 3D
   'captura:enviar': [...GESTAO, 'consultora', 'produtor'],
   'captura:revisar': GESTAO,
+  // vendas: a consultora gera links e atende os próprios leads; a gestão vê tudo (leads são dados pessoais: MFA)
+  'link:criar': [...GESTAO, 'consultora'],
+  'lead:ler': [...GESTAO, 'consultora'],
+  'numeros:ler': [...GESTAO, 'consultora'],
 };
 
 export const pode = (papel: Papel, acao: Acao): boolean => MATRIZ[acao].includes(papel);
