@@ -36,6 +36,11 @@ const Esquema = z.object({
   OSM_USER_AGENT: z.string().optional(),
   /** Arquivo do Overpass já baixado: prédios do entorno sem internet (testes e demonstração). */
   MAPA_ARQUIVO_PREDIOS: z.string().optional(),
+  /** Só desenvolvimento/testes: aceita webhook em http e na rede local (em produção, só https público). */
+  WEBHOOK_PERMITIR_LOCAL: z
+    .enum(['true', 'false'])
+    .default('false')
+    .transform((v) => v === 'true'),
 });
 
 export type Config = z.infer<typeof Esquema>;

@@ -6,5 +6,6 @@ CREATE DATABASE imersa_test_api OWNER imersa_owner;
 CREATE DATABASE imersa_test_api_2 OWNER imersa_owner;
 CREATE DATABASE imersa_test_api_3 OWNER imersa_owner;
 CREATE DATABASE imersa_test_api_4 OWNER imersa_owner;
+CREATE DATABASE imersa_test_api_5 OWNER imersa_owner;
 CREATE DATABASE imersa_e2e OWNER imersa_owner;
-GRANT CONNECT ON DATABASE imersa, imersa_test, imersa_test_2, imersa_test_3, imersa_test_api, imersa_test_api_2, imersa_test_api_3, imersa_test_api_4, imersa_e2e TO imersa_app;
+GRANT CONNECT ON DATABASE imersa, imersa_test, imersa_test_2, imersa_test_3, imersa_test_api, imersa_test_api_2, imersa_test_api_3, imersa_test_api_4, imersa_test_api_5, imersa_e2e TO imersa_app;

@@ -22,12 +22,27 @@ const corpo = (s: z.ZodType) => ({ required: true, content: { 'application/json'
 const r = (codigos: Record<number, string>) =>
   Object.fromEntries(Object.entries(codigos).map(([k, v]) => [k, { description: v }]));
 const auth = [{ bearer: [] }];
+const chave = [{ chaveApi: [] }];
+
+const DESCRICAO = `API do Imersa 3D.
+
+## Integração com CRM
+- **Leitura:** \`/v1/*\` com a chave da empresa (Painel → Integrações): \`Authorization: Bearer imk_…\`. Limite: 120 pedidos por minuto por chave.
+- **Webhooks:** POST JSON \`{ id, evento, criadoEm, dados }\` para a URL cadastrada (só https público). Eventos: \`lead.criado\`, \`unidade.status\` e \`teste\`.
+  - Cabeçalhos: \`X-Imersa-Evento\`, \`X-Imersa-Entrega\` (id, para ignorar repetições) e \`X-Imersa-Assinatura: t=<segundos>,v1=<hex>\`.
+  - Conferência: HMAC-SHA256 de \`"<t>.<corpo exato recebido>"\` com o segredo \`whsec_…\`, comparação em tempo constante, recusando \`t\` com mais de 5 min de diferença.
+  - Responda 2xx em até 10 s. Sem 2xx, nova tentativa em 30 s, 1 min, 2 min… (até 6 h entre tentativas, 8 tentativas no total).`;
 
 export function documentoOpenApi() {
   return {
     openapi: '3.1.0',
-    info: { title: 'Imersa 3D API', version: '0.2.0' },
-    components: { securitySchemes: { bearer: { type: 'http', scheme: 'bearer', bearerFormat: 'JWT' } } },
+    info: { title: 'Imersa 3D API', version: '0.3.0', description: DESCRICAO },
+    components: {
+      securitySchemes: {
+        bearer: { type: 'http', scheme: 'bearer', bearerFormat: 'JWT' },
+        chaveApi: { type: 'http', scheme: 'bearer', bearerFormat: 'imk_…', description: 'Chave de API da empresa (Painel → Integrações)' },
+      },
+    },
     paths: {
       '/health': { get: { summary: 'Saúde da API e do banco', responses: r({ 200: 'ok', 500: 'erro' }) } },
       '/auth/registro': { post: { summary: 'Cria empresa + administrador', requestBody: corpo(Registro), responses: r({ 201: 'criado', 400: 'dados inválidos', 409: 'já existe' }) } },
@@ -62,6 +77,15 @@ export function documentoOpenApi() {
       },
       '/unidades/{id}/historico': { get: { summary: 'Histórico de status', security: auth, responses: r({ 200: 'lista' }) } },
       '/auditoria': { get: { summary: 'Últimas 100 ações da empresa (gestão + MFA)', security: auth, responses: r({ 200: 'lista', 403: 'sem permissão' }) } },
+      '/v1/leads': {
+        get: {
+          summary: 'Leads da empresa em ordem de chegada (?desde=<criadoEm do último>&limite=1..500)',
+          security: chave,
+          responses: r({ 200: 'lista', 401: 'chave inválida ou revogada', 429: 'limite por chave' }),
+        },
+      },
+      '/v1/unidades': { get: { summary: 'Unidades com status e preço (?predioId= opcional)', security: chave, responses: r({ 200: 'lista', 401: 'chave inválida ou revogada' }) } },
+      '/v1/empreendimentos': { get: { summary: 'Empreendimentos e prédios', security: chave, responses: r({ 200: 'lista', 401: 'chave inválida ou revogada' }) } },
     },
   };
 }

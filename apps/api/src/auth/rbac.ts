@@ -13,11 +13,12 @@ export type Acao =
   | 'captura:revisar'
   | 'link:criar'
   | 'lead:ler'
-  | 'numeros:ler';
+  | 'numeros:ler'
+  | 'integracao:gerir';
 
 const TODOS: readonly Papel[] = PAPEIS;
 const GESTAO: readonly Papel[] = ['super_admin', 'admin'];
-const SENSIVEIS: readonly Acao[] = ['projeto:criar', 'membro:convidar', 'auditoria:ler', 'empreendimento:editar', 'importacao:executar', 'unidade:status', 'captura:revisar', 'lead:ler'];
+const SENSIVEIS: readonly Acao[] = ['projeto:criar', 'membro:convidar', 'auditoria:ler', 'empreendimento:editar', 'importacao:executar', 'unidade:status', 'captura:revisar', 'lead:ler', 'integracao:gerir'];
 
 const MATRIZ: Record<Acao, readonly Papel[]> = {
   'projeto:ler': TODOS,
@@ -35,6 +36,8 @@ const MATRIZ: Record<Acao, readonly Papel[]> = {
   'link:criar': [...GESTAO, 'consultora'],
   'lead:ler': [...GESTAO, 'consultora'],
   'numeros:ler': [...GESTAO, 'consultora'],
+  // chaves de API e webhooks dão acesso a todos os leads: só a gestão, com MFA
+  'integracao:gerir': GESTAO,
 };
 
 export const pode = (papel: Papel, acao: Acao): boolean => MATRIZ[acao].includes(papel);

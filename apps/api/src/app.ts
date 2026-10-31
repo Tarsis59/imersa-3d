@@ -25,6 +25,9 @@ import { rotasTelemetria } from './rotas/telemetria';
 import { rotasCapturas } from './rotas/capturas';
 import { rotasVendas } from './rotas/vendas';
 import { rotasPublicas } from './rotas/publico';
+import { rotasAoVivo } from './rotas/ao-vivo';
+import { rotasIntegracoes } from './rotas/integracoes';
+import { CanalUnidades } from './tempo-real/canal';
 import { ArmazenamentoLocal, ArmazenamentoS3, type Armazenamento } from './arquivos/armazenamento';
 import { clamav, semAntivirus, type Antivirus } from './arquivos/antivirus';
 import { comPrediosDeArquivo, servicosMapaReais, type ServicosMapa } from './mapa/osm';
@@ -361,7 +364,13 @@ export async function construirApp({ pool, config, logger = false, reportarErro,
   rotasTelemetria(app, { pool, exigir });
   rotasCapturas(app, { pool, exigir, armazenamento: arm });
   rotasVendas(app, { pool, exigir, webUrl: config.WEB_URL });
-  rotasPublicas(app, { pool, armazenamento: arm, entorno: criarEntorno(pool, servicosMapa) });
+  // status ao vivo: uma conexão LISTEN por instância; as transmissões abertas fecham antes de a API parar
+  const canal = new CanalUnidades(config.DATABASE_URL);
+  app.addHook('preClose', async () => canal.fechar());
+  const apiPublica = config.API_URL_PUBLICA ?? `http://localhost:${config.PORT}`;
+  rotasAoVivo(app, { pool, exigir, canal, segredo: config.JWT_SECRET, apiPublica });
+  rotasPublicas(app, { pool, armazenamento: arm, entorno: criarEntorno(pool, servicosMapa), canal, apiPublica });
+  rotasIntegracoes(app, { pool, exigir, chaveCifra: config.TOTP_KEY, permitirLocal: config.WEBHOOK_PERMITIR_LOCAL });
 
   return app;
 }

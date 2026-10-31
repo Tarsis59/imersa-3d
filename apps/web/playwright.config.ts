@@ -34,14 +34,14 @@ export default defineConfig({
       url: 'http://localhost:3334/health',
       reuseExistingServer: false,
       timeout: 60_000,
-      env: { DATABASE_URL: DB_APP, PORT: '3334', WEB_URL: 'http://localhost:3100', CORS_ORIGIN: 'http://localhost:3100', RATE_LIMIT_AUTH: '1000', API_URL_PUBLICA: 'http://localhost:3334', ARMAZENAMENTO_PASTA: 'armazenamento-e2e', MAPA_ARQUIVO_PREDIOS: PREDIOS_PAULISTA },
+      env: { DATABASE_URL: DB_APP, PORT: '3334', WEB_URL: 'http://localhost:3100', CORS_ORIGIN: 'http://localhost:3100', RATE_LIMIT_AUTH: '1000', API_URL_PUBLICA: 'http://localhost:3334', ARMAZENAMENTO_PASTA: 'armazenamento-e2e', MAPA_ARQUIVO_PREDIOS: PREDIOS_PAULISTA, WEBHOOK_PERMITIR_LOCAL: 'true' },
     },
     {
       command: 'pnpm --filter @imersa/api worker',
       url: 'http://localhost:3335',
       reuseExistingServer: false,
       timeout: 60_000,
-      env: { DATABASE_URL: DB_APP, ARMAZENAMENTO_PASTA: 'armazenamento-e2e', API_URL_PUBLICA: 'http://localhost:3334', RECONSTRUTOR: 'simulado', RECONSTRUTOR_SPLAT_SIMULADO: SPLAT_SIMULADO, WORKER_PORTA: '3335', WORKER_INTERVALO_S: '2', WORKER_PASTA: 'trabalho-worker-e2e' },
+      env: { DATABASE_URL: DB_APP, ARMAZENAMENTO_PASTA: 'armazenamento-e2e', API_URL_PUBLICA: 'http://localhost:3334', RECONSTRUTOR: 'simulado', RECONSTRUTOR_SPLAT_SIMULADO: SPLAT_SIMULADO, WORKER_PORTA: '3335', WORKER_INTERVALO_S: '2', WORKER_PASTA: 'trabalho-worker-e2e', WEBHOOK_PERMITIR_LOCAL: 'true' },
     },
     {
       command: PRODUCAO ? 'pnpm build && pnpm exec next start -p 3100' : 'node scripts/decodificadores.mjs && pnpm exec next dev -p 3100',

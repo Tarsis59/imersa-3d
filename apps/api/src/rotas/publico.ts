@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import type pg from 'pg';
 import { z } from 'zod';
@@ -6,11 +7,15 @@ import { ErroHttp } from '../erros';
 import { hashToken } from '../auth/hash';
 import type { Armazenamento } from '../arquivos/armazenamento';
 import type { criarEntorno } from './mapa';
+import { transmitirPredio, type CanalUnidades } from '../tempo-real/canal';
 
 interface Dependencias {
   pool: pg.Pool;
   armazenamento: Armazenamento;
   entorno: ReturnType<typeof criarEntorno>;
+  canal: CanalUnidades;
+  /** Endereço da API visto pelo navegador (status ao vivo). */
+  apiPublica: string;
 }
 
 /** Link aberto pelo cliente: vale 1 h (a página pede outro se precisar). */
@@ -33,8 +38,13 @@ const NovoLead = z.object({
   unidadeId: z.uuid().optional(),
   consentimento: z.boolean(),
   textoConsentimento: z.string().trim().min(10).max(2000),
+  /** Armadilha para robôs: campo escondido na página; gente de verdade deixa vazio. */
+  site: z.string().max(500).optional(),
 });
-const limite = (max: number, janela: string) => ({ config: { rateLimit: { max, timeWindow: janela } } });
+/** Limite por IP (memória da instância) + tamanho máximo do corpo. */
+const limite = (max: number, janela: string, bodyLimit = 16 * 1024) => ({ bodyLimit, config: { rateLimit: { max, timeWindow: janela } } });
+/** Limite por link no banco (vale para todas as instâncias da API): spam distribuído em muitos IPs num link só. */
+const MAX_LEADS_POR_LINK_HORA = 20;
 
 interface Link {
   linkId: string;
@@ -43,7 +53,7 @@ interface Link {
   consultoraId: string;
 }
 
-export function rotasPublicas(app: FastifyInstance, { pool, armazenamento, entorno }: Dependencias): void {
+export function rotasPublicas(app: FastifyInstance, { pool, armazenamento, entorno, canal, apiPublica }: Dependencias): void {
   /** Token → link válido. Desconhecido: 404; revogado ou vencido: 410 (o cliente pede um link novo à consultora). */
   async function resolver(req: FastifyRequest): Promise<Link> {
     const p = TokenLink.safeParse({ token: (req.params as { token?: string }).token });
@@ -115,7 +125,14 @@ export function rotasPublicas(app: FastifyInstance, { pool, armazenamento, entor
         ? await armazenamento.urlDownload({ chave: modelo.chave, assetId: modelo.id, tenantId: l.tenantId, nomeArquivo: modelo.nome, expiraS: DOWNLOAD_S })
         : null,
       interiores: arquivos.filter((a) => a.tipo === 'splat').map((a) => ({ id: a.id, nome: a.nome })),
+      aoVivoUrl: `${apiPublica}/publico/links/${(req.params as { token: string }).token}/ao-vivo`,
     };
+  });
+
+  /** Status das unidades ao vivo para o cliente (uma unidade vendida agora muda de cor na tela dele). */
+  app.get('/publico/links/:token/ao-vivo', limite(30, '1 minute'), async (req, reply) => {
+    const l = await resolver(req);
+    await transmitirPredio(req, reply, canal, { tenantId: l.tenantId, predioId: l.predioId });
   });
 
   app.get('/publico/links/:token/entorno', limite(60, '1 minute'), async (req) => {
@@ -163,12 +180,16 @@ export function rotasPublicas(app: FastifyInstance, { pool, armazenamento, entor
   });
 
   /** Pedido de contato. LGPD: só com consentimento explícito; guarda o texto aceito, a data, o IP e o navegador como prova. */
-  app.post('/publico/links/:token/leads', limite(10, '10 minutes'), async (req, reply) => {
+  app.post('/publico/links/:token/leads', limite(10, '10 minutes', 8 * 1024), async (req, reply) => {
     const l = await resolver(req);
     const d = NovoLead.parse(req.body);
     if (d.consentimento !== true) throw new ErroHttp(400, 'consentimento_obrigatorio');
     if (!d.telefone && !d.email) throw new ErroHttp(400, 'contato_obrigatorio');
+    // robô preencheu o campo escondido: responde como se tivesse dado certo (não ensina a contornar) e não grava
+    if (d.site) return reply.status(201).send({ id: randomUUID() });
     const novo = await withTenant(pool, daEmpresa(l), async (c) => {
+      const recentes = (await c.query<{ n: number }>("SELECT count(*)::int AS n FROM leads WHERE link_id = $1 AND criado_em > now() - interval '1 hour'", [l.linkId])).rows[0]!.n;
+      if (recentes >= MAX_LEADS_POR_LINK_HORA) throw new ErroHttp(429, 'muitos_pedidos');
       const unidade = d.unidadeId && (await unidadesDoPredio(c, l, [d.unidadeId])).has(d.unidadeId) ? d.unidadeId : null;
       const r = await c.query<{ id: string }>(
         `INSERT INTO leads (link_id, unit_id, nome, telefone, email, mensagem, consentimento, texto_consentimento, ip, navegador)

@@ -19,6 +19,7 @@ const config: Config = {
   RATE_LIMIT_AUTH: 1000,
   TRUST_PROXY: false,
   AMBIENTE: 'teste',
+  WEBHOOK_PERMITIR_LOCAL: false,
 };
 
 let app: FastifyInstance;
@@ -59,6 +60,10 @@ describe('saúde, documentação e cabeçalhos', () => {
     expect(Object.keys(r.json.paths)).toEqual(
       expect.arrayContaining(['/auth/login', '/auth/registro', '/auth/sair', '/projetos', '/membros', '/membros/convites', '/convites/aceitar']),
     );
+    // API pública para CRMs: rotas, chave e o formato da assinatura dos webhooks documentados
+    expect(Object.keys(r.json.paths)).toEqual(expect.arrayContaining(['/v1/leads', '/v1/unidades', '/v1/empreendimentos']));
+    expect(r.json.components.securitySchemes.chaveApi).toMatchObject({ type: 'http', scheme: 'bearer' });
+    expect(r.json.info.description).toContain('X-Imersa-Assinatura');
   });
   it('helmet e request-id', async () => {
     const r = await app.inject({ method: 'GET', url: '/health', headers: { 'x-request-id': 'teste-req-12345' } });

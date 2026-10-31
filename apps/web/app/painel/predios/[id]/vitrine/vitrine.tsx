@@ -1,6 +1,7 @@
 'use client';
 import { useEffect, useMemo, useRef, useState, type PointerEvent as EventoPonteiro } from 'react';
 import { criarViewer, filtrar, type Giro, filtroVazio, pontoCardeal, vetorJoystick, type EstadoViewer, type Filtro, type UnidadeViewer, type Viewer } from '@imersa/viewer';
+import type { StatusUnidade } from '@/lib/tipos';
 import { Botao, Campo, Cartao, Selecao } from '@/components/ui';
 import { alternarFavorito, lerFavoritos, salvarFavoritos } from '@/lib/favoritos';
 import { brl, COR_STATUS, ROTULO_STATUS, STATUS_UNIDADE } from '@/lib/tipos';
@@ -41,6 +42,7 @@ export function Vitrine({
   linkDoArquivo,
   telemetria: comTelemetria = true,
   aoEvento,
+  aoVivo,
 }: {
   predioId: string;
   projetoId: string;
@@ -65,6 +67,8 @@ export function Vitrine({
   /** Desempenho do 3D (painel interno). */
   telemetria?: boolean;
   aoEvento?: (e: EventoVitrine) => void;
+  /** Endereço da transmissão de status ao vivo (EventSource). Pedido de novo a cada reconexão (o bilhete do painel vence). */
+  aoVivo?: () => Promise<string | null>;
 }) {
   const canvas = useRef<HTMLCanvasElement>(null);
   const viewer = useRef<Viewer | null>(null);
@@ -72,6 +76,13 @@ export function Vitrine({
   inicial.current = { modeloUrl, unidades, rotacaoGraus, lat, lon, projetoId, predioId, qualidadeFixa, carregarEntorno, comTelemetria };
   const evento = useRef(aoEvento);
   evento.current = aoEvento;
+  const fonteAoVivo = useRef(aoVivo);
+  fonteAoVivo.current = aoVivo;
+  // status que mudaram depois de a página abrir (venda/reserva feita agora por outra pessoa)
+  const [statusAoVivo, setStatusAoVivo] = useState<Record<string, StatusUnidade>>({});
+  const statusAoVivoRef = useRef(statusAoVivo);
+  statusAoVivoRef.current = statusAoVivo;
+  const [estadoAoVivo, setEstadoAoVivo] = useState<'desligado' | 'conectando' | 'conectado'>('desligado');
   const [estado, setEstado] = useState<'carregando' | 'pronto' | 'erro'>('carregando');
   const [telemetria, setTelemetria] = useState<EstadoViewer | null>(null);
   const [filtro, setFiltro] = useState<Filtro>(filtroVazio);
@@ -115,6 +126,7 @@ export function Vitrine({
     v.pronto.then(
       () => {
         if (!vivo) return;
+        for (const [id, st] of Object.entries(statusAoVivoRef.current)) v.definirStatus(id, st);
         setComCorte(v.andaresComCorte());
         setEstado('pronto');
         // entorno depois do prédio: a primeira imagem não espera o OSM
@@ -146,7 +158,43 @@ export function Vitrine({
     if (selecionada) evento.current?.({ tipo: 'unidade', unidadeId: selecionada });
   }, [selecionada]);
 
-  const passam = useMemo(() => filtrar(unidades, filtro, favoritos), [unidades, filtro, favoritos]);
+  // status ao vivo: se a conexão cair, pede um endereço novo e reconecta em 5 s
+  useEffect(() => {
+    if (!fonteAoVivo.current) return;
+    let vivo = true;
+    let fonte: EventSource | null = null;
+    let espera: ReturnType<typeof setTimeout> | undefined;
+    const reconectar = () => {
+      setEstadoAoVivo('conectando');
+      espera = setTimeout(() => void abrir(), 5000);
+    };
+    const abrir = async () => {
+      setEstadoAoVivo('conectando');
+      const url = await fonteAoVivo.current?.().catch(() => null);
+      if (!vivo) return;
+      if (!url) return reconectar();
+      fonte = new EventSource(url);
+      fonte.onopen = () => vivo && setEstadoAoVivo('conectado');
+      fonte.addEventListener('unidade', (e) => {
+        const m = JSON.parse((e as MessageEvent<string>).data) as { id: string; status: StatusUnidade };
+        setStatusAoVivo((s) => ({ ...s, [m.id]: m.status }));
+        viewer.current?.definirStatus(m.id, m.status);
+      });
+      fonte.onerror = () => {
+        fonte?.close();
+        if (vivo) reconectar();
+      };
+    };
+    void abrir();
+    return () => {
+      vivo = false;
+      clearTimeout(espera);
+      fonte?.close();
+    };
+  }, [predioId]);
+
+  const unidadesAtuais = useMemo(() => unidades.map((u) => (statusAoVivo[u.id] ? { ...u, status: statusAoVivo[u.id]! } : u)), [unidades, statusAoVivo]);
+  const passam = useMemo(() => filtrar(unidadesAtuais, filtro, favoritos), [unidadesAtuais, filtro, favoritos]);
   const ativo = filtroAtivo(filtro);
   useEffect(() => {
     if (estado === 'pronto') viewer.current?.definirDestaque(ativo ? passam : null, favoritos);
@@ -160,8 +208,8 @@ export function Vitrine({
 
   const nomeAndar = new Map(andares.map((a) => [a.numero, a.nome]));
   const quartosDisponiveis = [...new Set(unidades.map((u) => u.quartos).filter((q): q is number => q !== null))].sort((a, b) => a - b);
-  const lista = unidades.filter((u) => passam.has(u.id));
-  const unidade = selecionada ? unidades.find((u) => u.id === selecionada) : undefined;
+  const lista = unidadesAtuais.filter((u) => passam.has(u.id));
+  const unidade = selecionada ? unidadesAtuais.find((u) => u.id === selecionada) : undefined;
   const modo = telemetria?.modo ?? 'orbita';
 
   const favoritar = (id: string) => {
@@ -220,6 +268,7 @@ export function Vitrine({
         data-posicao={telemetria ? `${telemetria.posicao.x.toFixed(1)},${telemetria.posicao.z.toFixed(1)}` : ''}
         data-entorno={entorno.tipo === 'pronto' ? String(entorno.predios) : entorno.tipo}
         data-giro={mostrarGiro ? 'pronto' : progressoGiro ? 'gerando' : 'fechado'}
+        data-ao-vivo={estadoAoVivo}
         className="relative h-[70vh] min-h-96 overflow-hidden rounded-2xl border border-borda bg-fundo lg:sticky lg:top-6"
       >
         <canvas

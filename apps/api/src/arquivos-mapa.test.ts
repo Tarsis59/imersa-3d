@@ -29,6 +29,7 @@ const config: Config = {
   RATE_LIMIT_AUTH: 1000,
   TRUST_PROXY: false,
   AMBIENTE: 'teste',
+  WEBHOOK_PERMITIR_LOCAL: false,
 };
 const SENHA = 'senha-forte-123';
 

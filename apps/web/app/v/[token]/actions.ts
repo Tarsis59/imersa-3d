@@ -30,6 +30,8 @@ export interface DadosLead {
   unidadeId: string;
   consentimento: boolean;
   textoConsentimento: string;
+  /** Campo escondido (armadilha para robôs). */
+  site: string;
 }
 
 /** Pedido de contato do cliente. A API recusa sem consentimento e guarda a prova (texto, data, IP, navegador). */
@@ -46,6 +48,7 @@ export async function enviarLead(token: string, d: DadosLead): Promise<{ ok: tru
       ...(d.unidadeId ? { unidadeId: d.unidadeId } : {}),
       consentimento: d.consentimento,
       textoConsentimento: d.textoConsentimento,
+      ...(d.site ? { site: d.site } : {}),
     },
   });
   if (r.status === 201) return { ok: true };

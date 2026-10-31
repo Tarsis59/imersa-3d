@@ -25,6 +25,7 @@ const MENSAGENS: Record<string, string> = {
   servico_mapa_indisponivel: 'O serviço de mapas não respondeu. Tente de novo em instantes.',
   antivirus_indisponivel: 'O antivírus não respondeu. Tente concluir de novo.',
   arquivo_ainda_nao_enviado: 'O arquivo ainda não chegou ao armazenamento.',
+  destino_invalido: 'Use um endereço https público (rede interna e http não são aceitos).',
 };
 
 export function mensagem(status: number, dados: unknown): string {

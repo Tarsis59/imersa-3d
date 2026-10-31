@@ -28,6 +28,7 @@ const config: Config = {
   RATE_LIMIT_AUTH: 1000,
   TRUST_PROXY: true,
   AMBIENTE: 'teste',
+  WEBHOOK_PERMITIR_LOCAL: false,
 };
 const SENHA = 'senha-forte-123';
 const CONSENTIMENTO = 'Autorizo a Construtora a usar meu nome e contato para falar comigo sobre este empreendimento.';

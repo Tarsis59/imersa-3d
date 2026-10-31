@@ -1,11 +1,39 @@
+import { createServer, type IncomingHttpHeaders } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import { test, expect, devices } from '@playwright/test';
-import { entrarComoAdminComMfa } from './ajuda';
+import { verificarAssinatura } from '../../api/src/integracoes/assinatura';
+import { API, entrarComoAdminComMfa } from './ajuda';
 
 const PLANILHA = ['predio;andar;codigo;tipologia;area_m2;quartos;preco;status', 'Torre V;1;101;Tipo 2Q;70;2;610.000,00;disponivel', 'Torre V;1;102;Tipo 3Q;98;3;820.000,00;disponivel', 'Torre V;2;201;Tipo 2Q;70;2;640.000,00;vendido'].join('\n');
 
-test('vendas: link pelo WhatsApp → cliente no celular (sem login) → pedido de contato → leads e números no painel', async ({ page, request, browser }) => {
+test('vendas: link pelo WhatsApp → cliente no celular (sem login) → pedido de contato → leads, números e CRM (webhook + API)', async ({ page, request, browser }) => {
   test.setTimeout(300_000);
+  // "CRM" de teste: recebe os webhooks
+  const recebidos: Array<{ headers: IncomingHttpHeaders; corpo: string }> = [];
+  const crm = createServer((r, s) => {
+    let corpo = '';
+    r.on('data', (c) => (corpo += c));
+    r.on('end', () => {
+      recebidos.push({ headers: r.headers, corpo });
+      s.writeHead(200).end();
+    });
+  });
+  await new Promise<void>((ok) => crm.listen(0, '127.0.0.1', ok));
+
   await entrarComoAdminComMfa(page, request, 'vendas');
+
+  // integrações: chave de API e webhook para o CRM
+  await page.getByRole('link', { name: 'Integrações' }).click();
+  await page.getByLabel('Nome da chave').fill('CRM da construtora');
+  await page.getByRole('button', { name: 'Criar chave' }).click();
+  const chave = (await page.getByTestId('chave-nova').textContent())!.trim();
+  expect(chave).toMatch(/^imk_/);
+  await page.getByLabel('Endereço do CRM (https)').fill(`http://127.0.0.1:${(crm.address() as AddressInfo).port}/imersa`);
+  await page.getByRole('button', { name: 'Cadastrar webhook' }).click();
+  const segredo = (await page.getByTestId('segredo-webhook').textContent())!.trim();
+  await expect(page.getByTestId('lista-webhooks')).toContainText('/imersa');
+  await page.goto('/painel');
+
   await page.getByLabel('Nome do projeto').fill('Residencial Aurora');
   await page.getByRole('button', { name: 'Criar projeto' }).click();
   await page.getByRole('link', { name: /Residencial Aurora/ }).click();
@@ -52,6 +80,14 @@ test('vendas: link pelo WhatsApp → cliente no celular (sem login) → pedido d
   expect(await cliente.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   await cliente.getByTestId('lista-vitrine').getByRole('button', { name: /^102/ }).tap();
   await expect(cliente.getByRole('heading', { name: 'Unidade 102' })).toBeVisible();
+
+  // ao vivo: a gestão reserva a 101 e o cliente vê na hora, sem recarregar
+  await expect(vitrine).toHaveAttribute('data-ao-vivo', 'conectado', { timeout: 30_000 });
+  await page.getByTestId('unidade-101').click();
+  await page.getByLabel('Novo status').selectOption('reservado');
+  await page.getByRole('button', { name: 'Mudar status' }).click();
+  await expect(page.getByText('Status alterado.')).toBeVisible();
+  await expect(cliente.getByTestId('lista-vitrine').getByRole('button', { name: /^101/ })).toContainText('Reservado', { timeout: 2_000 });
   await cliente.screenshot({ path: test.info().outputPath('portal-celular.png') });
 
   await cliente.getByRole('link', { name: /Quero falar com/ }).tap();
@@ -92,6 +128,16 @@ test('vendas: link pelo WhatsApp → cliente no celular (sem login) → pedido d
   await expect(page.getByTestId('numeros-consultoras')).toContainText('Admin E2E');
   await expect(page.getByTestId('numeros-unidades')).toContainText('102');
   await celular.close();
+
+  // CRM: o webhook do lead chega assinado (o worker entrega), e a API com chave devolve o lead
+  await expect.poll(() => recebidos.filter((r) => r.headers['x-imersa-evento'] === 'lead.criado').length, { timeout: 30_000 }).toBe(1);
+  const aviso = recebidos.find((r) => r.headers['x-imersa-evento'] === 'lead.criado')!;
+  expect(verificarAssinatura(segredo, String(aviso.headers['x-imersa-assinatura']), aviso.corpo)).toBe(true);
+  expect(JSON.parse(aviso.corpo).dados).toMatchObject({ nome: 'Carla Mendes', unidade: '102', empreendimento: 'Residencial Aurora' });
+  const v1 = await request.get(`${API}/v1/leads`, { headers: { authorization: `Bearer ${chave}` } });
+  expect(v1.status()).toBe(200);
+  expect(await v1.json()).toEqual([expect.objectContaining({ nome: 'Carla Mendes', telefone: '(11) 97777-6666' })]);
+  crm.close();
 
   // desativar o link: o cliente vê o aviso
   await page.goBack();

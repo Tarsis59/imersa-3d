@@ -91,6 +91,7 @@ export function PortalVitrine({
         linkDoArquivo={linkDoArquivo}
         telemetria={false}
         aoEvento={aoEvento}
+        aoVivo={async () => portal.aoVivoUrl}
       />
       <FormularioLead portal={portal} unidadeVista={unidadeVista} enviarLead={enviarLead} />
     </>
@@ -107,6 +108,7 @@ function FormularioLead({ portal, unidadeVista, enviarLead }: { portal: Portal; 
     mensagem: '',
     unidadeId: null,
     consentimento: false,
+    site: '',
   });
   const [enviando, setEnviando] = useState(false);
   const [resultado, setResultado] = useState<{ ok: true } | { ok: false; erro: string } | null>(null);
@@ -142,6 +144,11 @@ function FormularioLead({ portal, unidadeVista, enviarLead }: { portal: Portal; 
             }
           }}
         >
+          {/* armadilha para robôs: invisível para pessoas (e para leitores de tela); robô que preenche é descartado pela API */}
+          <div aria-hidden="true" className="absolute -left-[9999px] h-px w-px overflow-hidden">
+            <label htmlFor="lead-site">Site</label>
+            <input id="lead-site" tabIndex={-1} autoComplete="off" value={d.site} onChange={(e) => setD({ ...d, site: e.target.value })} />
+          </div>
           <Campo id="lead-nome" rotulo="Seu nome" required minLength={2} maxLength={120} autoComplete="name" value={d.nome} onChange={(e) => setD({ ...d, nome: e.target.value })} />
           <div className="grid gap-4 sm:grid-cols-2">
             <Campo id="lead-telefone" rotulo="WhatsApp ou telefone (com DDD)" type="tel" inputMode="tel" autoComplete="tel" maxLength={30} value={d.telefone} onChange={(e) => setD({ ...d, telefone: e.target.value })} />

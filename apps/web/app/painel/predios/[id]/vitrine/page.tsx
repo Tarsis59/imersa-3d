@@ -4,7 +4,7 @@ import type { UnidadeViewer } from '@imersa/viewer';
 import { apiNaPagina } from '@/lib/sessao';
 import type { Arquivo, DetalheProjeto, Espelho, Me } from '@/lib/tipos';
 import { Vitrine } from './vitrine';
-import { carregarEntorno, linkDoArquivo } from './actions';
+import { bilheteAoVivo, carregarEntorno, linkDoArquivo } from './actions';
 
 const NIVEIS_FIXOS = ['alto', 'medio', 'baixo'] as const;
 
@@ -59,6 +59,7 @@ export default async function PaginaVitrine({ params, searchParams }: { params: 
         qualidadeFixa={fixa >= 0 ? fixa : null}
         carregarEntorno={carregarEntorno.bind(null, predio.projetoId)}
         linkDoArquivo={linkDoArquivo}
+        aoVivo={bilheteAoVivo.bind(null, predio.id)}
       />
     </>
   );

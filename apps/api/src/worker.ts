@@ -1,4 +1,4 @@
-// Worker de capturas (fotos/vídeo → 3D) e da retenção LGPD: `pnpm --filter @imersa/api worker`. Pode haver vários (a fila não repete).
+// Worker de capturas (fotos/vídeo → 3D), webhooks para CRMs e retenção LGPD: `pnpm --filter @imersa/api worker`. Pode haver vários (a fila não repete).
 import { createServer } from 'node:http';
 import { setTimeout as esperar } from 'node:timers/promises';
 import { resolve } from 'node:path';
@@ -8,6 +8,7 @@ import { armazenamentoDaConfig } from './app';
 import { lerConfig } from './config';
 import { processarProxima, reconstrutorPython, reconstrutorSimulado } from './capturas/worker';
 import { anonimizarEventos, periodica } from './vendas/retencao';
+import { entregarWebhooks } from './integracoes/entregas';
 
 const extra = z
   .object({
@@ -52,6 +53,11 @@ const retencao = periodica(6 * 3600 * 1000, async () => {
 while (ativo) {
   try {
     await retencao();
+    const webhooks = await entregarWebhooks(pool, config.TOTP_KEY, { permitirLocal: config.WEBHOOK_PERMITIR_LOCAL }).catch((e) => {
+      console.error('[worker] webhooks: erro inesperado', e);
+      return 0;
+    });
+    if (webhooks) console.info(`[worker] webhooks: ${webhooks} entrega(s) tentada(s)`);
     const r = await processarProxima(deps);
     if (r !== 'vazia') console.info(`[worker] captura processada: ${r}`);
     if (r === 'vazia') await esperar(extra.WORKER_INTERVALO_S * 1000);

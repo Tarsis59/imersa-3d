@@ -225,4 +225,6 @@ export interface Portal {
   unidades: Array<{ id: string; codigo: string; andar: number; status: StatusUnidade; preco: number | null; meshNodeId: string | null; tipologia: string | null; areaM2: number | null; quartos: number | null }>;
   modeloUrl: string | null;
   interiores: Array<{ id: string; nome: string }>;
+  /** Transmissão do status das unidades ao vivo (EventSource direto na API). */
+  aoVivoUrl: string;
 }

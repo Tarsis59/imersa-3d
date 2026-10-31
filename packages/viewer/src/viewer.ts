@@ -8,7 +8,7 @@ import { massaDoPredio } from './units/massa';
 import { buildCityMesh } from './city/cityMesh';
 import { entornoParaLocal, type Entorno } from './city/entorno';
 import { alturaDoCorte, planoDeCorte } from './units/corte';
-import { COR_UNIDADE, type Caixa, type UnidadeViewer } from './units/tipos';
+import { COR_UNIDADE, type Caixa, type StatusUnidade, type UnidadeViewer } from './units/tipos';
 import { planejarVoo, enquadrar, type Pose } from './cameras/voo';
 import { passoPrimeiraPessoa, bloqueioPorCaixas, type Entrada, type EstadoPessoa, type OpcoesPasso } from './cameras/primeiraPessoa';
 import { QualidadeAdaptativa, type NivelQualidade } from './quality/adaptativa';
@@ -65,6 +65,8 @@ export interface Viewer {
   pronto: Promise<void>;
   /** `passam` = unidades em destaque (as outras ficam esmaecidas); `null` = todas. */
   definirDestaque(passam: ReadonlySet<string> | null, favoritos: ReadonlySet<string>): void;
+  /** Status mudou (venda/reserva em tempo real): repinta a unidade. Devolve `false` se ela não está no 3D. */
+  definirStatus(unidadeId: string, status: StatusUnidade): boolean;
   /** Esconde o que está acima do andar. Devolve `false` se o andar não tem unidade no 3D. */
   cortarNoAndar(andar: number | null): boolean;
   andaresComCorte(): number[];
@@ -581,6 +583,13 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
       destaque = passam;
       favoritos = favs;
       pintar();
+    },
+    definirStatus(id, status) {
+      const p = pecas.get(id);
+      if (!p) return false;
+      p.unidade = { ...p.unidade, status };
+      pintar();
+      return true;
     },
     cortarNoAndar(andar) {
       const y = andar === null ? null : alturaDoCorte([...pecas.values()].map((p) => ({ andar: p.unidade.andar, caixa: p.caixa })), andar);

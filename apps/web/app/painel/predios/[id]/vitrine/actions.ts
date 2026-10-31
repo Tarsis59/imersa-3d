@@ -21,3 +21,9 @@ export async function linkDoArquivo(arquivoId: string): Promise<string | null> {
   const r = await api<{ url: string }>(`/arquivos/${encodeURIComponent(arquivoId)}/download`, { token: await tokenParaAcao() });
   return r.status === 200 ? r.dados.url : null;
 }
+
+/** Endereço da transmissão de status ao vivo do prédio (bilhete de 2 min, preso ao prédio). */
+export async function bilheteAoVivo(predioId: string): Promise<string | null> {
+  const r = await api<{ url: string }>(`/predios/${encodeURIComponent(predioId)}/ao-vivo`, { metodo: 'POST', corpo: {}, token: await tokenParaAcao() });
+  return r.status === 200 ? r.dados.url : null;
+}
