@@ -22,6 +22,8 @@ type EstadoEntorno = { tipo: 'carregando' } | { tipo: 'pronto'; predios: number;
 export function Vitrine({
   predioId,
   projetoId,
+  predioNome,
+  empresa,
   chaveModelo,
   modeloUrl,
   unidades,
@@ -33,6 +35,9 @@ export function Vitrine({
 }: {
   predioId: string;
   projetoId: string;
+  predioNome: string;
+  /** Nome da empresa (vai na faixa da imagem baixada). */
+  empresa: string;
   /** Identidade estável do modelo (o link assinado muda a cada atualização da página). */
   chaveModelo: string;
   modeloUrl: string | null;
@@ -120,6 +125,22 @@ export function Vitrine({
     const novo = alternarFavorito(favoritos, id);
     setFavoritos(novo);
     salvarFavoritos(predioId, novo);
+  };
+  const [baixando, setBaixando] = useState(false);
+  const baixarImagem = async () => {
+    const v = viewer.current;
+    if (!v) return;
+    setBaixando(true);
+    try {
+      const png = await v.capturar({ empresa, predio: predioNome, data: new Date() });
+      const link = document.createElement('a');
+      link.href = URL.createObjectURL(png);
+      link.download = `${predioNome.replace(/[^\p{L}\p{N}]+/gu, '-').toLowerCase()}-${hoje()}.png`;
+      link.click();
+      setTimeout(() => URL.revokeObjectURL(link.href), 10_000);
+    } finally {
+      setBaixando(false);
+    }
   };
   const voar = (id: string) => {
     setSelecionada(id);
@@ -302,6 +323,9 @@ export function Vitrine({
                 <input id="hora-sol" type="range" min={6} max={19} step={0.25} value={horaSol} onChange={(e) => setHoraSol(Number(e.target.value))} />
               </label>
             </div>
+            <Botao type="button" variante="secundario" disabled={estado !== 'pronto' || baixando} onClick={() => void baixarImagem()}>
+              {baixando ? 'Gerando imagem…' : 'Baixar imagem (PNG)'}
+            </Botao>
             {modo === 'orbita' ? (
               <Botao type="button" variante="secundario" disabled={estado !== 'pronto'} onClick={() => viewer.current?.definirModo('primeira-pessoa')}>
                 Andar a pé (1ª pessoa)

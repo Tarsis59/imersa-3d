@@ -1,4 +1,6 @@
 import { test, expect } from '@playwright/test';
+import { readFile } from 'node:fs/promises';
+import { layoutMarca } from '../../../packages/viewer/src/captura/marca';
 import { entrarComoAdminComMfa } from './ajuda';
 
 const PLANILHA = [
@@ -44,6 +46,15 @@ test('vitrine 3D: volumes do prédio, filtros, favoritos, voo até a unidade, co
   expect(Number(await vitrine.getAttribute('data-entorno'))).toBeGreaterThan(300);
   await expect(page.getByRole('link', { name: /OpenStreetMap/ })).toHaveAttribute('href', 'https://www.openstreetmap.org/copyright');
   await expect(page.getByTestId('aviso-entorno')).toContainText('prédios reais em volta');
+
+  // imagem com a marca: PNG do tamanho do 3D + faixa (empresa, prédio, data, atribuição do OSM)
+  const [download] = await Promise.all([page.waitForEvent('download'), page.getByRole('button', { name: 'Baixar imagem (PNG)' }).click()]);
+  expect(download.suggestedFilename()).toMatch(/^torre-v-\d{4}-\d{2}-\d{2}\.png$/);
+  const png = await readFile((await download.path())!);
+  expect(png.subarray(1, 4).toString('latin1')).toBe('PNG');
+  const tela = await vitrine.locator('canvas').evaluate((c: HTMLCanvasElement) => ({ w: c.width, h: c.height }));
+  expect(png.readUInt32BE(16)).toBe(tela.w);
+  expect(png.readUInt32BE(20)).toBe(layoutMarca(tela.w, tela.h).alturaTotal);
 
   // telemetria: bússola e qualidade
   await expect(page.getByTestId('bussola')).toHaveAttribute('aria-label', /^Olhando para (N|NE|L|SE|S|SO|O|NO) \(\d+°\)$/);

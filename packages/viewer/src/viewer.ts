@@ -13,6 +13,7 @@ import { planejarVoo, enquadrar, type Pose } from './cameras/voo';
 import { passoPrimeiraPessoa, bloqueioPorCaixas, type Entrada, type EstadoPessoa, type OpcoesPasso } from './cameras/primeiraPessoa';
 import { QualidadeAdaptativa, type NivelQualidade } from './quality/adaptativa';
 import { criarCarregadorGltf, type Decodificadores } from './carregador';
+import { layoutMarca, textoDaMarca, type DadosMarca } from './captura/marca';
 
 export type ModoCamera = 'orbita' | 'primeira-pessoa';
 
@@ -54,6 +55,8 @@ export interface Viewer {
   definirSol(dataISO: string, hora: number): void;
   /** Prédios reais em volta (OSM). Devolve quantos foram desenhados. `null` tira o entorno. */
   definirEntorno(entorno: Entorno | null): Promise<number>;
+  /** PNG da vista atual com faixa da marca (empresa, prédio, data, "imagem ilustrativa" e atribuição do OSM). */
+  capturar(dados: Omit<DadosMarca, 'atribuicao'>): Promise<Blob>;
   aoSelecionar(cb: (unidadeId: string | null) => void): void;
   aoMudar(cb: (estado: EstadoViewer) => void): void;
   destruir(): void;
@@ -135,6 +138,7 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
   let bloqueado: OpcoesPasso['bloqueado'] = () => false;
   let bloqueadoCidade: OpcoesPasso['bloqueado'] = () => false;
   let cidade: THREE.Mesh | null = null;
+  let atribuicaoEntorno: string | null = null;
   const materialCidade = new THREE.MeshStandardMaterial({ color: 0xeceae4, roughness: 0.9 });
   prepararMaterial(materialCidade);
 
@@ -447,6 +451,7 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
         cidade = null;
       }
       bloqueadoCidade = () => false;
+      atribuicaoEntorno = null;
       if (!entorno) return 0;
       const predios = entornoParaLocal(entorno.predios, entorno.centro, rotacao, caixaDoPredio());
       if (predios.length === 0) return 0;
@@ -455,7 +460,40 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
       cidade.receiveShadow = true;
       cena.add(cidade);
       bloqueadoCidade = bloqueioPorRaio([cidade]);
+      atribuicaoEntorno = entorno.atribuicao;
       return predios.length;
+    },
+    capturar(dados) {
+      // desenha e copia na mesma tarefa: depois o navegador pode limpar o buffer do WebGL
+      renderer.render(cena, camera);
+      const w = canvas.width;
+      const h = canvas.height;
+      const l = layoutMarca(w, h);
+      const tela = document.createElement('canvas');
+      tela.width = w;
+      tela.height = l.alturaTotal;
+      const ctx = tela.getContext('2d');
+      if (!ctx) return Promise.reject(new Error('Sem suporte a canvas 2D'));
+      ctx.drawImage(canvas, 0, 0);
+      ctx.fillStyle = '#0f172a';
+      ctx.fillRect(0, h, w, l.alturaFaixa);
+      const t = textoDaMarca({ ...dados, atribuicao: atribuicaoEntorno });
+      const y = t.rodape ? h + l.alturaFaixa * 0.38 : h + l.alturaFaixa / 2;
+      ctx.textBaseline = 'middle';
+      ctx.fillStyle = '#ffffff';
+      ctx.font = `600 ${l.fonte}px system-ui, sans-serif`;
+      ctx.textAlign = 'left';
+      ctx.fillText(t.esquerda, l.margem, y, w * 0.58);
+      ctx.font = `${l.fonte}px system-ui, sans-serif`;
+      ctx.textAlign = 'right';
+      ctx.fillText(t.direita, w - l.margem, y, w * 0.38);
+      if (t.rodape) {
+        ctx.fillStyle = '#cbd5e1';
+        ctx.font = `${Math.max(9, Math.round(l.fonte * 0.75))}px system-ui, sans-serif`;
+        ctx.textAlign = 'left';
+        ctx.fillText(t.rodape, l.margem, h + l.alturaFaixa * 0.76, w - 2 * l.margem);
+      }
+      return new Promise((ok, erro) => tela.toBlob((b) => (b ? ok(b) : erro(new Error('Falha ao gerar o PNG'))), 'image/png'));
     },
     aoSelecionar(cb) {
       cbSelecao = cb;

@@ -2,7 +2,7 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import type { UnidadeViewer } from '@imersa/viewer';
 import { apiNaPagina } from '@/lib/sessao';
-import type { Arquivo, DetalheProjeto, Espelho } from '@/lib/tipos';
+import type { Arquivo, DetalheProjeto, Espelho, Me } from '@/lib/tipos';
 import { Vitrine } from './vitrine';
 
 export default async function PaginaVitrine({ params }: { params: Promise<{ id: string }> }) {
@@ -12,11 +12,13 @@ export default async function PaginaVitrine({ params }: { params: Promise<{ id: 
   if (r.status !== 200) notFound();
   const { predio, andares } = r.dados;
   // independentes entre si: em paralelo (cada ida à API custa uma volta de rede)
-  const [detalhe, lista, download] = await Promise.all([
+  const [detalhe, lista, download, me] = await Promise.all([
     apiNaPagina<DetalheProjeto>(`/projetos/${encodeURIComponent(predio.projetoId)}`, volta),
     apiNaPagina<Arquivo[]>(`/projetos/${encodeURIComponent(predio.projetoId)}/arquivos`, volta),
     predio.modeloArquivoId ? apiNaPagina<{ url: string }>(`/arquivos/${predio.modeloArquivoId}/download`, volta) : null,
+    apiNaPagina<Me>('/me', volta),
   ]);
+  const empresa = me.dados.empresas.find((e) => e.id === me.dados.tenantId)?.nome ?? '';
   const projeto = detalhe.dados.projeto;
   const modeloUrl = download?.status === 200 ? download.dados.url : null;
   const interiores = lista.dados.filter((a) => a.tipo === 'splat' && a.status === 'pronto').map((a) => ({ id: a.id, nome: a.nome }));
@@ -39,6 +41,8 @@ export default async function PaginaVitrine({ params }: { params: Promise<{ id: 
       <Vitrine
         predioId={predio.id}
         projetoId={predio.projetoId}
+        predioNome={predio.nome}
+        empresa={empresa}
         chaveModelo={predio.modeloArquivoId ?? 'volumes'}
         modeloUrl={modeloUrl}
         unidades={unidades}
