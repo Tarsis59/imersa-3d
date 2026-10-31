@@ -22,7 +22,12 @@ export default async function PaginaPredio({ params }: { params: Promise<{ id: s
         <Link href={`/painel/projetos/${espelho.predio.projetoId}`} className="text-sm text-suave hover:underline">
           ← {espelho.predio.projetoNome}
         </Link>
-        <h1 className="text-2xl font-bold">{espelho.predio.nome}</h1>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <h1 className="text-2xl font-bold">{espelho.predio.nome}</h1>
+          <Link href={`/painel/predios/${espelho.predio.id}/vitrine`} className="rounded-lg bg-acento px-4 py-2 text-sm font-semibold text-acento-texto hover:opacity-90">
+            Abrir Vitrine 3D
+          </Link>
+        </div>
       </div>
       <EspelhoVendas espelho={espelho} mudarStatus={mudarStatus.bind(null, espelho.predio.id)} />
       <Cartao titulo="Modelo 3D">

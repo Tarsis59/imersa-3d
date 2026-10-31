@@ -2,6 +2,8 @@ import type { NextConfig } from 'next';
 
 const config: NextConfig = {
   poweredByHeader: false,
+  // pacote do monorepo em TypeScript, sem build próprio
+  transpilePackages: ['@imersa/viewer'],
   async headers() {
     return [
       {

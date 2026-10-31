@@ -9,7 +9,7 @@
     "dev:api": "pnpm --filter @imersa/api dev",
     "dev:web": "pnpm --filter @imersa/web dev",
     "e2e": "pnpm --filter @imersa/web e2e",
-    "test": "turbo run test",
+    "test": "turbo run test --concurrency=2",
     "typecheck": "turbo run typecheck"
   },
   "devDependencies": {

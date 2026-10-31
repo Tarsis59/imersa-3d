@@ -1,0 +1,330 @@
+'use client';
+import { useEffect, useMemo, useRef, useState, type PointerEvent as EventoPonteiro } from 'react';
+import { criarViewer, filtrar, filtroVazio, pontoCardeal, vetorJoystick, type EstadoViewer, type Filtro, type UnidadeViewer, type Viewer } from '@imersa/viewer';
+import { Botao, Campo, Cartao, Selecao } from '@/components/ui';
+import { alternarFavorito, lerFavoritos, salvarFavoritos } from '@/lib/favoritos';
+import { brl, COR_STATUS, ROTULO_STATUS, STATUS_UNIDADE } from '@/lib/tipos';
+
+const ROTULO_NIVEL = { alto: 'alta', medio: 'média', baixo: 'baixa' } as const;
+const hoje = () => new Date().toISOString().slice(0, 10);
+const horaLegivel = (h: number) => `${String(Math.floor(h)).padStart(2, '0')}:${String(Math.round((h % 1) * 60)).padStart(2, '0')}`;
+const filtroAtivo = (f: Filtro) => f.quartos.length > 0 || f.areaMin !== null || f.precoMax !== null || f.status.length > 0 || f.somenteFavoritos;
+const numeroOuNulo = (v: string) => (v.trim() === '' || !Number.isFinite(Number(v)) ? null : Number(v));
+function alternar<T>(lista: T[], x: T): T[] {
+  return lista.includes(x) ? lista.filter((y) => y !== x) : [...lista, x];
+}
+
+export function Vitrine({
+  predioId,
+  chaveModelo,
+  modeloUrl,
+  unidades,
+  andares,
+  rotacaoGraus,
+  lat,
+  lon,
+}: {
+  predioId: string;
+  /** Identidade estável do modelo (o link assinado muda a cada atualização da página). */
+  chaveModelo: string;
+  modeloUrl: string | null;
+  unidades: UnidadeViewer[];
+  andares: Array<{ numero: number; nome: string }>;
+  rotacaoGraus: number;
+  lat: number | null;
+  lon: number | null;
+}) {
+  const canvas = useRef<HTMLCanvasElement>(null);
+  const viewer = useRef<Viewer | null>(null);
+  const inicial = useRef({ modeloUrl, unidades, rotacaoGraus, lat, lon });
+  inicial.current = { modeloUrl, unidades, rotacaoGraus, lat, lon };
+  const [estado, setEstado] = useState<'carregando' | 'pronto' | 'erro'>('carregando');
+  const [telemetria, setTelemetria] = useState<EstadoViewer | null>(null);
+  const [filtro, setFiltro] = useState<Filtro>(filtroVazio);
+  const [favoritos, setFavoritos] = useState<Set<string>>(() => new Set());
+  const [selecionada, setSelecionada] = useState<string | null>(null);
+  const [andarCorte, setAndarCorte] = useState('');
+  const [comCorte, setComCorte] = useState<number[]>([]);
+  const [dataSol, setDataSol] = useState(hoje);
+  const [horaSol, setHoraSol] = useState(10);
+
+  // depois da hidratação: o servidor não conhece o navegador de quem vê
+  useEffect(() => setFavoritos(lerFavoritos(predioId)), [predioId]);
+
+  // um viewer por modelo
+  useEffect(() => {
+    const el = canvas.current;
+    if (!el) return;
+    const c = inicial.current;
+    setEstado('carregando');
+    const v = criarViewer(el, { unidades: c.unidades, modeloUrl: c.modeloUrl, rotacaoGraus: c.rotacaoGraus, lat: c.lat ?? undefined, lon: c.lon ?? undefined });
+    viewer.current = v;
+    let vivo = true;
+    v.aoSelecionar((id) => setSelecionada(id));
+    v.aoMudar((e) => vivo && setTelemetria(e));
+    v.pronto.then(
+      () => {
+        if (!vivo) return;
+        setComCorte(v.andaresComCorte());
+        setEstado('pronto');
+      },
+      () => vivo && setEstado('erro'),
+    );
+    return () => {
+      vivo = false;
+      viewer.current = null;
+      v.destruir();
+    };
+  }, [chaveModelo]);
+
+  const passam = useMemo(() => filtrar(unidades, filtro, favoritos), [unidades, filtro, favoritos]);
+  const ativo = filtroAtivo(filtro);
+  useEffect(() => {
+    if (estado === 'pronto') viewer.current?.definirDestaque(ativo ? passam : null, favoritos);
+  }, [estado, passam, ativo, favoritos]);
+  useEffect(() => {
+    if (estado === 'pronto') viewer.current?.cortarNoAndar(andarCorte === '' ? null : Number(andarCorte));
+  }, [estado, andarCorte]);
+  useEffect(() => {
+    if (estado === 'pronto') viewer.current?.definirSol(dataSol, horaSol);
+  }, [estado, dataSol, horaSol]);
+
+  const nomeAndar = new Map(andares.map((a) => [a.numero, a.nome]));
+  const quartosDisponiveis = [...new Set(unidades.map((u) => u.quartos).filter((q): q is number => q !== null))].sort((a, b) => a - b);
+  const lista = unidades.filter((u) => passam.has(u.id));
+  const unidade = selecionada ? unidades.find((u) => u.id === selecionada) : undefined;
+  const modo = telemetria?.modo ?? 'orbita';
+
+  const favoritar = (id: string) => {
+    const novo = alternarFavorito(favoritos, id);
+    setFavoritos(novo);
+    salvarFavoritos(predioId, novo);
+  };
+  const voar = (id: string) => {
+    setSelecionada(id);
+    viewer.current?.voarPara(id);
+  };
+
+  return (
+    <div className="grid gap-6 lg:grid-cols-[1fr_340px] lg:items-start">
+      <div
+        data-testid="vitrine-3d"
+        data-estado={estado}
+        data-modo={modo}
+        data-corte={andarCorte || 'nenhum'}
+        data-posicao={telemetria ? `${telemetria.posicao.x.toFixed(1)},${telemetria.posicao.z.toFixed(1)}` : ''}
+        className="relative h-[70vh] min-h-96 overflow-hidden rounded-2xl border border-borda bg-fundo lg:sticky lg:top-6"
+      >
+        <canvas
+          ref={canvas}
+          className="block h-full w-full touch-none"
+          aria-label="Prédio em 3D. Arraste para girar, role para aproximar, toque numa unidade para ver os detalhes."
+        />
+        {estado === 'carregando' && <p className="absolute inset-0 grid place-items-center text-suave">Carregando o 3D…</p>}
+        {estado === 'erro' && <p className="absolute inset-0 grid place-items-center text-perigo">Não foi possível carregar o modelo 3D.</p>}
+        {telemetria && (
+          <>
+            <Bussola rumo={telemetria.rumo} />
+            <p data-testid="qualidade" className="absolute left-3 top-3 rounded-md bg-black/60 px-2 py-1 text-xs text-white">
+              {telemetria.fps} FPS · qualidade {ROTULO_NIVEL[telemetria.nivel]}
+            </p>
+          </>
+        )}
+        {modo === 'primeira-pessoa' && <Joystick aoMover={(e) => viewer.current?.definirEntrada(e)} />}
+      </div>
+
+      <div className="grid gap-4">
+        {unidade && (
+          <Cartao titulo={`Unidade ${unidade.codigo}`}>
+            <div data-testid="unidade-selecionada" className="grid gap-3 text-sm">
+              <span className={`w-fit rounded px-2 py-0.5 text-xs font-semibold ${COR_STATUS[unidade.status]}`}>{ROTULO_STATUS[unidade.status]}</span>
+              <dl className="grid grid-cols-2 gap-x-3 gap-y-1">
+                <dt className="text-suave">Andar</dt>
+                <dd>{nomeAndar.get(unidade.andar) ?? unidade.andar}</dd>
+                <dt className="text-suave">Área</dt>
+                <dd>{unidade.areaM2 === null ? '—' : `${unidade.areaM2.toLocaleString('pt-BR')} m²`}</dd>
+                <dt className="text-suave">Quartos</dt>
+                <dd>{unidade.quartos ?? '—'}</dd>
+                <dt className="text-suave">Preço</dt>
+                <dd>{brl(unidade.preco)}</dd>
+              </dl>
+              <div className="flex flex-wrap gap-2">
+                <Botao type="button" variante="secundario" onClick={() => favoritar(unidade.id)} aria-pressed={favoritos.has(unidade.id)}>
+                  {favoritos.has(unidade.id) ? '★ Favorita' : '☆ Favoritar'}
+                </Botao>
+                <Botao type="button" variante="secundario" onClick={() => voar(unidade.id)}>
+                  Ir até ela
+                </Botao>
+              </div>
+            </div>
+          </Cartao>
+        )}
+
+        <Cartao titulo="Filtros">
+          <div className="grid gap-4 text-sm">
+            {quartosDisponiveis.length > 0 && (
+              <fieldset className="grid gap-2">
+                <legend className="mb-1 font-medium">Quartos</legend>
+                <div className="flex flex-wrap gap-x-4 gap-y-1">
+                  {quartosDisponiveis.map((q) => (
+                    <label key={q} className="flex min-h-10 items-center gap-2">
+                      <input type="checkbox" checked={filtro.quartos.includes(q)} onChange={() => setFiltro({ ...filtro, quartos: alternar(filtro.quartos, q) })} />
+                      {q} {q === 1 ? 'quarto' : 'quartos'}
+                    </label>
+                  ))}
+                </div>
+              </fieldset>
+            )}
+            <div className="grid grid-cols-2 gap-3">
+              <Campo id="area-min" rotulo="Área mínima (m²)" type="number" min={0} inputMode="numeric" value={filtro.areaMin ?? ''} onChange={(e) => setFiltro({ ...filtro, areaMin: numeroOuNulo(e.target.value) })} />
+              <Campo id="preco-max" rotulo="Preço máximo (R$)" type="number" min={0} inputMode="numeric" value={filtro.precoMax ?? ''} onChange={(e) => setFiltro({ ...filtro, precoMax: numeroOuNulo(e.target.value) })} />
+            </div>
+            <fieldset className="grid gap-2">
+              <legend className="mb-1 font-medium">Status</legend>
+              <div className="flex flex-wrap gap-x-4 gap-y-1">
+                {STATUS_UNIDADE.map((s) => (
+                  <label key={s} className="flex min-h-10 items-center gap-2">
+                    <input type="checkbox" checked={filtro.status.includes(s)} onChange={() => setFiltro({ ...filtro, status: alternar(filtro.status, s) })} />
+                    {ROTULO_STATUS[s]}
+                  </label>
+                ))}
+              </div>
+            </fieldset>
+            <label className="flex min-h-10 items-center gap-2">
+              <input type="checkbox" checked={filtro.somenteFavoritos} onChange={(e) => setFiltro({ ...filtro, somenteFavoritos: e.target.checked })} />
+              Só favoritas ({favoritos.size})
+            </label>
+            {ativo && (
+              <Botao type="button" variante="secundario" onClick={() => setFiltro(filtroVazio())}>
+                Limpar filtros
+              </Botao>
+            )}
+          </div>
+        </Cartao>
+
+        <Cartao titulo="Unidades">
+          <p data-testid="contagem-filtro" className="mb-3 text-sm text-suave">
+            {lista.length} de {unidades.length} unidades
+          </p>
+          <ul className="grid max-h-72 gap-1 overflow-y-auto" data-testid="lista-vitrine">
+            {lista.map((u) => (
+              <li key={u.id} className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => voar(u.id)}
+                  className={`flex min-h-10 flex-1 items-center justify-between gap-2 rounded-lg border px-3 py-2 text-left text-sm hover:bg-fundo ${u.id === selecionada ? 'border-acento' : 'border-borda'}`}
+                >
+                  <span className="font-semibold">{u.codigo}</span>
+                  <span className="text-suave">{nomeAndar.get(u.andar) ?? u.andar}</span>
+                  <span className={`rounded px-1.5 text-xs ${COR_STATUS[u.status]}`}>{ROTULO_STATUS[u.status]}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => favoritar(u.id)}
+                  aria-pressed={favoritos.has(u.id)}
+                  aria-label={`${favoritos.has(u.id) ? 'Desfavoritar' : 'Favoritar'} ${u.codigo}`}
+                  className="min-h-10 min-w-10 rounded-lg text-lg text-amber-700 hover:bg-fundo"
+                >
+                  {favoritos.has(u.id) ? '★' : '☆'}
+                </button>
+              </li>
+            ))}
+          </ul>
+        </Cartao>
+
+        <Cartao titulo="Vista">
+          <div className="grid gap-4 text-sm">
+            <Selecao id="andar-corte" rotulo="Ver até o andar (corte)" value={andarCorte} onChange={(e) => setAndarCorte(e.target.value)} disabled={estado !== 'pronto'}>
+              <option value="">Prédio inteiro</option>
+              {comCorte.map((n) => (
+                <option key={n} value={String(n)}>
+                  {nomeAndar.get(n) ?? `${n}º andar`}
+                </option>
+              ))}
+            </Selecao>
+            <div className="grid grid-cols-2 gap-3">
+              <Campo id="data-sol" rotulo="Dia do sol" type="date" value={dataSol} onChange={(e) => e.target.value && setDataSol(e.target.value)} />
+              <label htmlFor="hora-sol" className="grid gap-1">
+                <span className="font-medium">Hora: {horaLegivel(horaSol)}</span>
+                <input id="hora-sol" type="range" min={6} max={19} step={0.25} value={horaSol} onChange={(e) => setHoraSol(Number(e.target.value))} />
+              </label>
+            </div>
+            {modo === 'orbita' ? (
+              <Botao type="button" variante="secundario" disabled={estado !== 'pronto'} onClick={() => viewer.current?.definirModo('primeira-pessoa')}>
+                Andar a pé (1ª pessoa)
+              </Botao>
+            ) : (
+              <>
+                <p className="text-suave">WASD ou setas para andar, arraste para olhar. No celular, use o controle no canto da tela.</p>
+                <Botao type="button" variante="secundario" onClick={() => viewer.current?.definirModo('orbita')}>
+                  Voltar para a vista de cima
+                </Botao>
+              </>
+            )}
+          </div>
+        </Cartao>
+      </div>
+    </div>
+  );
+}
+
+function Bussola({ rumo }: { rumo: number }) {
+  return (
+    <div
+      data-testid="bussola"
+      role="img"
+      className="absolute right-3 top-3 grid h-16 w-16 place-items-center rounded-full bg-black/60 text-white"
+      aria-label={`Olhando para ${pontoCardeal(rumo)} (${rumo}°)`}
+    >
+      {/* a agulha aponta para o norte: gira ao contrário do rumo da câmera */}
+      <span className="absolute inset-1 grid justify-items-center" style={{ transform: `rotate(${-rumo}deg)` }} aria-hidden>
+        <span className="text-xs font-bold text-red-300">N</span>
+      </span>
+      <span className="text-xs font-semibold" aria-hidden>
+        {pontoCardeal(rumo)} {rumo}°
+      </span>
+    </div>
+  );
+}
+
+const RAIO_JOYSTICK = 48;
+function Joystick({ aoMover }: { aoMover: (e: { frente: number; lado: number }) => void }) {
+  const [dedo, setDedo] = useState({ x: 0, y: 0 });
+  const centro = useRef<{ x: number; y: number } | null>(null);
+  const mover = (e: EventoPonteiro<HTMLDivElement>) => {
+    if (!centro.current) return;
+    const dx = e.clientX - centro.current.x;
+    const dy = e.clientY - centro.current.y;
+    const d = Math.hypot(dx, dy);
+    const k = d > RAIO_JOYSTICK ? RAIO_JOYSTICK / d : 1;
+    setDedo({ x: dx * k, y: dy * k });
+    aoMover(vetorJoystick(dx, dy, RAIO_JOYSTICK));
+  };
+  const soltar = () => {
+    centro.current = null;
+    setDedo({ x: 0, y: 0 });
+    aoMover({ frente: 0, lado: 0 });
+  };
+  return (
+    <div
+      data-testid="joystick"
+      role="application"
+      aria-label="Controle para andar: arraste na direção desejada"
+      className="absolute bottom-4 left-4 h-28 w-28 touch-none rounded-full border-2 border-white/70 bg-black/40"
+      onPointerDown={(e) => {
+        const r = e.currentTarget.getBoundingClientRect();
+        centro.current = { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+        e.currentTarget.setPointerCapture(e.pointerId);
+        mover(e);
+      }}
+      onPointerMove={mover}
+      onPointerUp={soltar}
+      onPointerCancel={soltar}
+    >
+      <span
+        className="absolute left-1/2 top-1/2 h-12 w-12 rounded-full bg-white/80"
+        style={{ transform: `translate(calc(-50% + ${dedo.x}px), calc(-50% + ${dedo.y}px))` }}
+      />
+    </div>
+  );
+}

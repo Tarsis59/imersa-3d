@@ -51,4 +51,19 @@ test('arquivos e 3D: envia GLB real, recusa GLB falso, liga ao prédio e vincula
   await expect(page.getByTestId('vinculo-atual')).toContainText('Ligada à unidade 101', { timeout: 30_000 });
   // o modelo NÃO é recarregado depois do vínculo (continua pronto, sem piscar)
   await expect(visualizador).toHaveAttribute('data-estado', 'pronto');
+
+  // vitrine com o modelo real: a peça ligada é a unidade 101; só o andar dela tem corte
+  await page.getByRole('link', { name: '← Casa' }).click();
+  await page.getByRole('link', { name: 'Abrir Vitrine 3D' }).click();
+  const vitrine = page.getByTestId('vitrine-3d');
+  await expect(vitrine).toHaveAttribute('data-estado', 'pronto', { timeout: 45_000 });
+  await expect(page.getByText('as peças ligadas às unidades aparecem na cor do status')).toBeVisible();
+  await page.getByTestId('lista-vitrine').getByRole('button', { name: /^101/ }).click();
+  await expect(page.getByRole('heading', { name: 'Unidade 101' })).toBeVisible();
+  await expect(page.getByLabel('Ver até o andar (corte)').locator('option')).toHaveText(['Prédio inteiro', '1º andar']);
+  await page.getByLabel('Ver até o andar (corte)').selectOption({ label: '1º andar' });
+  await expect(vitrine).toHaveAttribute('data-corte', '1');
+  // primeira pessoa com colisão pelas paredes reais do modelo (raio contra as malhas)
+  await page.getByRole('button', { name: 'Andar a pé (1ª pessoa)' }).click();
+  await expect(vitrine).toHaveAttribute('data-modo', 'primeira-pessoa');
 });

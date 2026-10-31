@@ -49,4 +49,20 @@ describe('enquadrar', () => {
       expect(pose.posicao.y).toBeGreaterThan(pose.alvo.y);
     }
   });
+
+  it('margem afasta a câmera na mesma direção (mostra as unidades vizinhas)', () => {
+    const c = { minX: 0, maxX: 8, minY: 21, maxY: 24, minZ: 0, maxZ: 8 };
+    const perto = enquadrar(c, 50, 1);
+    const longe = enquadrar(c, 50, 1, 20, 2.3);
+    expect(longe.posicao.distanceTo(longe.alvo) / perto.posicao.distanceTo(perto.alvo)).toBeCloseTo(2.3 / 1.15, 6);
+  });
+
+  it('chega de lado (20° acima do horizonte), para os andares de cima não esconderem a unidade', () => {
+    const pose = enquadrar({ minX: 0, maxX: 8, minY: 21, maxY: 24, minZ: 0, maxZ: 8 }, 50, 1);
+    const d = pose.posicao.clone().sub(pose.alvo);
+    expect(THREE.MathUtils.radToDeg(Math.asin(d.y / d.length()))).toBeCloseTo(20, 5);
+    const alto = enquadrar({ minX: 0, maxX: 8, minY: 0, maxY: 60, minZ: 0, maxZ: 8 }, 50, 1, 35);
+    const d2 = alto.posicao.clone().sub(alto.alvo);
+    expect(THREE.MathUtils.radToDeg(Math.asin(d2.y / d2.length()))).toBeCloseTo(35, 5);
+  });
 });

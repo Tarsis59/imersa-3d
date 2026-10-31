@@ -75,6 +75,9 @@ importers:
 
   apps/web:
     dependencies:
+      '@imersa/viewer':
+        specifier: workspace:*
+        version: link:../../packages/viewer
       fflate:
         specifier: ^0.8.3
         version: 0.8.3

@@ -25,13 +25,18 @@ export function planejarVoo(de: Pose, para: Pose): (t: number) => Pose {
   };
 }
 
-/** Pose que mostra a caixa inteira, de cima a 45°, vindo do sudeste. */
-export function enquadrar(caixa: Caixa, fovGraus: number, aspecto: number): Pose {
+/**
+ * Pose que mostra a caixa inteira, vinda do sudeste, `elevacaoGraus` acima do horizonte.
+ * Para uma unidade, 20° (quase de frente): de cima, os andares superiores a esconderiam.
+ * `margem` multiplica a distância mínima (1,15 = justo; maior = mostra o entorno).
+ */
+export function enquadrar(caixa: Caixa, fovGraus: number, aspecto: number, elevacaoGraus = 20, margem = 1.15): Pose {
   const alvo = new THREE.Vector3((caixa.minX + caixa.maxX) / 2, (caixa.minY + caixa.maxY) / 2, (caixa.minZ + caixa.maxZ) / 2);
   const raio = Math.hypot(caixa.maxX - caixa.minX, caixa.maxY - caixa.minY, caixa.maxZ - caixa.minZ) / 2;
   const vertical = THREE.MathUtils.degToRad(fovGraus);
   const horizontal = 2 * Math.atan(Math.tan(vertical / 2) * aspecto);
-  const distancia = (raio / Math.sin(Math.min(vertical, horizontal) / 2)) * 1.15;
-  const direcao = new THREE.Vector3(1, Math.SQRT2, 1).normalize();
+  const distancia = (raio / Math.sin(Math.min(vertical, horizontal) / 2)) * margem;
+  const el = THREE.MathUtils.degToRad(elevacaoGraus);
+  const direcao = new THREE.Vector3(Math.cos(el) * Math.SQRT1_2, Math.sin(el), Math.cos(el) * Math.SQRT1_2);
   return { posicao: alvo.clone().addScaledVector(direcao, distancia), alvo };
 }
