@@ -1,0 +1,35 @@
+name: CI
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  testes:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgis/postgis:16-3.5
+        env:
+          POSTGRES_USER: imersa_owner
+          POSTGRES_PASSWORD: imersa_owner_dev
+          POSTGRES_DB: imersa
+        ports:
+          - 55432:5432
+        options: >-
+          --health-cmd "pg_isready -U imersa_owner -d imersa"
+          --health-interval 3s --health-timeout 3s --health-retries 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - name: Papéis e bancos de teste
+        run: psql -h localhost -p 55432 -U imersa_owner -d imersa -v ON_ERROR_STOP=1 -f infra/docker/initdb/01-roles.sql
+        env:
+          PGPASSWORD: imersa_owner_dev
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+      - run: pnpm test

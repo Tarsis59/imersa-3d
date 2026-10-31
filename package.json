@@ -1,0 +1,17 @@
+{
+  "name": "imersa3d",
+  "private": true,
+  "packageManager": "pnpm@11.7.0",
+  "scripts": {
+    "db:up": "docker compose up -d --wait",
+    "db:down": "docker compose down",
+    "db:migrate": "pnpm --filter @imersa/db migrate",
+    "dev:api": "pnpm --filter @imersa/api dev",
+    "test": "turbo run test",
+    "typecheck": "turbo run typecheck"
+  },
+  "devDependencies": {
+    "turbo": "^2.11.10",
+    "typescript": "~5.9.3"
+  }
+}
