@@ -20,7 +20,7 @@ from .kaggle_cli import KaggleCli
 from .pipeline import RAIZ, ErroPipeline, Trabalho, executar
 from .video import extrair_quadros
 
-ZIP_TESTE = RAIZ.parents[1] / "exemplos" / "fotos-para-reconstrucao" / "tandt_db.zip"
+ZIP_TESTE = RAIZ.parents[2] / "exemplos" / "fotos-para-reconstrucao" / "tandt_db.zip"
 
 
 def preparar_playroom(destino: Path) -> tuple[Path, Path]:
