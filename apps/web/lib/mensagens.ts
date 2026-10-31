@@ -10,6 +10,13 @@ const MENSAGENS: Record<string, string> = {
   convite_invalido: 'Convite inválido, já usado ou expirado.',
   nome_obrigatorio: 'Informe seu nome.',
   ja_e_membro: 'Você já faz parte desta empresa.',
+  nao_encontrado: 'Não encontrado.',
+  nada_para_alterar: 'Nenhuma alteração para salvar.',
+  transicao_invalida: 'Essa mudança de status não é permitida.',
+  motivo_obrigatorio: 'Informe o motivo (obrigatório para distrato).',
+  andar_inexistente: 'Esse andar não existe no prédio.',
+  tipologia_inexistente: 'Tipologia não encontrada.',
+  tipologia_de_outro_empreendimento: 'A tipologia é de outro empreendimento.',
 };
 
 export function mensagem(status: number, dados: unknown): string {

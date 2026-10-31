@@ -1,7 +1,7 @@
 import Link from 'next/link';
 import { Aviso, Cartao } from '@/components/ui';
 import { apiNaPagina } from '@/lib/sessao';
-import { ehGestao, type Me, type Projeto } from '@/lib/tipos';
+import { ehGestao, ROTULO_STATUS_PROJETO, type Me, type Projeto } from '@/lib/tipos';
 import { FormProjeto } from './form-projeto';
 
 export default async function Painel() {
@@ -31,8 +31,14 @@ export default async function Painel() {
         ) : (
           <ul className="divide-y divide-borda" data-testid="lista-projetos">
             {projetos.map((p) => (
-              <li key={p.id} className="py-2">
-                {p.nome}
+              <li key={p.id}>
+                <Link href={`/painel/projetos/${p.id}`} className="flex flex-wrap items-baseline justify-between gap-2 py-3 hover:underline">
+                  <span className="font-medium">{p.nome}</span>
+                  <span className="text-sm text-suave">
+                    {ROTULO_STATUS_PROJETO[p.status]}
+                    {p.cidade ? ` · ${p.cidade}${p.uf ? `/${p.uf}` : ''}` : ''}
+                  </span>
+                </Link>
               </li>
             ))}
           </ul>
