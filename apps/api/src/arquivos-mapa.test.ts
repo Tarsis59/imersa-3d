@@ -123,6 +123,17 @@ describe('arquivos', () => {
     expect(r.headers['content-type']).toBe('model/gltf-binary');
   });
 
+  it('CORS: o navegador do site pode fazer o PUT direto (pré-checagem libera o método)', async () => {
+    const r = await app.inject({
+      method: 'OPTIONS',
+      url: '/arquivos/00000000-0000-4000-8000-000000000000/conteudo',
+      headers: { origin: 'http://localhost:3000', 'access-control-request-method': 'PUT', 'access-control-request-headers': 'content-type' },
+    });
+    expect(r.statusCode).toBe(204);
+    expect(r.headers['access-control-allow-methods']).toContain('PUT');
+    expect(r.headers['access-control-allow-origin']).toBe('http://localhost:3000');
+  });
+
   it('o mesmo link não serve para enviar de novo', async () => {
     const d = await req('POST', `/projetos/${projeto}/arquivos`, { nome: 'b.glb', tipo: 'modelo_3d', tamanho: GLB.length }, admin);
     await enviar(d.json.envio.url, GLB);

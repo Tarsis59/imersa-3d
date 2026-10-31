@@ -72,13 +72,66 @@ export interface UnidadeEspelho {
   tipologia: string | null;
   areaM2: number | null;
   quartos: number | null;
+  meshNodeId: string | null;
   transicoes: StatusUnidade[];
 }
 
 export interface Espelho {
-  predio: { id: string; nome: string; projetoId: string; projetoNome: string };
+  predio: { id: string; nome: string; projetoId: string; projetoNome: string; modeloArquivoId: string | null };
   andares: Array<{ id: string; numero: number; nome: string; unidades: UnidadeEspelho[] }>;
 }
 
 const formatoReal = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL', maximumFractionDigits: 0 });
 export const brl = (v: number | null) => (v === null ? '—' : formatoReal.format(v));
+
+export type TipoArquivo = 'modelo_3d' | 'splat' | 'ifc' | 'planta' | 'imagem' | 'documento';
+export const ROTULO_TIPO_ARQUIVO: Record<TipoArquivo, string> = {
+  modelo_3d: 'Modelo 3D (.glb)',
+  splat: 'Interior real (splat)',
+  ifc: 'Projeto BIM (.ifc)',
+  planta: 'Planta',
+  imagem: 'Imagem',
+  documento: 'Documento (.pdf)',
+};
+export const ACEITA_POR_TIPO: Record<TipoArquivo, string> = {
+  modelo_3d: '.glb',
+  splat: '.spz,.ply,.splat,.sog',
+  ifc: '.ifc',
+  planta: '.pdf,.png,.jpg,.jpeg,.dwg',
+  imagem: '.png,.jpg,.jpeg,.webp',
+  documento: '.pdf',
+};
+
+export interface Arquivo {
+  id: string;
+  nome: string;
+  tipo: TipoArquivo;
+  status: 'aguardando_envio' | 'verificando' | 'pronto' | 'rejeitado';
+  motivoRejeicao: string | null;
+  tamanho: number;
+  verificadoAntivirus: boolean;
+  criadoEm: string;
+}
+
+export type CategoriaPoi = 'escola' | 'saude' | 'mercado' | 'farmacia' | 'transporte' | 'parque' | 'outro';
+export const ROTULO_CATEGORIA: Record<CategoriaPoi, string> = {
+  escola: 'Escola',
+  saude: 'Saúde',
+  mercado: 'Mercado',
+  farmacia: 'Farmácia',
+  transporte: 'Transporte',
+  parque: 'Parque',
+  outro: 'Outro',
+};
+
+export interface Poi {
+  id: string;
+  categoria: CategoriaPoi;
+  nome: string;
+  origem: 'osm' | 'manual';
+  distanciaM: number;
+  minutosAPe: number;
+}
+
+export const tamanhoLegivel = (bytes: number) =>
+  bytes < 1024 * 1024 ? `${Math.max(1, Math.round(bytes / 1024))} KB` : `${(bytes / 1024 / 1024).toLocaleString('pt-BR', { maximumFractionDigits: 1 })} MB`;

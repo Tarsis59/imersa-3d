@@ -17,6 +17,14 @@ const MENSAGENS: Record<string, string> = {
   andar_inexistente: 'Esse andar não existe no prédio.',
   tipologia_inexistente: 'Tipologia não encontrada.',
   tipologia_de_outro_empreendimento: 'A tipologia é de outro empreendimento.',
+  arquivo_invalido: 'Arquivo não aceito para esse tipo.',
+  limite_armazenamento: 'Limite de armazenamento da empresa atingido.',
+  arquivo_invalido_para_modelo: 'Escolha um modelo 3D (.glb) já verificado deste empreendimento.',
+  no_3d_em_uso: 'Essa peça do modelo já está ligada a outra unidade.',
+  sem_localizacao: 'Salve a localização do empreendimento primeiro.',
+  servico_mapa_indisponivel: 'O serviço de mapas não respondeu. Tente de novo em instantes.',
+  antivirus_indisponivel: 'O antivírus não respondeu. Tente concluir de novo.',
+  arquivo_ainda_nao_enviado: 'O arquivo ainda não chegou ao armazenamento.',
 };
 
 export function mensagem(status: number, dados: unknown): string {

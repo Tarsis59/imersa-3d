@@ -2,7 +2,8 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { Aviso, Cartao } from '@/components/ui';
 import { apiNaPagina } from '@/lib/sessao';
-import { COR_STATUS, ehGestao, ROTULO_STATUS, ROTULO_STATUS_PROJETO, STATUS_UNIDADE, type DetalheProjeto, type Me } from '@/lib/tipos';
+import { COR_STATUS, ehGestao, ROTULO_STATUS, ROTULO_STATUS_PROJETO, STATUS_UNIDADE, type Arquivo, type DetalheProjeto, type Me, type Poi } from '@/lib/tipos';
+import { SecaoArquivos, SecaoArredores } from './secoes';
 import { criarPredio, criarTipologia, importar, salvarDados } from './actions';
 import { FormDados, FormImportacao, FormPredio, FormTipologia } from './formularios';
 
@@ -39,6 +40,8 @@ export default async function PaginaProjeto({ params }: { params: Promise<{ id: 
   const { projeto, predios, tipologias, resumo } = r.dados;
   const gestao = ehGestao(me.papel);
   const podeEditar = gestao && me.mfa;
+  const arquivos = (await apiNaPagina<Arquivo[]>(`/projetos/${projeto.id}/arquivos`, volta)).dados;
+  const arredores = (await apiNaPagina<{ semLocalizacao: boolean; pois: Poi[] }>(`/projetos/${projeto.id}/pois`, volta)).dados;
 
   return (
     <>
@@ -123,6 +126,14 @@ export default async function PaginaProjeto({ params }: { params: Promise<{ id: 
           <FormImportacao previa={importar.bind(null, projeto.id, false)} aplicar={importar.bind(null, projeto.id, true)} />
         </Cartao>
       )}
+
+      <Cartao titulo="Arquivos 3D e documentos">
+        <SecaoArquivos projetoId={projeto.id} arquivos={arquivos} podeEditar={podeEditar} />
+      </Cartao>
+
+      <Cartao titulo="Localização e arredores">
+        <SecaoArredores projetoId={projeto.id} temLocalizacao={!arredores.semLocalizacao} pois={arredores.pois} podeEditar={podeEditar} />
+      </Cartao>
 
       <Cartao titulo="Dados do empreendimento">
         {podeEditar ? (

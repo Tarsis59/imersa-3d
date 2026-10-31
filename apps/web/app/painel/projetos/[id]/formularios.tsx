@@ -3,6 +3,7 @@ import { useActionState, useState } from 'react';
 import { Aviso, Botao, Campo, Selecao } from '@/components/ui';
 import { ROTULO_STATUS_PROJETO, type DetalheProjeto, type StatusProjeto } from '@/lib/tipos';
 import type { EstadoForm, EstadoImportacao, ResumoImportacao } from './actions';
+import { lerXlsx, tabelaParaCsv } from '@/lib/xlsx';
 
 type Acao<E> = (estado: E, form: FormData) => Promise<E>;
 
@@ -105,9 +106,13 @@ const ROTULOS_RESUMO: Array<[keyof ResumoImportacao, string]> = [
   ['semMudanca', 'sem mudança'],
 ];
 
-/** Excel em português costuma salvar CSV em Windows-1252; tenta UTF-8 e cai para ele se precisar. */
+/**
+ * .xlsx: lido no navegador e convertido em CSV (a importação é a mesma).
+ * CSV: o Excel em português costuma salvar em Windows-1252; tenta UTF-8 e cai para ele se precisar.
+ */
 async function lerArquivoTexto(arquivo: File): Promise<string> {
   const bytes = await arquivo.arrayBuffer();
+  if (arquivo.name.toLowerCase().endsWith('.xlsx')) return tabelaParaCsv(lerXlsx(new Uint8Array(bytes)));
   try {
     return new TextDecoder('utf-8', { fatal: true }).decode(bytes);
   } catch {
@@ -184,11 +189,11 @@ export function FormImportacao({ previa, aplicar }: { previa: Acao<EstadoImporta
         </a>
       </p>
       <label htmlFor="arquivo-csv" className="grid gap-1 text-sm">
-        <span className="font-medium">Arquivo CSV</span>
+        <span className="font-medium">Arquivo (.csv ou .xlsx)</span>
         <input
           id="arquivo-csv"
           type="file"
-          accept=".csv,text/csv"
+          accept=".csv,.xlsx,text/csv"
           className="text-sm file:mr-3 file:rounded-lg file:border file:border-borda file:bg-superficie file:px-3 file:py-2"
           onChange={async (e) => {
             const arquivo = e.target.files?.[0];

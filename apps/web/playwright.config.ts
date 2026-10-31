@@ -8,7 +8,12 @@ export default defineConfig({
   workers: 1,
   retries: 0,
   reporter: 'list',
-  use: { baseURL: 'http://localhost:3100', trace: 'retain-on-failure' },
+  use: {
+    baseURL: 'http://localhost:3100',
+    trace: 'retain-on-failure',
+    // WebGL por software no Chromium sem tela (para o visualizador 3D)
+    launchOptions: { args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader'] },
+  },
   globalSetup: './e2e/preparar.ts',
   webServer: [
     {
@@ -16,7 +21,7 @@ export default defineConfig({
       url: 'http://localhost:3334/health',
       reuseExistingServer: false,
       timeout: 60_000,
-      env: { DATABASE_URL: DB_APP, PORT: '3334', WEB_URL: 'http://localhost:3100', CORS_ORIGIN: 'http://localhost:3100', RATE_LIMIT_AUTH: '1000' },
+      env: { DATABASE_URL: DB_APP, PORT: '3334', WEB_URL: 'http://localhost:3100', CORS_ORIGIN: 'http://localhost:3100', RATE_LIMIT_AUTH: '1000', API_URL_PUBLICA: 'http://localhost:3334', ARMAZENAMENTO_PASTA: 'armazenamento-e2e' },
     },
     {
       command: 'pnpm exec next dev -p 3100',

@@ -24,3 +24,25 @@ export async function mudarStatus(predioId: string, _: EstadoStatus, form: FormD
   revalidatePath(`/painel/predios/${predioId}`);
   return { ok: 'Status alterado.', unidadeId };
 }
+
+export interface EstadoModelo {
+  erro?: string;
+  ok?: string;
+}
+
+export async function vincularModelo(predioId: string, _: EstadoModelo, form: FormData): Promise<EstadoModelo> {
+  const arquivoId = String(form.get('arquivoId') ?? '') || null;
+  const r = await api(`/predios/${predioId}/modelo`, { metodo: 'PATCH', corpo: { arquivoId }, token: await tokenParaAcao() });
+  if (r.status !== 200) return { erro: mensagem(r.status, r.dados) };
+  revalidatePath(`/painel/predios/${predioId}`);
+  return { ok: arquivoId ? 'Modelo 3D ligado ao prédio.' : 'Modelo 3D desligado do prédio.' };
+}
+
+/** Liga (ou desliga, com meshNodeId null) uma peça do modelo 3D a uma unidade. */
+export async function vincularPeca(predioId: string, unidadeId: string, meshNodeId: string | null): Promise<{ erro?: string }> {
+  const r = await api(`/unidades/${encodeURIComponent(unidadeId)}`, { metodo: 'PATCH', corpo: { meshNodeId }, token: await tokenParaAcao() });
+  if (r.status !== 200) return { erro: mensagem(r.status, r.dados) };
+  revalidatePath(`/painel/predios/${predioId}/3d`);
+  revalidatePath(`/painel/predios/${predioId}`);
+  return {};
+}

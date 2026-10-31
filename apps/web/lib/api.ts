@@ -11,7 +11,7 @@ export interface RespostaApi<T> {
 /** Chamada servidor→API. Repassa o IP do navegador para o limite de tentativas por pessoa. */
 export async function api<T = unknown>(
   caminho: string,
-  opcoes: { metodo?: 'GET' | 'POST' | 'PATCH'; corpo?: unknown; token?: string } = {},
+  opcoes: { metodo?: 'GET' | 'POST' | 'PATCH' | 'DELETE'; corpo?: unknown; token?: string } = {},
 ): Promise<RespostaApi<T>> {
   const h = await headers();
   const ip = h.get('x-forwarded-for') ?? h.get('x-real-ip');

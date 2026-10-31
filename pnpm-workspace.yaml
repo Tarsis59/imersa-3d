@@ -21,3 +21,5 @@ minimumReleaseAgeExclude:
   - '@aws-sdk/s3-request-presigner@3.1161.0'
   - '@aws-sdk/signature-v4-multi-region@3.996.51'
   - '@aws-sdk/token-providers@3.1161.0'
+  - three@0.187.0
+  - '@types/three@0.187.0'

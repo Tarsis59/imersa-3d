@@ -2,6 +2,8 @@
 .env
 .next
 .turbo
+armazenamento
+armazenamento-e2e
 coverage
 dist
 next-env.d.ts
