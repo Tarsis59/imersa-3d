@@ -2,9 +2,10 @@
 import { useEffect, useRef, useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 import * as THREE from 'three';
-import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { criarCarregadorGltf } from '@imersa/viewer';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { Aviso, Botao, Cartao, Selecao } from '@/components/ui';
+import { DECODIFICADORES } from '@/lib/decodificadores';
 import { ROTULO_STATUS, type StatusUnidade } from '@/lib/tipos';
 
 export interface UnidadeVinculo {
@@ -62,7 +63,9 @@ export function Visualizador3D({
     controles.enableDamping = true;
     let ativo = true;
 
-    new GLTFLoader().load(
+    // GLB comprimido (Meshopt/Draco/KTX2) também abre
+    const { carregador, liberar } = criarCarregadorGltf(renderer, DECODIFICADORES);
+    carregador.load(
       urlAtual.current,
       (gltf) => {
         if (!ativo) return;
@@ -112,6 +115,7 @@ export function Visualizador3D({
     });
     return () => {
       ativo = false;
+      liberar();
       window.removeEventListener('resize', aoRedimensionar);
       renderer.setAnimationLoop(null);
       controles.dispose();

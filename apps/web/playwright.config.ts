@@ -27,7 +27,7 @@ export default defineConfig({
       env: { DATABASE_URL: DB_APP, PORT: '3334', WEB_URL: 'http://localhost:3100', CORS_ORIGIN: 'http://localhost:3100', RATE_LIMIT_AUTH: '1000', API_URL_PUBLICA: 'http://localhost:3334', ARMAZENAMENTO_PASTA: 'armazenamento-e2e', MAPA_ARQUIVO_PREDIOS: PREDIOS_PAULISTA },
     },
     {
-      command: 'pnpm exec next dev -p 3100',
+      command: 'node scripts/decodificadores.mjs && pnpm exec next dev -p 3100',
       url: 'http://localhost:3100/login',
       reuseExistingServer: false,
       timeout: 180_000,

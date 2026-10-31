@@ -4,6 +4,7 @@ import { criarViewer, filtrar, filtroVazio, pontoCardeal, vetorJoystick, type Es
 import { Botao, Campo, Cartao, Selecao } from '@/components/ui';
 import { alternarFavorito, lerFavoritos, salvarFavoritos } from '@/lib/favoritos';
 import { brl, COR_STATUS, ROTULO_STATUS, STATUS_UNIDADE } from '@/lib/tipos';
+import { DECODIFICADORES } from '@/lib/decodificadores';
 import { carregarEntorno } from './actions';
 import { InteriorSplat } from './interior';
 
@@ -68,7 +69,7 @@ export function Vitrine({
     if (!el) return;
     const c = inicial.current;
     setEstado('carregando');
-    const v = criarViewer(el, { unidades: c.unidades, modeloUrl: c.modeloUrl, rotacaoGraus: c.rotacaoGraus, lat: c.lat ?? undefined, lon: c.lon ?? undefined });
+    const v = criarViewer(el, { unidades: c.unidades, modeloUrl: c.modeloUrl, rotacaoGraus: c.rotacaoGraus, lat: c.lat ?? undefined, lon: c.lon ?? undefined, decodificadores: DECODIFICADORES });
     viewer.current = v;
     let vivo = true;
     v.aoSelecionar((id) => setSelecionada(id));

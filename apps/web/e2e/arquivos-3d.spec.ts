@@ -2,7 +2,9 @@ import { test, expect } from '@playwright/test';
 import { fileURLToPath } from 'node:url';
 import { entrarComoAdminComMfa } from './ajuda';
 
-const CASA = fileURLToPath(new URL('./fixtures/casa-fzk.glb', import.meta.url));
+// casa BIM real comprimida pela ferramenta do pacote viewer (gltf-transform): 531 KB → 154 KB (Meshopt) / 135 KB (Draco)
+const CASA = fileURLToPath(new URL('./fixtures/casa-fzk-meshopt.glb', import.meta.url));
+const CASA_DRACO = fileURLToPath(new URL('./fixtures/casa-fzk-draco.glb', import.meta.url));
 
 test('arquivos e 3D: envia GLB real, recusa GLB falso, liga ao prédio e vincula peça à unidade', async ({ page, request }) => {
   test.setTimeout(300_000);
@@ -12,10 +14,10 @@ test('arquivos e 3D: envia GLB real, recusa GLB falso, liga ao prédio e vincula
   await page.getByRole('button', { name: 'Criar projeto' }).click();
   await page.getByRole('link', { name: /Casa FZK/ }).click();
 
-  // envio do modelo real (casa BIM convertida de IFC, 107 peças)
+  // envio do modelo real (casa BIM convertida de IFC, 107 peças, comprimida sem perder os nomes)
   await page.locator('#arquivo-envio').setInputFiles(CASA);
   await page.getByRole('button', { name: 'Enviar arquivo' }).click();
-  await expect(page.getByText('casa-fzk.glb enviado e verificado.')).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText('casa-fzk-meshopt.glb enviado e verificado.')).toBeVisible({ timeout: 30_000 });
   await expect(page.getByTestId('lista-arquivos').locator('[data-status-arquivo="pronto"]')).toHaveCount(1);
 
   // arquivo com extensão .glb mas conteúdo de executável é recusado
@@ -36,7 +38,7 @@ test('arquivos e 3D: envia GLB real, recusa GLB falso, liga ao prédio e vincula
 
   // modelo 3D do prédio
   await page.getByRole('link', { name: /ver espelho de vendas/ }).click();
-  await page.getByLabel('Modelo 3D do prédio').selectOption({ label: 'casa-fzk.glb' });
+  await page.getByLabel('Modelo 3D do prédio').selectOption({ label: 'casa-fzk-meshopt.glb' });
   await page.getByRole('button', { name: 'Salvar modelo' }).click();
   await expect(page.getByText('Modelo 3D ligado ao prédio.')).toBeVisible();
 
@@ -66,4 +68,19 @@ test('arquivos e 3D: envia GLB real, recusa GLB falso, liga ao prédio e vincula
   // primeira pessoa com colisão pelas paredes reais do modelo (raio contra as malhas)
   await page.getByRole('button', { name: 'Andar a pé (1ª pessoa)' }).click();
   await expect(vitrine).toHaveAttribute('data-modo', 'primeira-pessoa');
+
+  // a mesma casa em Draco (formato comum de quem exporta do Blender/Revit) também abre e as peças continuam clicáveis
+  await page.getByRole('link', { name: '← Casa' }).click();
+  await page.getByRole('link', { name: '← Casa FZK' }).click();
+  await page.locator('#arquivo-envio').setInputFiles(CASA_DRACO);
+  await page.getByRole('button', { name: 'Enviar arquivo' }).click();
+  await expect(page.getByText('casa-fzk-draco.glb enviado e verificado.')).toBeVisible({ timeout: 30_000 });
+  await page.getByRole('link', { name: /ver espelho de vendas/ }).click();
+  await page.getByLabel('Modelo 3D do prédio').selectOption({ label: 'casa-fzk-draco.glb' });
+  await page.getByRole('button', { name: 'Salvar modelo' }).click();
+  await expect(page.getByText('Modelo 3D ligado ao prédio.')).toBeVisible();
+  await page.getByRole('link', { name: 'Abrir no 3D e ligar peças às unidades' }).click();
+  await expect(visualizador).toHaveAttribute('data-estado', 'pronto', { timeout: 45_000 });
+  await visualizador.locator('canvas').click();
+  await expect(page.getByTestId('peca-selecionada')).toHaveText(/^product-[0-9a-f-]+-body$/);
 });

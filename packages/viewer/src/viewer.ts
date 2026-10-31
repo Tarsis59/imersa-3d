@@ -1,6 +1,5 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { CSM } from 'three/addons/csm/CSM.js';
 import { ORIGEM_PAULISTA } from './geo/project';
 import { sunDirection, horaSaoPauloParaUtc } from './sun/sun';
@@ -13,6 +12,7 @@ import { COR_UNIDADE, type Caixa, type UnidadeViewer } from './units/tipos';
 import { planejarVoo, enquadrar, type Pose } from './cameras/voo';
 import { passoPrimeiraPessoa, bloqueioPorCaixas, type Entrada, type EstadoPessoa, type OpcoesPasso } from './cameras/primeiraPessoa';
 import { QualidadeAdaptativa, type NivelQualidade } from './quality/adaptativa';
+import { criarCarregadorGltf, type Decodificadores } from './carregador';
 
 export type ModoCamera = 'orbita' | 'primeira-pessoa';
 
@@ -26,6 +26,8 @@ export interface ConfigViewer {
   lon?: number;
   /** Índice do nível de qualidade inicial (0 = alto). */
   qualidadeInicial?: number;
+  /** Pastas dos decodificadores Draco/KTX2 (Meshopt já vem embutido). */
+  decodificadores?: Decodificadores;
 }
 
 export interface EstadoViewer {
@@ -186,7 +188,8 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
   }
 
   async function montarModelo(url: string): Promise<void> {
-    const gltf = await new GLTFLoader().loadAsync(url);
+    const { carregador, liberar } = criarCarregadorGltf(renderer, config.decodificadores);
+    const gltf = await carregador.loadAsync(url).finally(liberar);
     const modelo = gltf.scene;
     const caixa = new THREE.Box3().setFromObject(modelo);
     const centro = caixa.getCenter(new THREE.Vector3());
