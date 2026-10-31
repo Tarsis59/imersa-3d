@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { randomBytes } from 'node:crypto';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import pg from 'pg';
@@ -11,6 +11,7 @@ import { codigoTotp } from './auth/totp';
 import { hashSenha } from './auth/senha';
 import { ArmazenamentoLocal } from './arquivos/armazenamento';
 import type { Antivirus } from './arquivos/antivirus';
+import { processarProxima, type Reconstrutor } from './capturas/worker';
 import type { ServicosMapa } from './mapa/osm';
 import type { Config } from './config';
 
@@ -353,5 +354,111 @@ describe('telemetria do viewer', () => {
     expect(r.json.porNivel).toEqual({ alto: 9, medio: 0, baixo: 2 });
     expect(r.json.celular.sessoes).toBe(5);
     expect((await req('GET', '/telemetria/viewer/resumo', undefined, outra)).json.sessoes).toBe(0);
+  });
+});
+
+describe('capturas: fotos/vídeo → 3D (fila, worker, revisão e publicação)', () => {
+  const ZIP = Buffer.concat([Buffer.from([0x50, 0x4b, 0x03, 0x04]), Buffer.alloc(200, 7)]);
+  const SOG = Buffer.concat([Buffer.from([0x50, 0x4b, 0x03, 0x04]), Buffer.from('splat comprimido')]);
+  let p = '';
+  let pastaWorker = '';
+  beforeAll(async () => {
+    p = (await req('POST', '/projetos', { nome: 'Apartamento capturado' }, admin)).json.id;
+    pastaWorker = await mkdtemp(join(tmpdir(), 'imersa-worker-'));
+  });
+  afterAll(() => rm(pastaWorker, { recursive: true, force: true }));
+
+  async function novaCaptura(token: string, nome = 'Sala 101') {
+    const d = await req('POST', `/projetos/${p}/arquivos`, { nome: 'fotos.zip', tipo: 'captura', tamanho: ZIP.length }, token);
+    expect(d.status).toBe(201);
+    expect((await enviar(d.json.envio.url, ZIP)).json.status).toBe('pronto');
+    // o site sempre avisa a API que o envio terminou (no S3 é isso que dispara a verificação): a consultora também pode
+    expect((await req('POST', `/arquivos/${d.json.id}/concluir`, {}, token)).json.status).toBe('pronto');
+    const c = await req('POST', `/projetos/${p}/capturas`, { nome, arquivoId: d.json.id }, token);
+    expect(c.status).toBe(201);
+    return c.json.id as string;
+  }
+  const chamadas: Array<{ arquivo: string; tipo: string }> = [];
+  const sucesso: Reconstrutor = async (e) => {
+    chamadas.push({ arquivo: e.arquivo, tipo: e.tipo });
+    const splat = join(e.pasta, 'cena.sog');
+    await writeFile(splat, SOG);
+    return { ok: true, splat, avisos: ['10% das fotos estão tremidas; elas serão ignoradas.'], metricas: { psnr: 27.5, gaussianas: 812345 }, rostos_desfocados: 2 };
+  };
+  const falha =
+    (erro: string, mensagem: string, detalhes: string[] = []): Reconstrutor =>
+    async () => ({ ok: false, erro, mensagem, detalhes });
+  const deps = (reconstrutor: Reconstrutor) => ({ pool, armazenamento: new ArmazenamentoLocal(pasta, 'http://api.teste', SEGREDO), reconstrutor, pastaTrabalho: pastaWorker });
+  const captura = async (id: string, token = admin) => (await req('GET', `/capturas/${id}`, undefined, token)).json;
+
+  it('consultora envia; o worker processa e deixa em revisão; a gestão vê a prévia e publica como interior do projeto', async () => {
+    const id = await novaCaptura(consultora);
+    expect(await captura(id)).toMatchObject({ status: 'na_fila', nome: 'Sala 101', origem: 'fotos' });
+    expect(await processarProxima(deps(sucesso))).toBe('ok');
+    expect(chamadas.at(-1)!.tipo).toBe('zip');
+    const c = await captura(id);
+    expect(c).toMatchObject({ status: 'revisao', tentativas: 1, mensagem: null, metricas: { psnr: 27.5, gaussianas: 812345, rostosDesfocados: 2 } });
+    expect(c.avisos).toEqual(['10% das fotos estão tremidas; elas serão ignoradas.']);
+    // ainda não é arquivo do projeto (a Vitrine não mostra antes da revisão)
+    expect((await req('GET', `/projetos/${p}/arquivos`, undefined, admin)).json.filter((a: { tipo: string }) => a.tipo === 'splat')).toHaveLength(0);
+    // prévia para a revisão
+    const previa = await req('GET', `/capturas/${id}/previa`, undefined, admin);
+    expect(previa.status).toBe(200);
+    const u = new URL(previa.json.url);
+    expect((await app.inject({ method: 'GET', url: `${u.pathname}${u.search}` })).rawPayload.equals(SOG)).toBe(true);
+    // consultora não publica; gestão publica
+    expect((await req('POST', `/capturas/${id}/publicar`, {}, consultora)).status).toBe(403);
+    const pub = await req('POST', `/capturas/${id}/publicar`, {}, admin);
+    expect(pub.status).toBe(200);
+    expect(await captura(id)).toMatchObject({ status: 'publicado', splatArquivoId: pub.json.arquivoId });
+    const splats = (await req('GET', `/projetos/${p}/arquivos`, undefined, consultora)).json.filter((a: { tipo: string }) => a.tipo === 'splat');
+    expect(splats).toEqual([expect.objectContaining({ id: pub.json.arquivoId, nome: 'Sala 101.sog', status: 'pronto', tamanho: SOG.length })]);
+    expect((await req('POST', `/capturas/${id}/publicar`, {}, admin)).json.erro).toBe('captura_nao_esta_em_revisao');
+  });
+
+  it('fila vazia: nada a fazer', async () => {
+    expect(await processarProxima(deps(sucesso))).toBe('vazia');
+  });
+
+  it('fotos ruins: erro com a mensagem e os problemas, sem nova tentativa', async () => {
+    const id = await novaCaptura(admin, 'Quarto escuro');
+    const ruins = falha('fotos_reprovadas', 'As fotos não passaram na verificação de qualidade.', ['70% das fotos estão escuras demais']);
+    expect(await processarProxima(deps(ruins))).toBe('erro');
+    expect(await captura(id)).toMatchObject({ status: 'erro', mensagem: 'As fotos não passaram na verificação de qualidade.', detalhes: ['70% das fotos estão escuras demais'] });
+    expect(await processarProxima(deps(sucesso))).toBe('vazia');
+  });
+
+  it('falha da GPU: volta para a fila uma vez; na 2ª falha vira erro; reenviar recomeça', async () => {
+    const id = await novaCaptura(admin, 'Cozinha');
+    const gpu = falha('falha_na_gpu', 'O processamento na nuvem falhou.');
+    expect(await processarProxima(deps(gpu))).toBe('erro');
+    expect(await captura(id)).toMatchObject({ status: 'na_fila', tentativas: 1 });
+    expect(await processarProxima(deps(gpu))).toBe('erro');
+    expect(await captura(id)).toMatchObject({ status: 'erro', tentativas: 2, mensagem: 'O processamento na nuvem falhou.' });
+    expect((await req('POST', `/capturas/${id}/reenviar`, {}, admin)).status).toBe(200);
+    expect(await captura(id)).toMatchObject({ status: 'na_fila', tentativas: 0, mensagem: null });
+    expect((await req('POST', `/capturas/${id}/cancelar`, {}, admin)).status).toBe(200);
+  });
+
+  it('cancelada durante o processamento: o worker não sobrescreve', async () => {
+    const id = await novaCaptura(admin, 'Varanda');
+    const cancelaNoMeio: Reconstrutor = async (e) => {
+      expect((await req('POST', `/capturas/${id}/cancelar`, {}, admin)).status).toBe(200);
+      return sucesso(e);
+    };
+    await processarProxima(deps(cancelaNoMeio));
+    expect(await captura(id)).toMatchObject({ status: 'cancelado' });
+  });
+
+  it('validação: arquivo que não é de captura ou ainda não enviado; outra empresa não vê', async () => {
+    const pdf = await req('POST', `/projetos/${p}/arquivos`, { nome: 'planta.pdf', tipo: 'documento', tamanho: 10 }, admin);
+    expect((await req('POST', `/projetos/${p}/capturas`, { nome: 'X', arquivoId: pdf.json.id }, admin)).json.erro).toBe('arquivo_invalido_para_captura');
+    const pendente = await req('POST', `/projetos/${p}/arquivos`, { nome: 'f.zip', tipo: 'captura', tamanho: 100 }, admin);
+    expect((await req('POST', `/projetos/${p}/capturas`, { nome: 'X', arquivoId: pendente.json.id }, admin)).json.erro).toBe('arquivo_invalido_para_captura');
+    const lista = await req('GET', `/projetos/${p}/capturas`, undefined, consultora);
+    expect(lista.status).toBe(200);
+    expect(lista.json.length).toBeGreaterThanOrEqual(4);
+    expect((await req('GET', `/projetos/${p}/capturas`, undefined, outra)).status).toBe(404);
+    expect((await req('GET', `/capturas/${lista.json[0].id}`, undefined, outra)).status).toBe(404);
   });
 });

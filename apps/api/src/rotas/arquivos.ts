@@ -94,7 +94,7 @@ export function rotasArquivos(app: FastifyInstance, d: Dependencias): void {
         await c.query(
           `SELECT id, nome, tipo, status, motivo_rejeicao AS "motivoRejeicao", coalesce(tamanho, tamanho_declarado)::float8 AS tamanho,
                   verificado_antivirus AS "verificadoAntivirus", criado_em AS "criadoEm"
-             FROM assets WHERE project_id = $1 ORDER BY criado_em DESC`,
+             FROM assets WHERE project_id = $1 AND status <> 'em_revisao' ORDER BY criado_em DESC`,
           [id],
         )
       ).rows;
@@ -102,7 +102,8 @@ export function rotasArquivos(app: FastifyInstance, d: Dependencias): void {
   });
 
   app.post('/projetos/:id/arquivos', async (req, reply) => {
-    const s = await exigir(req, 'empreendimento:editar');
+    // fotos/vídeo de captura: quem está no imóvel (consultora, produtor) também envia
+    const s = await exigir(req, (req.body as { tipo?: unknown } | null)?.tipo === 'captura' ? 'captura:enviar' : 'empreendimento:editar');
     const { id } = IdParam.parse(req.params);
     const n = NovoArquivo.parse(req.body);
     const erro = validarDeclaracao(n.tipo, n.nome, n.tamanho);
@@ -172,7 +173,8 @@ export function rotasArquivos(app: FastifyInstance, d: Dependencias): void {
       const q = LinkAssinado.parse(req.query);
       if (!conferirAssinatura(segredo, 'get', id, q.t, q.exp, q.sig)) throw new ErroHttp(403, 'link_invalido');
       const a = await withTenant(pool, { tenantId: q.t, userId: null }, async (c) =>
-        (await c.query<Arquivo & { tamanho: string }>("SELECT chave, nome, tamanho FROM assets WHERE id = $1 AND status = 'pronto'", [id])).rows[0],
+        // 'em_revisao': prévia de captura (o link assinado só é gerado para a gestão, na rota da captura)
+        (await c.query<Arquivo & { tamanho: string }>("SELECT chave, nome, tamanho FROM assets WHERE id = $1 AND status IN ('pronto', 'em_revisao')", [id])).rows[0],
       );
       if (!a) throw new ErroHttp(404, 'nao_encontrado');
       return reply
@@ -187,10 +189,12 @@ export function rotasArquivos(app: FastifyInstance, d: Dependencias): void {
 
   // Envio direto ao S3: o navegador avisa que terminou e a API verifica.
   app.post('/arquivos/:id/concluir', async (req) => {
-    const s = await exigir(req, 'empreendimento:editar');
     const { id } = IdParam.parse(req.params);
-    const status = await withTenant(pool, ctx(s), async (c) => (await c.query<{ status: string }>('SELECT status FROM assets WHERE id = $1', [id])).rows[0]?.status);
-    if (!status) throw new ErroHttp(404, 'nao_encontrado');
+    const a = await withTenant(pool, ctx(await exigir(req)), async (c) => (await c.query<{ status: string; tipo: string }>('SELECT status, tipo FROM assets WHERE id = $1', [id])).rows[0]);
+    if (!a) throw new ErroHttp(404, 'nao_encontrado');
+    // a mesma permissão de quem pode enviar esse tipo de arquivo
+    const s = await exigir(req, a.tipo === 'captura' ? 'captura:enviar' : 'empreendimento:editar');
+    const status = a.status;
     if (status === 'pronto' || status === 'rejeitado') return { status };
     return verificar(s.tenantId, id, s.userId, null);
   });

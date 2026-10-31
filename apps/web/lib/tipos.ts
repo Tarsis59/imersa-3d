@@ -84,7 +84,7 @@ export interface Espelho {
 const formatoReal = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL', maximumFractionDigits: 0 });
 export const brl = (v: number | null) => (v === null ? '—' : formatoReal.format(v));
 
-export type TipoArquivo = 'modelo_3d' | 'splat' | 'ifc' | 'planta' | 'imagem' | 'documento';
+export type TipoArquivo = 'modelo_3d' | 'splat' | 'ifc' | 'planta' | 'imagem' | 'documento' | 'captura';
 export const ROTULO_TIPO_ARQUIVO: Record<TipoArquivo, string> = {
   modelo_3d: 'Modelo 3D (.glb)',
   splat: 'Interior real (splat)',
@@ -92,6 +92,7 @@ export const ROTULO_TIPO_ARQUIVO: Record<TipoArquivo, string> = {
   planta: 'Planta',
   imagem: 'Imagem',
   documento: 'Documento (.pdf)',
+  captura: 'Fotos ou vídeo para 3D (.zip, .mp4, .mov)',
 };
 export const ACEITA_POR_TIPO: Record<TipoArquivo, string> = {
   modelo_3d: '.glb',
@@ -100,7 +101,35 @@ export const ACEITA_POR_TIPO: Record<TipoArquivo, string> = {
   planta: '.pdf,.png,.jpg,.jpeg,.dwg',
   imagem: '.png,.jpg,.jpeg,.webp',
   documento: '.pdf',
+  captura: '.zip,.mp4,.mov',
 };
+
+export type StatusCaptura = 'aguardando_envio' | 'na_fila' | 'processando' | 'revisao' | 'publicado' | 'erro' | 'cancelado';
+export const ROTULO_STATUS_CAPTURA: Record<StatusCaptura, string> = {
+  aguardando_envio: 'Aguardando envio',
+  na_fila: 'Na fila',
+  processando: 'Processando (GPU)',
+  revisao: 'Pronta para revisão',
+  publicado: 'Publicada',
+  erro: 'Precisa de atenção',
+  cancelado: 'Cancelada',
+};
+
+export interface Captura {
+  id: string;
+  projetoId: string;
+  nome: string;
+  status: StatusCaptura;
+  mensagem: string | null;
+  detalhes: string[];
+  avisos: string[];
+  metricas: { psnr?: number; gaussianas?: number; rostosDesfocados?: number; fotos?: number; registradas?: number; tempos_s?: Record<string, number> };
+  tentativas: number;
+  splatArquivoId: string | null;
+  origem: 'fotos' | 'video';
+  arquivoNome: string;
+  criadoEm: string;
+}
 
 export interface Arquivo {
   id: string;

@@ -8,11 +8,13 @@ export type Acao =
   | 'auditoria:ler'
   | 'empreendimento:editar'
   | 'importacao:executar'
-  | 'unidade:status';
+  | 'unidade:status'
+  | 'captura:enviar'
+  | 'captura:revisar';
 
 const TODOS: readonly Papel[] = PAPEIS;
 const GESTAO: readonly Papel[] = ['super_admin', 'admin'];
-const SENSIVEIS: readonly Acao[] = ['projeto:criar', 'membro:convidar', 'auditoria:ler', 'empreendimento:editar', 'importacao:executar', 'unidade:status'];
+const SENSIVEIS: readonly Acao[] = ['projeto:criar', 'membro:convidar', 'auditoria:ler', 'empreendimento:editar', 'importacao:executar', 'unidade:status', 'captura:revisar'];
 
 const MATRIZ: Record<Acao, readonly Papel[]> = {
   'projeto:ler': TODOS,
@@ -23,6 +25,9 @@ const MATRIZ: Record<Acao, readonly Papel[]> = {
   'importacao:executar': GESTAO,
   // A regra fina (quem faz qual transição) fica em dominio/status.ts.
   'unidade:status': [...GESTAO, 'consultora'],
+  // quem está no imóvel envia as fotos/vídeo; só a gestão publica o 3D
+  'captura:enviar': [...GESTAO, 'consultora', 'produtor'],
+  'captura:revisar': GESTAO,
 };
 
 export const pode = (papel: Papel, acao: Acao): boolean => MATRIZ[acao].includes(papel);

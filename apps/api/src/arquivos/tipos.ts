@@ -1,4 +1,4 @@
-export const TIPOS_ARQUIVO = ['modelo_3d', 'splat', 'ifc', 'planta', 'imagem', 'documento'] as const;
+export const TIPOS_ARQUIVO = ['modelo_3d', 'splat', 'ifc', 'planta', 'imagem', 'documento', 'captura'] as const;
 export type TipoArquivo = (typeof TIPOS_ARQUIVO)[number];
 
 const MB = 1024 * 1024;
@@ -10,6 +10,8 @@ export const REGRAS: Record<TipoArquivo, { extensoes: readonly string[]; maxByte
   planta: { extensoes: ['.pdf', '.png', '.jpg', '.jpeg', '.dwg'], maxBytes: 100 * MB },
   imagem: { extensoes: ['.png', '.jpg', '.jpeg', '.webp'], maxBytes: 30 * MB },
   documento: { extensoes: ['.pdf'], maxBytes: 50 * MB },
+  // fotos (ZIP) ou vídeo do celular para virar 3D
+  captura: { extensoes: ['.zip', '.mp4', '.mov'], maxBytes: 3 * 1024 * MB },
 };
 
 /** Bytes do começo do arquivo necessários para conferir a assinatura. */
@@ -38,10 +40,17 @@ const MAGIA: Record<string, Conferidor> = {
   '.jpeg': comeca([0xff, 0xd8, 0xff]),
   '.webp': (b) => b.subarray(0, 4).toString('latin1') === 'RIFF' && b.subarray(8, 12).toString('latin1') === 'WEBP',
   '.dwg': comeca('AC10'),
+  '.zip': comeca([0x50, 0x4b, 0x03, 0x04]),
+  // MP4/MOV (ISO BMFF / QuickTime): o 1º bloco começa no byte 4 com o tipo do átomo
+  '.mp4': (b) => ['ftyp', 'moov', 'mdat', 'wide', 'free', 'skip'].includes(b.subarray(4, 8).toString('latin1')),
+  '.mov': (b) => ['ftyp', 'moov', 'mdat', 'wide', 'free', 'skip'].includes(b.subarray(4, 8).toString('latin1')),
 };
 
 const CONTEUDO: Record<string, string> = {
   '.glb': 'model/gltf-binary',
+  '.zip': 'application/zip',
+  '.mp4': 'video/mp4',
+  '.mov': 'video/quicktime',
   '.pdf': 'application/pdf',
   '.png': 'image/png',
   '.jpg': 'image/jpeg',

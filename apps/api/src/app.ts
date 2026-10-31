@@ -22,6 +22,7 @@ import { rotasEmpreendimentos } from './rotas/empreendimentos';
 import { rotasArquivos } from './rotas/arquivos';
 import { rotasMapa } from './rotas/mapa';
 import { rotasTelemetria } from './rotas/telemetria';
+import { rotasCapturas } from './rotas/capturas';
 import { ArmazenamentoLocal, ArmazenamentoS3, type Armazenamento } from './arquivos/armazenamento';
 import { clamav, semAntivirus, type Antivirus } from './arquivos/antivirus';
 import { comPrediosDeArquivo, servicosMapaReais, type ServicosMapa } from './mapa/osm';
@@ -38,7 +39,7 @@ export interface Deps {
   mapa?: ServicosMapa;
 }
 
-function armazenamentoDaConfig(config: Config): Armazenamento {
+export function armazenamentoDaConfig(config: Config): Armazenamento {
   if (config.ARMAZENAMENTO === 's3') {
     const { S3_BUCKET, S3_REGIAO, S3_ACCESS_KEY, S3_SECRET_KEY } = config;
     if (!S3_BUCKET || !S3_REGIAO || !S3_ACCESS_KEY || !S3_SECRET_KEY) throw new Error('ARMAZENAMENTO=s3 exige S3_BUCKET, S3_REGIAO, S3_ACCESS_KEY e S3_SECRET_KEY');
@@ -335,10 +336,11 @@ export async function construirApp({ pool, config, logger = false, reportarErro,
   });
 
   rotasEmpreendimentos(app, { pool, exigir });
+  const arm = armazenamento ?? armazenamentoDaConfig(config);
   rotasArquivos(app, {
     pool,
     exigir,
-    armazenamento: armazenamento ?? armazenamentoDaConfig(config),
+    armazenamento: arm,
     antivirus: antivirus ?? (config.CLAMAV_HOST ? clamav(config.CLAMAV_HOST, config.CLAMAV_PORTA ?? 3310) : semAntivirus),
     segredo: config.JWT_SECRET,
     limiteBytes: (config.LIMITE_ARMAZENAMENTO_GB ?? 50) * 1024 ** 3,
@@ -346,6 +348,7 @@ export async function construirApp({ pool, config, logger = false, reportarErro,
   const mapaReal = servicosMapaReais(config.OSM_USER_AGENT ?? 'Imersa3D-dev/0.1 (ambiente de desenvolvimento)');
   rotasMapa(app, { pool, exigir, mapa: mapa ?? (config.MAPA_ARQUIVO_PREDIOS ? comPrediosDeArquivo(mapaReal, config.MAPA_ARQUIVO_PREDIOS) : mapaReal) });
   rotasTelemetria(app, { pool, exigir });
+  rotasCapturas(app, { pool, exigir, armazenamento: arm });
 
   return app;
 }

@@ -2,8 +2,9 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { Aviso, Cartao } from '@/components/ui';
 import { apiNaPagina } from '@/lib/sessao';
-import { COR_STATUS, ehGestao, ROTULO_STATUS, ROTULO_STATUS_PROJETO, STATUS_UNIDADE, type Arquivo, type DetalheProjeto, type Me, type Poi } from '@/lib/tipos';
+import { COR_STATUS, ehGestao, ROTULO_STATUS, ROTULO_STATUS_PROJETO, STATUS_UNIDADE, type Arquivo, type Captura, type DetalheProjeto, type Me, type Poi } from '@/lib/tipos';
 import { SecaoArquivos, SecaoArredores } from './secoes';
+import { SecaoCapturas } from './capturas';
 import { criarPredio, criarTipologia, importar, salvarDados } from './actions';
 import { FormDados, FormImportacao, FormPredio, FormTipologia } from './formularios';
 
@@ -42,6 +43,9 @@ export default async function PaginaProjeto({ params }: { params: Promise<{ id: 
   const podeEditar = gestao && me.mfa;
   const arquivos = (await apiNaPagina<Arquivo[]>(`/projetos/${projeto.id}/arquivos`, volta)).dados;
   const arredores = (await apiNaPagina<{ semLocalizacao: boolean; pois: Poi[] }>(`/projetos/${projeto.id}/pois`, volta)).dados;
+  const capturas = (await apiNaPagina<Captura[]>(`/projetos/${projeto.id}/capturas`, volta)).dados;
+  // quem está no imóvel (consultora, produtor) envia fotos/vídeo; só a gestão (com MFA) revisa e publica
+  const podeEnviarCaptura = gestao || me.papel === 'consultora' || me.papel === 'produtor';
 
   return (
     <>
@@ -129,6 +133,10 @@ export default async function PaginaProjeto({ params }: { params: Promise<{ id: 
 
       <Cartao titulo="Arquivos 3D e documentos">
         <SecaoArquivos projetoId={projeto.id} arquivos={arquivos} podeEditar={podeEditar} />
+      </Cartao>
+
+      <Cartao titulo="Fotos ou vídeo → 3D (interior real)">
+        <SecaoCapturas projetoId={projeto.id} capturas={capturas} podeEnviar={podeEnviarCaptura} podeRevisar={podeEditar} />
       </Cartao>
 
       <Cartao titulo="Localização e arredores">

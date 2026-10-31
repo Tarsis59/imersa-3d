@@ -33,6 +33,9 @@ describe('conteúdo real (assinatura binária)', () => {
     ['sala.sog', bytes(0x50, 0x4b, 0x03, 0x04), 1000],
     ['sala.ply', texto('ply\nformat binary'), 1000],
     ['sala.splat', bytes(1, 2, 3), 32 * 1000],
+    ['fotos.zip', bytes(0x50, 0x4b, 0x03, 0x04), 1000],
+    ['visita.mp4', texto('\u0000\u0000\u0000 ftypisom'), 1000],
+    ['visita.mov', texto('\u0000\u0000\u0000\u0014ftypqt  '), 1000],
   ])('%s confere', (nome, inicio, tamanho) => expect(conferirConteudo(nome, inicio, tamanho)).toBeNull());
 
   it.each([
@@ -41,6 +44,8 @@ describe('conteúdo real (assinatura binária)', () => {
     ['foto.jpg', bytes(0x89, 0x50, 0x4e, 0x47)],
     ['modelo.ifc', texto('glTF')],
     ['sala.spz', texto('MZ\u0090\u0000')],
+    ['fotos.zip', texto('MZ\u0090\u0000')],
+    ['visita.mp4', texto('<html><body>')],
   ])('%s com conteúdo de outro tipo é recusado', (nome, inicio) => {
     expect(conferirConteudo(nome, inicio, 1000)).toBe('o conteúdo não corresponde ao tipo do arquivo');
   });
@@ -61,5 +66,14 @@ describe('nomes', () => {
   it('tipo de conteúdo pela extensão', () => {
     expect(tipoDeConteudo('casa.glb')).toBe('model/gltf-binary');
     expect(tipoDeConteudo('sala.spz')).toBe('application/octet-stream');
+  });
+});
+
+describe('captura (fotos ZIP ou vídeo do celular)', () => {
+  it('aceita .zip, .mp4 e .mov até 3 GB; recusa outras extensões', () => {
+    expect(validarDeclaracao('captura', 'fotos.zip', 2900 * MB)).toBeNull();
+    expect(validarDeclaracao('captura', 'visita.MOV', 100 * MB)).toBeNull();
+    expect(validarDeclaracao('captura', 'fotos.rar', 10)).toMatch(/extensão não aceita/);
+    expect(validarDeclaracao('captura', 'visita.mp4', 3100 * MB)).toMatch(/limite/);
   });
 });

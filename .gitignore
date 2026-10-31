@@ -11,3 +11,4 @@ node_modules
 playwright-report
 test-results
 apps/web/public/decodificadores/
+apps/api/trabalho-worker*/

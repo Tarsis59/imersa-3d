@@ -13,7 +13,7 @@ const ROTULO_STATUS_ARQUIVO: Record<Arquivo['status'], string> = {
 };
 
 /** PUT direto no armazenamento (link assinado), com progresso. */
-function enviarComProgresso(url: string, cabecalhos: Record<string, string>, arquivo: File, aoProgredir: (p: number) => void): Promise<number> {
+export function enviarComProgresso(url: string, cabecalhos: Record<string, string>, arquivo: File, aoProgredir: (p: number) => void): Promise<number> {
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
     xhr.open('PUT', url);

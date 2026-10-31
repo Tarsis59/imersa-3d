@@ -1,6 +1,9 @@
 -- Capturas: fotos (ZIP) ou vídeo de um imóvel → 3D (Gaussian Splatting) pelo motor de reconstrução.
 ALTER TABLE assets DROP CONSTRAINT assets_tipo_check;
 ALTER TABLE assets ADD CONSTRAINT assets_tipo_check CHECK (tipo IN ('modelo_3d', 'splat', 'ifc', 'planta', 'imagem', 'documento', 'captura'));
+-- Splat gerado por uma captura fica 'em_revisao' (fora das listas e da Vitrine) até a gestão publicar.
+ALTER TABLE assets DROP CONSTRAINT assets_status_check;
+ALTER TABLE assets ADD CONSTRAINT assets_status_check CHECK (status IN ('aguardando_envio', 'verificando', 'pronto', 'rejeitado', 'em_revisao'));
 
 CREATE TABLE capturas (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -17,9 +20,7 @@ CREATE TABLE capturas (
   tentativas integer NOT NULL DEFAULT 0 CHECK (tentativas BETWEEN 0 AND 20),
   -- última vez que o worker deu sinal de vida (captura parada há muito tempo volta para a fila)
   trabalho_em timestamptz,
-  -- splat gerado, guardado no armazenamento até a publicação (só vira arquivo do projeto ao publicar)
-  resultado_chave text CHECK (length(resultado_chave) <= 500),
-  resultado_tamanho bigint CHECK (resultado_tamanho >= 0),
+  -- splat gerado ('em_revisao' até publicar)
   splat_asset_id uuid,
   criado_por uuid DEFAULT app_user_id() REFERENCES users (id) ON DELETE SET NULL,
   criado_em timestamptz NOT NULL DEFAULT now(),
