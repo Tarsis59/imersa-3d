@@ -1,0 +1,54 @@
+# Render (Blueprint): API do Imersa 3D no plano grátis. Painel do Render → New → Blueprint → este repositório.
+# O plano grátis desliga após 15 min sem visitas (a 1ª visita depois leva ~1 min para acordar). Por isso as capturas
+# 3D ficam desligadas aqui (WORKER_CAPTURAS=false) e rodam no GitHub Actions (.github/workflows/capturas.yml).
+# Webhooks e retenção LGPD rodam aqui enquanto a API está acordada (os eventos só nascem com ela acordada).
+services:
+  - type: web
+    name: imersa-api
+    runtime: docker
+    dockerfilePath: infra/producao/Dockerfile
+    dockerContext: .
+    plan: free
+    region: virginia
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      # Supabase: usar o SESSION POOLER (IPv4; o Render não sai por IPv6). Ver docs/planos/PRODUCAO-GRATUITA.md
+      - key: DATABASE_URL
+        sync: false
+      - key: DATABASE_URL_OWNER
+        sync: false
+      - key: JWT_SECRET
+        generateValue: true
+      - key: TOTP_KEY
+        sync: false
+      - key: ARMAZENAMENTO
+        value: s3
+      - key: S3_BUCKET
+        sync: false
+      - key: S3_REGIAO
+        sync: false
+      - key: S3_ENDPOINT
+        sync: false
+      - key: S3_ACCESS_KEY
+        sync: false
+      - key: S3_SECRET_KEY
+        sync: false
+      - key: WEB_URL
+        sync: false
+      - key: CORS_ORIGIN
+        sync: false
+      - key: API_URL_PUBLICA
+        sync: false
+      - key: OSM_USER_AGENT
+        sync: false
+      - key: TRUST_PROXY
+        value: 'true'
+      - key: WEBHOOK_PERMITIR_LOCAL
+        value: 'false'
+      - key: WORKER_CAPTURAS
+        value: 'false'
+      - key: AMBIENTE
+        value: producao
+      - key: SENTRY_DSN
+        sync: false

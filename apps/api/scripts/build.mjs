@@ -4,6 +4,8 @@ import { build } from 'esbuild';
 const banner = { js: "import { createRequire as __criarRequire } from 'node:module'; const require = __criarRequire(import.meta.url);" };
 const entradas = [
   ['src/server.ts', 'dist/server.mjs'],
+  ['src/worker.ts', 'dist/worker.mjs'],
+  ['src/tudo.ts', 'dist/tudo.mjs'],
   ['../../packages/db/src/migrate-cli.ts', 'dist/migrate.mjs'],
 ];
 

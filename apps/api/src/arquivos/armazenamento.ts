@@ -160,6 +160,10 @@ export class ArmazenamentoS3 implements Armazenamento {
       region: cfg.regiao,
       endpoint: cfg.endpoint,
       forcePathStyle: Boolean(cfg.endpoint),
+      // checksum só quando a operação exige: senão a URL pré-assinada leva o CRC32 de um corpo vazio
+      // e o bucket recusa o arquivo enviado pelo navegador (S3 compatíveis e a própria AWS)
+      requestChecksumCalculation: 'WHEN_REQUIRED',
+      responseChecksumValidation: 'WHEN_REQUIRED',
       credentials: { accessKeyId: cfg.accessKeyId, secretAccessKey: cfg.secretAccessKey },
     });
   }

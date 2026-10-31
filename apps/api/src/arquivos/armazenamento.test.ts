@@ -68,6 +68,9 @@ describe('armazenamento S3 (URL pré-assinada gerada offline)', () => {
     expect(u.searchParams.get('X-Amz-Expires')).toBe('900');
     expect(u.searchParams.get('X-Amz-Signature')).toMatch(/^[0-9a-f]{64}$/);
     expect(envio.cabecalhos).toEqual({ 'content-type': 'model/gltf-binary' });
+    // sem checksum calculado na hora de assinar: o SDK assinaria o CRC32 de um corpo VAZIO e o bucket
+    // recusaria o arquivo de verdade que o navegador envia depois (Supabase, R2, B2 e a própria AWS)
+    expect([...u.searchParams.keys()].filter((k) => k.toLowerCase().includes('checksum'))).toEqual([]);
   });
 
   it('download assinado com nome do arquivo', async () => {

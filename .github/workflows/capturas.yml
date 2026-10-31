@@ -1,0 +1,52 @@
+# Capturas (fotos/vídeo → 3D) na hospedagem grátis: o serviço da API (Render grátis) desliga sem visitas e mataria
+# um processamento de ~1 h no meio. Aqui roda de hora em hora (ou na hora, pelo botão "Run workflow"), processa a
+# fila até esvaziar e termina. O treino roda na GPU grátis do Kaggle; este job só valida, desfoca rostos e comprime.
+# Liga com a variável do repositório CAPTURAS_ATIVAS=true (Settings → Secrets and variables → Actions).
+name: Capturas 3D
+
+on:
+  schedule:
+    - cron: '17 * * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: capturas
+  cancel-in-progress: false
+
+jobs:
+  fila:
+    if: ${{ vars.CAPTURAS_ATIVAS == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      JWT_SECRET: ${{ secrets.JWT_SECRET }}
+      TOTP_KEY: ${{ secrets.TOTP_KEY }}
+      ARMAZENAMENTO: s3
+      S3_BUCKET: ${{ secrets.S3_BUCKET }}
+      S3_REGIAO: ${{ secrets.S3_REGIAO }}
+      S3_ENDPOINT: ${{ secrets.S3_ENDPOINT }}
+      S3_ACCESS_KEY: ${{ secrets.S3_ACCESS_KEY }}
+      S3_SECRET_KEY: ${{ secrets.S3_SECRET_KEY }}
+      KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
+      KAGGLE_KEY: ${{ secrets.KAGGLE_KEY }}
+      RECONSTRUTOR: python
+      RECONSTRUCAO_PYTHON: python
+      AMBIENTE: producao
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Dependências
+        run: |
+          pnpm install --frozen-lockfile --filter "@imersa/api..."
+          pip install "numpy>=2.0" "opencv-python-headless>=4.10" "kaggle>=2.2"
+          npm install -g --no-audit --no-fund @playcanvas/splat-transform@3.10.3
+      - name: Processar a fila
+        run: pnpm --filter @imersa/api exec tsx src/worker.ts --uma-vez
