@@ -46,6 +46,22 @@ test('sol e vista: horas de sol por unidade (com a sombra dos prédios reais), f
   await page.getByRole('button', { name: 'Limpar filtros' }).click();
   await expect(page.getByTestId('contagem-filtro')).toHaveText('24 de 24 unidades');
 
+  // simulador de financiamento (SAC e Price) e comparador de unidades
+  await lista.getByRole('button', { name: /^601/ }).click();
+  await page.getByTestId('simulador').getByText('Simular financiamento').click();
+  await expect(page.getByTestId('parcela-sac')).toHaveText(/^R\$\s?\d{1,3}(\.\d{3})*(,\d{2})?$/);
+  await expect(page.getByTestId('parcela-price')).toHaveText(/^R\$\s?\d{1,3}(\.\d{3})*(,\d{2})?$/);
+  await page.getByRole('button', { name: 'Comparar', exact: true }).click();
+  await lista.getByRole('button', { name: /^602/ }).click();
+  await page.getByRole('button', { name: 'Comparar', exact: true }).click();
+  const comparador = page.getByTestId('comparador');
+  await expect(comparador).toContainText('601');
+  await expect(comparador).toContainText('602');
+  await expect(comparador).toContainText('Preço por m²');
+  await page.getByRole('button', { name: 'Ouvir' }).click(); // narração pela voz do navegador (não pode quebrar a tela)
+  await page.getByRole('button', { name: 'Limpar comparação' }).click();
+  await expect(comparador).toHaveCount(0);
+
   // vista da janela: câmera na varanda da unidade, olhando para fora; voltar ao prédio
   await lista.getByRole('button', { name: /^601/ }).click();
   await page.getByRole('button', { name: 'Ver a vista desta unidade' }).click();

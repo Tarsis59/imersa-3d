@@ -11,10 +11,34 @@ import type { ResultadoEntorno } from './actions';
 import { InteriorSplat } from './interior';
 import { Giro360 } from './giro';
 import { Assistente, type AcaoAssistente } from './assistente';
+import { SimuladorFinanciamento } from './simulador';
 
 const ROTULO_NIVEL = { alto: 'alta', medio: 'média', baixo: 'baixa' } as const;
 const ROTULO_SOL: Record<PeriodoDeSol, string> = { manha: 'Sol da manhã', tarde: 'Sol da tarde', 'dia-todo': 'Sol o dia todo', 'pouco-sol': 'Pouco sol direto' };
 const horas = (h: number) => `${h.toLocaleString('pt-BR')} h`;
+const MAX_COMPARAR = 3;
+
+/** Texto falado da unidade (narração pela voz do próprio navegador, em português). */
+function textoDaUnidade(u: UnidadeViewer, andar: string, sol: EstudoSolar | undefined): string {
+  const partes = [`Unidade ${u.codigo}, ${andar}`];
+  if (u.quartos !== null) partes.push(`${u.quartos} ${u.quartos === 1 ? 'quarto' : 'quartos'}`);
+  if (u.areaM2 !== null) partes.push(`${u.areaM2.toLocaleString('pt-BR')} metros quadrados`);
+  if (sol) partes.push(`${ROTULO_SOL[sol.periodo].toLowerCase()}, com ${sol.inverno.toLocaleString('pt-BR')} horas de sol direto no inverno`);
+  if (u.status === 'disponivel' && u.preco !== null) partes.push(`por ${brl(u.preco)}`);
+  return `${partes.join(', ')}.`;
+}
+
+function narrar(texto: string): boolean {
+  if (typeof window === 'undefined' || !('speechSynthesis' in window)) return false;
+  window.speechSynthesis.cancel();
+  const fala = new SpeechSynthesisUtterance(texto);
+  fala.lang = 'pt-BR';
+  const voz = window.speechSynthesis.getVoices().find((v) => v.lang.toLowerCase().startsWith('pt-br')) ?? window.speechSynthesis.getVoices().find((v) => v.lang.toLowerCase().startsWith('pt'));
+  if (voz) fala.voice = voz;
+  fala.rate = 1.02;
+  window.speechSynthesis.speak(fala);
+  return true;
+}
 const hoje = () => new Date().toISOString().slice(0, 10);
 const horaLegivel = (h: number) => `${String(Math.floor(h)).padStart(2, '0')}:${String(Math.round((h % 1) * 60)).padStart(2, '0')}`;
 const filtroAtivo = (f: Filtro) => f.quartos.length > 0 || f.areaMin !== null || f.precoMax !== null || f.status.length > 0 || f.somenteFavoritos;
@@ -226,6 +250,10 @@ export function Vitrine({
   const ativo = filtroAtivo(filtro) || filtroSol.length > 0;
   // vista da janela da unidade (câmera na varanda)
   const [vista, setVista] = useState<string | null>(null);
+  // comparar unidades lado a lado (até 3)
+  const [comparar, setComparar] = useState<string[]>([]);
+  const [podeNarrar, setPodeNarrar] = useState(false);
+  useEffect(() => setPodeNarrar('speechSynthesis' in window), []);
   // dentro do apartamento (primeira pessoa) e o elevador que leva até ele
   const [interior, setInterior] = useState<string | null>(null);
   const [elevador, setElevador] = useState<{ destino: number; atual: number; nome: string } | null>(null);
@@ -287,6 +315,8 @@ export function Vitrine({
     setVista(null);
     setInterior(null);
     setElevador(null);
+    setComparar([]);
+    if ('speechSynthesis' in window) window.speechSynthesis.cancel();
     setSelecionada(null);
     setAndarCorte('');
     setInteriorAberto(null);
@@ -523,6 +553,7 @@ export function Vitrine({
                   </span>
                 </div>
               )}
+              {unidade.status === 'disponivel' && unidade.preco !== null && <SimuladorFinanciamento key={unidade.id} preco={unidade.preco} />}
               <div className="flex flex-wrap gap-2">
                 <Botao type="button" variante="secundario" onClick={() => favoritar(unidade.id)} aria-pressed={favoritos.has(unidade.id)}>
                   {favoritos.has(unidade.id) ? '★ Favorita' : '☆ Favoritar'}
@@ -530,6 +561,20 @@ export function Vitrine({
                 <Botao type="button" variante="secundario" onClick={() => voar(unidade.id)}>
                   Ir até ela
                 </Botao>
+                <Botao
+                  type="button"
+                  variante="secundario"
+                  aria-pressed={comparar.includes(unidade.id)}
+                  disabled={!comparar.includes(unidade.id) && comparar.length >= MAX_COMPARAR}
+                  onClick={() => setComparar((c) => (c.includes(unidade.id) ? c.filter((x) => x !== unidade.id) : [...c, unidade.id]))}
+                >
+                  {comparar.includes(unidade.id) ? '✓ Comparando' : 'Comparar'}
+                </Botao>
+                {podeNarrar && (
+                  <Botao type="button" variante="secundario" onClick={() => narrar(textoDaUnidade(unidade, nomeAndar.get(unidade.andar) ?? `${unidade.andar}º andar`, solar.get(unidade.id)))}>
+                    Ouvir
+                  </Botao>
+                )}
                 {interior !== unidade.id && (
                   <Botao type="button" variante="secundario" disabled={estado !== 'pronto' || elevador !== null} onClick={() => entrar(unidade)}>
                     Entrar no apartamento
@@ -557,6 +602,57 @@ export function Vitrine({
           </Cartao>
         )}
 
+        {comparar.length >= 2 && (
+          <Cartao titulo="Comparar unidades">
+            <div className="overflow-x-auto" data-testid="comparador">
+              <table className="w-full text-left text-sm">
+                <thead>
+                  <tr>
+                    <th className="py-1 pr-2 font-medium text-suave" scope="col">
+                      <span className="sr-only">Item</span>
+                    </th>
+                    {comparar.map((id) => (
+                      <th key={id} scope="col" className="py-1 pr-2 font-semibold">
+                        {unidadesAtuais.find((u) => u.id === id)?.codigo}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {(
+                    [
+                      ['Situação', (u: UnidadeViewer) => ROTULO_STATUS[u.status]],
+                      ['Andar', (u: UnidadeViewer) => nomeAndar.get(u.andar) ?? String(u.andar)],
+                      ['Quartos', (u: UnidadeViewer) => (u.quartos === null ? '—' : String(u.quartos))],
+                      ['Área', (u: UnidadeViewer) => (u.areaM2 === null ? '—' : `${u.areaM2.toLocaleString('pt-BR')} m²`)],
+                      ['Preço', (u: UnidadeViewer) => brl(u.preco)],
+                      ['Preço por m²', (u: UnidadeViewer) => (u.preco !== null && u.areaM2 ? brl(Math.round(u.preco / u.areaM2)) : '—')],
+                      ['Sol', (u: UnidadeViewer) => (solar.get(u.id) ? ROTULO_SOL[solar.get(u.id)!.periodo] : '—')],
+                      ['Sol no inverno', (u: UnidadeViewer) => (solar.get(u.id) ? horas(solar.get(u.id)!.inverno) : '—')],
+                    ] as const
+                  ).map(([rotulo, valor]) => (
+                    <tr key={rotulo} className="border-t border-borda">
+                      <th scope="row" className="py-1 pr-2 font-normal text-suave">
+                        {rotulo}
+                      </th>
+                      {comparar.map((id) => {
+                        const u = unidadesAtuais.find((x) => x.id === id);
+                        return (
+                          <td key={id} className="py-1 pr-2">
+                            {u ? valor(u) : '—'}
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              <Botao type="button" variante="secundario" className="mt-2" onClick={() => setComparar([])}>
+                Limpar comparação
+              </Botao>
+            </div>
+          </Cartao>
+        )}
         {assistenteUrl && (
           <Cartao titulo="Pergunte ao assistente">
             <Assistente url={assistenteUrl} aoAcao={aoAcaoIA} />
