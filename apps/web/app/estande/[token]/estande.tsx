@@ -7,7 +7,7 @@ import { conferir, inicial, tocar, type EstadoEstande } from '@/lib/estande';
 import type { Portal } from '@/lib/tipos';
 import type { DadosSinal, enviarSinal } from './actions';
 
-type EventoApi = { tipo: 'abriu' | 'unidade' | 'favorito' | 'interior' | 'tempo' | 'tour_lazer'; unidadeId?: string; duracaoS?: number };
+type EventoApi = { tipo: 'abriu' | 'unidade' | 'favorito' | 'interior' | 'tempo' | 'tour_lazer' | 'missao'; unidadeId?: string; duracaoS?: number; missao?: string };
 /** O PC do estande fica dias ligado: recarrega (memória limpa, versão nova do site) quando está só apresentando. */
 const RECARGA_H = 12;
 

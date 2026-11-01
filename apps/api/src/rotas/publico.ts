@@ -26,11 +26,16 @@ interface Dependencias {
 const DOWNLOAD_S = 60 * 60;
 const TokenLink = z.object({ token: z.string().regex(/^[\w-]{43}$/) });
 const TokenArquivo = TokenLink.extend({ id: z.uuid() });
-const TIPOS_EVENTO = ['abriu', 'unidade', 'favorito', 'interior', 'tempo', 'tour_lazer'] as const;
+const TIPOS_EVENTO = ['abriu', 'unidade', 'favorito', 'interior', 'tempo', 'tour_lazer', 'missao'] as const;
+export const MISSOES = ['lazer', 'tipologias', 'por_dentro', 'por_do_sol', 'a_pe'] as const;
 const Eventos = z.object({
   sessao: z.uuid(),
   eventos: z
-    .array(z.object({ tipo: z.enum(TIPOS_EVENTO), unidadeId: z.uuid().optional(), duracaoS: z.number().int().min(0).max(86_400).optional() }))
+    .array(
+      z
+        .object({ tipo: z.enum(TIPOS_EVENTO), unidadeId: z.uuid().optional(), duracaoS: z.number().int().min(0).max(86_400).optional(), missao: z.enum(MISSOES).optional() })
+        .refine((e) => (e.tipo === 'missao') === (e.missao !== undefined), { message: 'missão só no evento de missão', path: ['missao'] }),
+    )
     .min(1)
     .max(50),
 });
@@ -176,14 +181,14 @@ export function rotasPublicas(app: FastifyInstance, { pool, armazenamento, entor
     await withTenant(pool, daEmpresa(l), async (c) => {
       const validas = await unidadesDoPredio(c, l, d.eventos.flatMap((e) => (e.unidadeId ? [e.unidadeId] : [])));
       await c.query(
-        `INSERT INTO view_events (link_id, sessao, tipo, unit_id, duracao_s, ip, navegador)
-         SELECT $1, $2, e.tipo, e.unidade, e.duracao, $3, $4 FROM jsonb_to_recordset($5::jsonb) AS e(tipo text, unidade uuid, duracao integer)`,
+        `INSERT INTO view_events (link_id, sessao, tipo, unit_id, duracao_s, missao, ip, navegador)
+         SELECT $1, $2, e.tipo, e.unidade, e.duracao, e.missao, $3, $4 FROM jsonb_to_recordset($5::jsonb) AS e(tipo text, unidade uuid, duracao integer, missao text)`,
         [
           l.linkId,
           d.sessao,
           req.ip,
           navegador,
-          JSON.stringify(d.eventos.map((e) => ({ tipo: e.tipo, unidade: e.unidadeId && validas.has(e.unidadeId) ? e.unidadeId : null, duracao: e.duracaoS ?? null }))),
+          JSON.stringify(d.eventos.map((e) => ({ tipo: e.tipo, unidade: e.unidadeId && validas.has(e.unidadeId) ? e.unidadeId : null, duracao: e.duracaoS ?? null, missao: e.missao ?? null }))),
         ],
       );
     });

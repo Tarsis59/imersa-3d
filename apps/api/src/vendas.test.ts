@@ -461,3 +461,31 @@ describe('lazer do empreendimento (tour na Vitrine)', () => {
     expect((await req('GET', `/predios/${torreA}/lazer`, undefined, ana)).json).toHaveLength(1);
   });
 });
+
+describe('missões e conquistas (Plano 11d)', () => {
+  it('missão completa vira evento, esquenta o lead (quente com 3) e vai para os Números e para o CRM', async () => {
+    const link = tokenDe((await novoLink(bia)).json.url);
+    const sessao = randomUUID();
+    // missão sem nome ou nome de missão em outro evento: recusado
+    expect((await req('POST', `/publico/links/${link}/eventos`, { sessao, eventos: [{ tipo: 'missao' }] })).status).toBe(400);
+    expect((await req('POST', `/publico/links/${link}/eventos`, { sessao, eventos: [{ tipo: 'abriu', missao: 'lazer' }] })).status).toBe(400);
+    expect((await req('POST', `/publico/links/${link}/eventos`, { sessao, eventos: [{ tipo: 'missao', missao: 'voar' }] })).status).toBe(400);
+
+    const ok = await req('POST', `/publico/links/${link}/eventos`, { sessao, eventos: [{ tipo: 'abriu' }, { tipo: 'missao', missao: 'lazer' }, { tipo: 'missao', missao: 'por_dentro' }] });
+    expect(ok.status).toBe(204);
+    const lead1 = await req('POST', `/publico/links/${link}/leads`, { nome: 'Cliente Morno', telefone: '41999990000', consentimento: true, textoConsentimento: CONSENTIMENTO });
+    expect(lead1.status).toBe(201);
+    let leads = (await req('GET', '/leads', undefined, gestao)).json as Array<{ id: string; temperatura: string; missoes: string[] }>;
+    expect(leads.find((l) => l.id === lead1.json.id)).toMatchObject({ temperatura: 'morno', missoes: ['lazer', 'por_dentro'] });
+
+    await req('POST', `/publico/links/${link}/eventos`, { sessao, eventos: [{ tipo: 'missao', missao: 'por_do_sol' }] });
+    leads = (await req('GET', '/leads', undefined, gestao)).json;
+    expect(leads.find((l) => l.id === lead1.json.id)).toMatchObject({ temperatura: 'quente', missoes: ['lazer', 'por_dentro', 'por_do_sol'] });
+
+    // o CRM recebe a mesma temperatura (a função é a do webhook de lead criado)
+    expect((await owner.query<{ t: string }>('SELECT temperatura_do_link(link_id) AS t FROM leads WHERE id = $1', [lead1.json.id])).rows[0]!.t).toBe('quente');
+
+    const n = (await req('GET', `/projetos/${projeto}/numeros?dias=30`, undefined, gestao)).json;
+    expect(n.missoes).toMatchObject({ lazer: 1, por_dentro: 1, por_do_sol: 1, tipologias: 0, a_pe: 0 });
+  });
+});

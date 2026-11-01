@@ -13,6 +13,7 @@ import { Giro360 } from './giro';
 import { Assistente, type AcaoAssistente } from './assistente';
 import { ComandoVitrine } from './comando';
 import type { AcaoComando } from '@/lib/comandos';
+import { ehPorDoSol, MISSOES, PASSEIO_M, progressoTipologias, somarCaminhada, type IdMissao } from '@/lib/missoes';
 import { SimuladorFinanciamento } from './simulador';
 import { CartaoLazer, PainelDoPonto, passoDoTourMs, rotuloDoPonto, type EstadoTour } from './lazer';
 import type { NovoLazer } from './actions';
@@ -54,7 +55,7 @@ function alternar<T>(lista: T[], x: T): T[] {
 }
 
 /** O que o visitante fez, para os números de vendas (portal público). */
-export type EventoVitrine = { tipo: 'unidade' | 'favorito'; unidadeId: string } | { tipo: 'interior' } | { tipo: 'tour_lazer' };
+export type EventoVitrine = { tipo: 'unidade' | 'favorito'; unidadeId: string } | { tipo: 'interior' } | { tipo: 'tour_lazer' } | { tipo: 'missao'; missao: IdMissao };
 
 type EstadoEntorno = { tipo: 'carregando' } | { tipo: 'pronto'; predios: number; atribuicao: string } | { tipo: 'sem_localizacao' } | { tipo: 'indisponivel' };
 
@@ -691,6 +692,57 @@ export function Vitrine({
     setSelecionada(id);
     viewer.current?.voarPara(id);
   };
+  // missões e conquistas: cada uma conta uma vez por visita, vira evento e mostra o selo
+  const [missoes, setMissoes] = useState<ReadonlySet<IdMissao>>(() => new Set());
+  const [conquista, setConquista] = useState<string | null>(null);
+  // fora do atualizador de estado: o modo estrito do React roda o atualizador duas vezes (evento em dobro)
+  const feitas = useRef(new Set<IdMissao>());
+  const completar = (id: IdMissao) => {
+    if (feitas.current.has(id)) return;
+    feitas.current.add(id);
+    aoEvento?.({ tipo: 'missao', missao: id });
+    setConquista(MISSOES.find((x) => x.id === id)!.titulo);
+    setMissoes(new Set(feitas.current));
+  };
+  useEffect(() => {
+    if (!conquista) return;
+    const t = setTimeout(() => setConquista(null), 4000);
+    return () => clearTimeout(t);
+  }, [conquista]);
+  const [vistasParaMissao, setVistasParaMissao] = useState<ReadonlySet<string>>(() => new Set());
+  useEffect(() => {
+    if (selecionada) setVistasParaMissao((v) => (v.has(selecionada) ? v : new Set([...v, selecionada])));
+  }, [selecionada]);
+  const tipologias = progressoTipologias(vistasParaMissao, unidades);
+  useEffect(() => {
+    if (tipologias.meta > 0 && tipologias.vistos >= tipologias.meta) completar('tipologias');
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- completar só muda o estado das missões
+  }, [tipologias.vistos, tipologias.meta]);
+  useEffect(() => {
+    if (interior) completar('por_dentro');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [interior]);
+  useEffect(() => {
+    if (ehPorDoSol(horaSol, vista !== null || interior !== null)) completar('por_do_sol');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [horaSol, vista, interior]);
+  useEffect(() => {
+    if (tour?.completo) completar('lazer');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tour?.completo]);
+  const caminhada = useRef<{ total: number; ultimo: { x: number; z: number } | null }>({ total: 0, ultimo: null });
+  useEffect(() => {
+    if (!telemetria || telemetria.modo !== 'primeira-pessoa') {
+      caminhada.current.ultimo = null;
+      return;
+    }
+    const c = caminhada.current;
+    c.total = somarCaminhada(c.total, c.ultimo, telemetria.posicao);
+    c.ultimo = { x: telemetria.posicao.x, z: telemetria.posicao.z };
+    if (c.total >= PASSEIO_M) completar('a_pe');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [telemetria]);
+
   // comandos por texto/voz (e os que a IA pede): cada ação mexe só na tela; devolve o que não deu para fazer
   const [perguntaAssistente, setPerguntaAssistente] = useState<{ texto: string; vez: number } | null>(null);
   const executarComandos = (acoes: AcaoComando[]): string[] => {
@@ -808,6 +860,7 @@ export function Vitrine({
         data-moradores={telemetria?.moradores ?? 0}
         data-decorado={telemetria?.decorado ?? 0}
         data-fotos={qtdFotos}
+        data-missoes={missoes.size}
         data-terceira={telemetria?.terceiraPessoa ? 'sim' : 'nao'}
         data-boneco={telemetria?.boneco ?? ''}
         data-no-ar={telemetria?.noAr ? 'sim' : 'nao'}
@@ -900,6 +953,11 @@ export function Vitrine({
           />
         )}
         {progressoGiro && <p className="absolute inset-x-0 bottom-12 mx-auto w-fit rounded-md bg-black/70 px-3 py-1 text-sm text-white">{progressoGiro}</p>}
+        {conquista && (
+          <p role="status" data-testid="conquista" className="pointer-events-none absolute inset-x-0 top-14 mx-auto w-fit rounded-full bg-amber-400 px-4 py-2 text-sm font-bold text-slate-900 shadow-lg">
+            🏅 Conquista: {conquista}
+          </p>
+        )}
         {fotoAberta && (
           <div role="dialog" aria-modal="true" aria-label={`Foto: ${fotoAberta.nome}`} data-testid="foto-aberta" className="fixed inset-0 z-50 grid place-items-center bg-black/85 p-4" onClick={() => setFotoAberta(null)}>
             {/* eslint-disable-next-line @next/next/no-img-element -- link assinado temporário, fora do otimizador de imagens */}
@@ -1064,6 +1122,22 @@ export function Vitrine({
             </div>
           </Cartao>
         )}
+        <Cartao titulo={`Missões · ${missoes.size} de ${MISSOES.length}`}>
+          <ul className="grid gap-2 text-sm" data-testid="missoes" data-feitas={missoes.size}>
+            {MISSOES.map((m) => (
+              <li key={m.id} className="flex items-start gap-2" data-missao={m.id} data-feita={missoes.has(m.id) ? 'sim' : 'nao'}>
+                <span aria-hidden className={missoes.has(m.id) ? 'text-amber-500' : 'text-suave'}>
+                  {missoes.has(m.id) ? '🏅' : '○'}
+                </span>
+                <span>
+                  <span className={missoes.has(m.id) ? 'font-semibold' : ''}>{m.titulo}</span>
+                  {m.id === 'tipologias' && !missoes.has(m.id) && tipologias.meta > 0 && <span className="text-suave"> ({tipologias.vistos} de {tipologias.meta})</span>}
+                  {!missoes.has(m.id) && <span className="block text-xs text-suave">{m.dica}</span>}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </Cartao>
         <Cartao titulo="Peça o que quiser ver">
           <ComandoVitrine
             pronto={estado === 'pronto'}

@@ -107,7 +107,10 @@ export function rotasVendas(app: FastifyInstance, { pool, exigir, webUrl }: Depe
         await c.query(
           `SELECT x.id, x.nome, x.telefone, x.email, x.mensagem, x.status, x.criado_em AS "criadoEm",
                   un.codigo AS unidade, b.nome AS predio, b.id AS "predioId", p.nome AS projeto, p.id AS "projetoId",
-                  u.nome AS consultora, l.titulo AS link
+                  u.nome AS consultora, l.titulo AS link,
+                  temperatura_do_link(x.link_id) AS temperatura,
+                  coalesce((SELECT array_agg(DISTINCT e.missao ORDER BY e.missao) FROM view_events e
+                             WHERE e.link_id = x.link_id AND e.tipo = 'missao' AND e.criado_em > now() - interval '30 days'), '{}') AS missoes
              FROM leads x
              JOIN share_links l ON l.id = x.link_id
              JOIN users u ON u.id = l.criado_por
@@ -159,12 +162,13 @@ export function rotasVendas(app: FastifyInstance, { pool, exigir, webUrl }: Depe
         )`;
       const p = [id, dela, dias];
       const t = (
-        await c.query<{ visitas: number; interiores: number; toursLazer: number; tempo: number | null; leads: number }>(
+        await c.query<{ visitas: number; interiores: number; toursLazer: number; tempo: number | null; leads: number; missoes: Record<string, number> | null }>(
           `${base} SELECT (SELECT count(*)::int FROM ev WHERE tipo = 'abriu') AS visitas,
                           (SELECT count(*)::int FROM ev WHERE tipo = 'interior') AS interiores,
                           (SELECT count(*)::int FROM ev WHERE tipo = 'tour_lazer') AS "toursLazer",
                           (SELECT avg(duracao_s)::float8 FROM ev WHERE tipo = 'tempo') AS tempo,
-                          (SELECT count(*)::int FROM ld) AS leads`,
+                          (SELECT count(*)::int FROM ld) AS leads,
+                          (SELECT jsonb_object_agg(missao, n) FROM (SELECT missao, count(DISTINCT coalesce(sessao::text, id::text))::int AS n FROM ev WHERE tipo = 'missao' GROUP BY missao) m) AS missoes`,
           p,
         )
       ).rows[0]!;
@@ -194,6 +198,8 @@ export function rotasVendas(app: FastifyInstance, { pool, exigir, webUrl }: Depe
         visitas: t.visitas,
         interiores: t.interiores,
         toursLazer: t.toursLazer,
+        // visitas (sessões) que completaram cada missão
+        missoes: { lazer: 0, tipologias: 0, por_dentro: 0, por_do_sol: 0, a_pe: 0, ...(t.missoes ?? {}) },
         tempoMedioS: t.tempo === null ? null : Math.round(t.tempo),
         leads: t.leads,
         conversao: t.visitas ? t.leads / t.visitas : 0,

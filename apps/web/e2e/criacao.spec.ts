@@ -96,6 +96,9 @@ test('criar com tudo: foto com GPS + planta + texto → montagem ao vivo → Vit
   await page.getByRole('button', { name: 'Entrar no apartamento' }).click();
   await expect(vitrine).toHaveAttribute('data-modo', 'primeira-pessoa', { timeout: 15_000 });
   await expect(vitrine).toHaveAttribute('data-decorado', /^[1-9]\d*$/, { timeout: 15_000 });
+  // missão cumprida: selo na tela e no cartão de missões
+  await expect(page.getByTestId('conquista')).toContainText('Entre num apartamento');
+  await expect(page.locator('[data-missao="por_dentro"]')).toHaveAttribute('data-feita', 'sim');
   await page.waitForTimeout(1500);
   await vitrine.screenshot({ path: test.info().outputPath('decorado-101.png') });
   await page.getByRole('button', { name: 'Sair do apartamento' }).click();
