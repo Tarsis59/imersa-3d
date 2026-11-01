@@ -50,7 +50,33 @@ export async function lazerDoPredio(c: pg.PoolClient, predioId: string): Promise
   ).rows;
 }
 
+/**
+ * Fotos do imóvel com GPS (Plano 11c, item 14): viram quadros no 3D onde foram tiradas. Só foto, fachada e render que
+ * a gestão confirmou na criação; documento e planta nunca aparecem aqui.
+ */
+export async function fotosNoLugar(c: pg.PoolClient, projetoId: string): Promise<Array<{ id: string; nome: string; lat: number; lon: number; rumo: number | null }>> {
+  return (
+    await c.query(
+      `SELECT id, nome, lat, lon, rumo FROM assets
+        WHERE project_id = $1 AND status = 'pronto' AND tipo = 'imagem' AND lat IS NOT NULL AND papel IN ('foto', 'fachada', 'render')
+        ORDER BY criado_em LIMIT 60`,
+      [projetoId],
+    )
+  ).rows;
+}
+
 export function rotasLazer(app: FastifyInstance, { pool, exigir }: Dependencias): void {
+  /** Fotos com GPS do empreendimento do prédio: quadros no 3D. */
+  app.get('/predios/:id/fotos', async (req) => {
+    const s = await exigir(req, 'projeto:ler');
+    const { id } = IdParam.parse(req.params);
+    return withTenant(pool, ctx(s), async (c) => {
+      const p = (await c.query<{ project_id: string }>('SELECT project_id FROM buildings WHERE id = $1', [id])).rows[0];
+      if (!p) throw new ErroHttp(404, 'nao_encontrado');
+      return fotosNoLugar(c, p.project_id);
+    });
+  });
+
   app.get('/predios/:id/lazer', async (req) => {
     const s = await exigir(req, 'projeto:ler');
     const { id } = IdParam.parse(req.params);

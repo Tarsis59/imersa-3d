@@ -53,6 +53,8 @@ const NovaCriacao = z.object({
   texto: z.string().max(4000).default(''),
   descricao: EsquemaDescricao,
   planilha: z.string().max(3_000_000).nullable().default(null),
+  /** Estilo do apartamento decorado (móveis, piso e paredes). */
+  estilo: z.enum(['moderno', 'classico', 'jovem']).default('moderno'),
   pistas: z
     .object({
       local: z.object({ lat: Lat, lon: Lon, rotulo: z.string().trim().min(1).max(300) }).nullable().optional(),
@@ -62,7 +64,11 @@ const NovaCriacao = z.object({
     .default({}),
 });
 const Iniciar = z.object({
-  arquivos: z.array(z.object({ id: z.uuid(), papel: z.enum(PAPEIS) })).max(200).default([]),
+  // GPS e rumo (bússola) lidos do EXIF no navegador: a foto vira quadro no 3D onde foi tirada
+  arquivos: z
+    .array(z.object({ id: z.uuid(), papel: z.enum(PAPEIS), lat: Lat.optional(), lon: Lon.optional(), rumo: z.number().min(0).lt(360).optional() }))
+    .max(200)
+    .default([]),
   // para retomar: o CEP ou o ponto que faltou
   cep: z.string().regex(/^\d{5}-?\d{3}$/).nullable().optional(),
   local: z.object({ lat: Lat, lon: Lon, rotulo: z.string().trim().min(1).max(300) }).nullable().optional(),
@@ -101,7 +107,7 @@ export function rotasCriacao(app: FastifyInstance, { pool, exigir, mapa }: Depen
       return reply.status(400).send({ erro: 'sem_andares' });
     }
     const r = await withTenant(pool, ctx(s), async (c) => {
-      const p = (await c.query<{ id: string }>('INSERT INTO projects (nome, descricao) VALUES ($1, $2) RETURNING id', [n.nome, n.texto.trim() ? n.texto.trim().slice(0, 4000) : null])).rows[0]!;
+      const p = (await c.query<{ id: string }>('INSERT INTO projects (nome, descricao, estilo_decorado) VALUES ($1, $2, $3) RETURNING id', [n.nome, n.texto.trim() ? n.texto.trim().slice(0, 4000) : null, n.estilo])).rows[0]!;
       await registrarAuditoria(c, { userId: s.userId, acao: 'projeto.criar', entidade: 'project', entidadeId: p.id, depois: { nome: n.nome, origem: 'criacao_integrada' } });
       const m = (
         await c.query<{ id: string }>('INSERT INTO montagens (project_id, texto, descricao, pistas, planilha) VALUES ($1, $2, $3::jsonb, $4::jsonb, $5) RETURNING id', [

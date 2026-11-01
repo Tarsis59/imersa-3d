@@ -2,7 +2,7 @@
  * JPEG com EXIF de câmera e GPS (testes do classificador e da criação integrada): põe um segmento APP1 logo depois
  * do início do JPEG. `le` escolhe a ordem dos bytes do TIFF (os celulares usam as duas).
  */
-export function comExifGps(jpeg: Uint8Array, lat: number, lon: number, o: { le?: boolean; camera?: boolean } = {}): Uint8Array {
+export function comExifGps(jpeg: Uint8Array, lat: number, lon: number, o: { le?: boolean; camera?: boolean; rumo?: number } = {}): Uint8Array {
   const le = o.le ?? true;
   const camera = o.camera ?? true;
   const tiff = new DataView(new ArrayBuffer(512));
@@ -31,9 +31,10 @@ export function comExifGps(jpeg: Uint8Array, lat: number, lon: number, o: { le?:
   u32(e + 4, 1);
   u32(e + 8, gpsIfd);
   u32(e + 12, 0);
-  // GPS IFD: 1 LatRef, 2 Lat, 3 LonRef, 4 Lon
-  u16(gpsIfd, 4);
-  const dados = gpsIfd + 2 + 4 * 12 + 4;
+  // GPS IFD: 1 LatRef, 2 Lat, 3 LonRef, 4 Lon (e 17 ImgDirection, se tiver rumo)
+  const nGps = o.rumo === undefined ? 4 : 5;
+  u16(gpsIfd, nGps);
+  const dados = gpsIfd + 2 + nGps * 12 + 4;
   const ent = (i: number, tag: number, tipo: number, qtd: number, valor: (p: number) => void) => {
     const p = gpsIfd + 2 + i * 12;
     u16(p, tag);
@@ -52,10 +53,15 @@ export function comExifGps(jpeg: Uint8Array, lat: number, lon: number, o: { le?:
   ent(1, 2, 5, 3, (p) => u32(p, dados));
   ent(2, 3, 2, 2, (p) => tiff.setUint8(p, (lon < 0 ? 'W' : 'E').charCodeAt(0)));
   ent(3, 4, 5, 3, (p) => u32(p, dados + 24));
-  u32(gpsIfd + 2 + 4 * 12, 0);
+  if (o.rumo !== undefined) ent(4, 0x11, 5, 1, (p) => u32(p, dados + 48));
+  u32(gpsIfd + 2 + nGps * 12, 0);
   racionais(dados, lat);
   racionais(dados + 24, lon);
-  fim = dados + 48;
+  if (o.rumo !== undefined) {
+    u32(dados + 48, Math.round(o.rumo * 100));
+    u32(dados + 52, 100);
+  }
+  fim = dados + (o.rumo === undefined ? 48 : 56);
   const corpo = new Uint8Array(tiff.buffer, 0, fim);
   const app1 = new Uint8Array(4 + 6 + fim);
   app1.set([0xff, 0xe1, ((app1.length - 2) >> 8) & 0xff, (app1.length - 2) & 0xff], 0);

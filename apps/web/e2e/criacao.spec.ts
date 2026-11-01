@@ -4,7 +4,8 @@ import { entrarComoAdminComMfa } from './ajuda';
 import { comExifGps } from './exif';
 
 // foto do imóvel com GPS na Av. Paulista (onde está o arquivo de prédios reais do e2e)
-const FOTO = comExifGps(new Uint8Array(readFileSync(new URL('./fixtures/video-fzk-capa.jpg', import.meta.url))), -23.56175, -46.6545);
+// tirada 40 m ao sul do ponto, olhando para o norte (bússola): vira um quadro no 3D ali
+const FOTO = comExifGps(new Uint8Array(readFileSync(new URL('./fixtures/video-fzk-capa.jpg', import.meta.url))), -23.56175 - 40 / 110_540, -46.6545, { rumo: 0 });
 const PDF = Buffer.from('%PDF-1.4\n1 0 obj<<>>endobj\ntrailer<<>>\n%%EOF\n');
 const TEXTO = 'Residencial Paulista Vista, 6 andares, 4 apartamentos por andar, 2 e 3 quartos de 60 e 80 m², piscina, academia e churrasqueira.';
 
@@ -45,6 +46,8 @@ test('criar com tudo: foto com GPS + planta + texto → montagem ao vivo → Vit
   await page.getByRole('spinbutton', { name: 'Andares', exact: true }).fill('8');
   await expect(page.getByTestId('resumo-plano')).toContainText('Vai criar 32 unidades em 8 andares');
   await expect(page.getByTestId('resumo-plano')).toContainText('16 de 2 quartos (60 m²), 16 de 3 quartos (80 m²)');
+  await page.getByRole('radio', { name: /Clássico/ }).click();
+  await expect(page.getByRole('radio', { name: /Clássico/ })).toHaveAttribute('aria-checked', 'true');
 
   // 4. cria: envia os arquivos e acompanha a montagem ao vivo
   await page.getByTestId('criar-empreendimento').click();
@@ -67,6 +70,18 @@ test('criar com tudo: foto com GPS + planta + texto → montagem ao vivo → Vit
   await expect(vitrine).toHaveAttribute('data-lazer', '3');
   await expect(vitrine).toHaveAttribute('data-entorno', /^[1-9]\d*$/, { timeout: 60_000 });
   await expect(page.getByRole('button', { name: /Conheça o lazer/ })).toBeVisible();
+  // a foto com GPS virou um quadro no lugar em que foi tirada
+  await expect(vitrine).toHaveAttribute('data-fotos', '1');
   await page.waitForTimeout(2000);
   await vitrine.screenshot({ path: test.info().outputPath('cidade-completa.png') });
+
+  // apartamento decorado no estilo escolhido: entra na 101 e já vê a sala mobiliada
+  await page.getByTestId('lista-vitrine').getByRole('button', { name: /^101/ }).click();
+  await page.getByRole('button', { name: 'Entrar no apartamento' }).click();
+  await expect(vitrine).toHaveAttribute('data-modo', 'primeira-pessoa', { timeout: 15_000 });
+  await expect(vitrine).toHaveAttribute('data-decorado', /^[1-9]\d*$/, { timeout: 15_000 });
+  await page.waitForTimeout(1500);
+  await vitrine.screenshot({ path: test.info().outputPath('decorado-101.png') });
+  await page.getByRole('button', { name: 'Sair do apartamento' }).click();
+  await expect(vitrine).toHaveAttribute('data-decorado', '0');
 });

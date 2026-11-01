@@ -12,13 +12,16 @@ describe('EXIF', () => {
       expect(x.gps!.lat).toBeCloseTo(-23.561414, 5);
       expect(x.gps!.lon).toBeCloseTo(-46.655881, 5);
     }
-    expect(lerExif(comExifGps(JPEG_VAZIO, 10.5, 20.25, { camera: false }))).toMatchObject({ camera: false, gps: { lat: 10.5, lon: 20.25 } });
+    expect(lerExif(comExifGps(JPEG_VAZIO, 10.5, 20.25, { camera: false }))).toMatchObject({ camera: false, gps: { lat: 10.5, lon: 20.25 }, rumo: null });
+    // bússola: para onde a câmera olhava
+    for (const le of [true, false]) expect(lerExif(comExifGps(JPEG_VAZIO, -23.5, -46.6, { le, rumo: 271.5 })).rumo).toBeCloseTo(271.5, 5);
   });
   it('sem EXIF, PNG ou lixo: vazio, sem lançar', () => {
-    expect(lerExif(JPEG_VAZIO)).toEqual({ gps: null, camera: false });
-    expect(lerExif(new Uint8Array([0x89, 0x50, 0x4e, 0x47]))).toEqual({ gps: null, camera: false });
+    const vazio = { gps: null, rumo: null, camera: false };
+    expect(lerExif(JPEG_VAZIO)).toEqual(vazio);
+    expect(lerExif(new Uint8Array([0x89, 0x50, 0x4e, 0x47]))).toEqual(vazio);
     const cortado = comExifGps(JPEG_VAZIO, -23.5, -46.6).subarray(0, 40);
-    expect(lerExif(cortado)).toEqual({ gps: null, camera: false });
+    expect(lerExif(cortado)).toEqual(vazio);
   });
 });
 

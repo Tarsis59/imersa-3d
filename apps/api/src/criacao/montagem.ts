@@ -137,7 +137,7 @@ interface Linha {
   descricao: Descricao;
   pistas: Pistas;
   planilha: string | null;
-  arquivos: Array<{ id: string; papel: Papel }>;
+  arquivos: Array<{ id: string; papel: Papel; lat?: number; lon?: number; rumo?: number }>;
 }
 
 /**
@@ -290,6 +290,9 @@ export async function executarMontagem(d: DepsMontagem, s: Sessao, montagemId: s
         }
         await c.query('SAVEPOINT arquivo');
         try {
+          // papel confirmado e, na foto com GPS, onde foi tirada (o 3D põe um quadro ali)
+          const comGps = a.lat !== undefined && a.lon !== undefined;
+          await c.query('UPDATE assets SET papel = $2, lat = $3, lon = $4, rumo = $5 WHERE id = $1', [a.id, a.papel, comGps ? a.lat : null, comGps ? a.lon : null, comGps ? (a.rumo ?? null) : null]);
           if (a.papel === 'ifc' && arq.tipo === 'ifc') {
             await c.query('INSERT INTO conversoes_bim (project_id, arquivo_id) VALUES ($1, $2)', [projetoId, a.id]);
             mais('bim');

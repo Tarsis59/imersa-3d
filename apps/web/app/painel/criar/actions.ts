@@ -21,6 +21,7 @@ export interface PedidoCriacao {
   texto: string;
   descricao: Descricao;
   planilha: string | null;
+  estilo: 'moderno' | 'classico' | 'jovem';
   pistas: { gps?: Array<{ lat: number; lon: number }>; cep?: string | null; local?: { lat: number; lon: number; rotulo: string } | null };
 }
 
@@ -33,9 +34,17 @@ export async function criarEmpreendimento(p: PedidoCriacao): Promise<{ projetoId
   return { erro: mensagem(r.status, r.dados) };
 }
 
+export interface ArquivoMontagem {
+  id: string;
+  papel: string;
+  lat?: number;
+  lon?: number;
+  rumo?: number;
+}
+
 export async function iniciarMontagem(
   montagemId: string,
-  corpo: { arquivos?: Array<{ id: string; papel: string }>; cep?: string | null; local?: { lat: number; lon: number; rotulo: string } | null },
+  corpo: { arquivos?: ArquivoMontagem[]; cep?: string | null; local?: { lat: number; lon: number; rotulo: string } | null },
 ): Promise<{ erro?: string }> {
   const r = await api(`/montagens/${montagemId}/iniciar`, { metodo: 'POST', corpo, token: await tokenParaAcao() });
   if (r.status === 202) return {};

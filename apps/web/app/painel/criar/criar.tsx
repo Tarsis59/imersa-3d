@@ -8,7 +8,7 @@ import { CATEGORIAS_LAZER, ROTULO_LAZER, tamanhoLegivel, type CategoriaLazer, ty
 import { lerXlsx, tabelaParaCsv } from '@/lib/xlsx';
 import { concluirEnvio, prepararEnvio } from '../projetos/[id]/actions-arquivos';
 import { enviarComProgresso } from '../projetos/[id]/secoes';
-import { criarEmpreendimento, iniciarMontagem, interpretar, recalcularPlano } from './actions';
+import { criarEmpreendimento, iniciarMontagem, interpretar, recalcularPlano, type ArquivoMontagem } from './actions';
 
 const MAX_ARQUIVOS = 200;
 /** Com pelo menos isso de fotos do imóvel, dá para tentar o 3D real (splat); menos que isso o validador recusa. */
@@ -24,6 +24,8 @@ interface Item {
   papel: Exclude<PapelArquivo, 'planilha' | 'texto'>;
   possiveis: PapelArquivo[];
   gps: { lat: number; lon: number } | null;
+  /** Bússola da foto (graus a partir do norte), para o quadro no 3D olhar para o lado certo. */
+  rumo: number | null;
   estado: EstadoItem;
   enviado: number;
   id?: string;
@@ -73,6 +75,9 @@ async function lerCoresDaImagem(arquivo: File): Promise<boolean> {
   }
 }
 
+/** O que a montagem recebe de cada arquivo: o papel e, na foto com GPS, onde foi tirada e para onde olhava. */
+const paraMontagem = (x: Item, id: string): ArquivoMontagem => ({ id, papel: x.papel, ...(x.gps ? { lat: x.gps.lat, lon: x.gps.lon, ...(x.rumo !== null ? { rumo: x.rumo } : {}) } : {}) });
+
 const esperar = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const numero = (v: string, min: number, max: number): number | null => {
   const n = Number(v);
@@ -89,6 +94,7 @@ export function Criar() {
   const [descricao, setDescricao] = useState<Descricao | null>(null);
   const [plano, setPlano] = useState<PlanoCriacao | null>(null);
   const [cep, setCep] = useState('');
+  const [estilo, setEstilo] = useState<'moderno' | 'classico' | 'jovem'>('moderno');
   const [fotos3d, setFotos3d] = useState(true);
   const [fase, setFase] = useState<'editando' | 'lendo' | 'criando' | 'enviando' | 'iniciando'>('editando');
   const [erro, setErro] = useState<string | null>(null);
@@ -129,17 +135,19 @@ export function Criar() {
           continue;
         }
         let gps = null;
+        let rumo = null;
         let camera = false;
         const ext = extensao(arquivo.name);
         if (ext === '.jpg' || ext === '.jpeg') {
           const x = lerExif(new Uint8Array(await arquivo.slice(0, 256 * 1024).arrayBuffer()));
           gps = x.gps;
+          rumo = x.rumo;
           camera = x.camera;
         }
         const ehImagem = ['.jpg', '.jpeg', '.png', '.webp'].includes(ext);
         const desenho = ehImagem && !camera ? await lerCoresDaImagem(arquivo) : false;
         const papel = classificar(arquivo.name, { camera, desenho }) as Item['papel'];
-        const item: Item = { chave: `${arquivo.name}:${arquivo.size}:${arquivo.lastModified}`, arquivo, papel, possiveis, gps, estado: 'na_lista', enviado: 0 };
+        const item: Item = { chave: `${arquivo.name}:${arquivo.size}:${arquivo.lastModified}`, arquivo, papel, possiveis, gps, rumo, estado: 'na_lista', enviado: 0 };
         if (vistos.has(item.chave)) continue;
         if (vistos.size >= MAX_ARQUIVOS) {
           fora.push(`${arquivo.name}: limite de ${MAX_ARQUIVOS} arquivos`);
@@ -235,13 +243,13 @@ export function Criar() {
     return null;
   }
 
-  async function enviarTodos(projetoId: string, lista: Item[]): Promise<Array<{ id: string; papel: string }>> {
+  async function enviarTodos(projetoId: string, lista: Item[]): Promise<ArquivoMontagem[]> {
     const fila = lista.filter((x) => x.estado !== 'enviado');
-    const feitos = lista.filter((x) => x.estado === 'enviado' && x.id).map((x) => ({ id: x.id!, papel: x.papel }));
+    const feitos = lista.filter((x) => x.estado === 'enviado' && x.id).map((x) => paraMontagem(x, x.id!));
     const trabalhar = async () => {
       for (let item = fila.shift(); item; item = fila.shift()) {
         const id = await enviarItem(projetoId, item);
-        if (id) feitos.push({ id, papel: item.papel });
+        if (id) feitos.push(paraMontagem(item, id));
       }
     };
     await Promise.all(Array.from({ length: ENVIOS_JUNTOS }, trabalhar));
@@ -265,7 +273,7 @@ export function Criar() {
       if (nomeFinal.length < 2) return setErro('Dê um nome ao empreendimento.');
       if (!planilha && !desc.andares && !desc.totalUnidades) return setErro('Diga quantos andares o prédio tem (no texto ou no campo abaixo), ou largue a planilha de unidades.');
       setFase('criando');
-      const r = await criarEmpreendimento({ nome: nomeFinal, texto, descricao: desc, planilha: planilha?.csv ?? null, pistas: { gps: gps.slice(0, 500), cep: /^\d{5}-?\d{3}$/.test(cep.trim()) ? cep.trim() : null } });
+      const r = await criarEmpreendimento({ nome: nomeFinal, texto, descricao: desc, planilha: planilha?.csv ?? null, estilo, pistas: { gps: gps.slice(0, 500), cep: /^\d{5}-?\d{3}$/.test(cep.trim()) ? cep.trim() : null } });
       if (r.erro || !r.projetoId || !r.montagemId) {
         setFase('editando');
         return setErro(r.erro ?? 'Não deu para criar.');
@@ -277,13 +285,13 @@ export function Criar() {
         const conteudo: Record<string, Uint8Array> = {};
         for (const f of fotos) conteudo[f.arquivo.name] = new Uint8Array(await f.arquivo.arrayBuffer());
         const zip = new File([zipSync(conteudo, { level: 0 }).slice()], 'fotos-do-imovel.zip', { type: 'application/zip' });
-        const item: Item = { chave: 'zip-fotos', arquivo: zip, papel: 'captura', possiveis: ['captura'], gps: null, estado: 'na_lista', enviado: 0 };
+        const item: Item = { chave: 'zip-fotos', arquivo: zip, papel: 'captura', possiveis: ['captura'], gps: null, rumo: null, estado: 'na_lista', enviado: 0 };
         lista = [...itens, item];
         setItens(lista);
       }
     }
     setFase('enviando');
-    const enviados = seguirSemOsQueFalharam ? lista.filter((x) => x.estado === 'enviado' && x.id).map((x) => ({ id: x.id!, papel: x.papel })) : await enviarTodos(alvo.projetoId, lista);
+    const enviados = seguirSemOsQueFalharam ? lista.filter((x) => x.estado === 'enviado' && x.id).map((x) => paraMontagem(x, x.id!)) : await enviarTodos(alvo.projetoId, lista);
     const falhas = seguirSemOsQueFalharam ? 0 : lista.length - enviados.length;
     if (falhas > 0) {
       setFase('editando');
@@ -529,6 +537,31 @@ export function Criar() {
                     </option>
                   ))}
                 </select>
+              </div>
+            </fieldset>
+            <fieldset>
+              <legend className="mb-2 text-sm font-medium">Apartamento decorado (o que o cliente vê ao entrar na unidade)</legend>
+              <div className="flex flex-wrap gap-2" role="radiogroup" aria-label="Estilo do apartamento decorado">
+                {(
+                  [
+                    ['moderno', 'Moderno', 'cinza e madeira clara'],
+                    ['classico', 'Clássico', 'piso de madeira e tons quentes'],
+                    ['jovem', 'Jovem', 'cores vivas e madeira clara'],
+                  ] as const
+                ).map(([v, rotulo, dica]) => (
+                  <button
+                    key={v}
+                    type="button"
+                    role="radio"
+                    aria-checked={estilo === v}
+                    disabled={ocupado}
+                    onClick={() => setEstilo(v)}
+                    className={`grid rounded-lg border px-3 py-2 text-left text-sm ${estilo === v ? 'border-acento bg-acento/10 font-semibold' : 'border-borda bg-superficie'}`}
+                  >
+                    {rotulo}
+                    <span className="text-xs font-normal text-suave">{dica}</span>
+                  </button>
+                ))}
               </div>
             </fieldset>
             {plano && !planilha && (

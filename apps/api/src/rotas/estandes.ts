@@ -139,7 +139,7 @@ export function rotasEstandes(app: FastifyInstance, { pool, exigir, armazenament
         }>(
           `SELECT json_build_object('id', b.id, 'nome', b.nome) AS predio,
                   json_build_object('id', p.id, 'nome', p.nome, 'cidade', p.cidade, 'uf', p.uf, 'lat', ST_Y(p.geom), 'lon', ST_X(p.geom),
-                                    'rotacaoGraus', p.rotacao_graus::float8) AS empreendimento,
+                                    'rotacaoGraus', p.rotacao_graus::float8, 'estiloDecorado', p.estilo_decorado) AS empreendimento,
                   (SELECT json_build_object('id', a.id, 'nome', a.nome) FROM assets a WHERE a.id = b.modelo_asset_id AND a.status = 'pronto') AS modelo
              FROM buildings b JOIN projects p ON p.id = b.project_id WHERE b.id = $1`,
           [id],

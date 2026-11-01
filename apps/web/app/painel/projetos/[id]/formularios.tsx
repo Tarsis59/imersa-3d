@@ -25,6 +25,11 @@ export function FormDados({ projeto, acao }: { projeto: DetalheProjeto['projeto'
           </option>
         ))}
       </Selecao>
+      <Selecao id="estilo-decorado" name="estiloDecorado" rotulo="Estilo do apartamento decorado" defaultValue={projeto.estiloDecorado}>
+        <option value="moderno">Moderno</option>
+        <option value="classico">Clássico</option>
+        <option value="jovem">Jovem</option>
+      </Selecao>
       <div className="sm:col-span-2">
         <Campo id="endereco" name="endereco" rotulo="Endereço" defaultValue={projeto.endereco ?? ''} maxLength={300} autoComplete="street-address" />
       </div>

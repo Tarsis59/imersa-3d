@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import type pg from 'pg';
 import { z } from 'zod';
-import { lazerDoPredio } from './lazer';
+import { fotosNoLugar, lazerDoPredio } from './lazer';
 import { withTenant } from '@imersa/db';
 import { ErroHttp } from '../erros';
 import { hashToken } from '../auth/hash';
@@ -85,13 +85,13 @@ export function rotasPublicas(app: FastifyInstance, { pool, armazenamento, entor
         await c.query<{
           predio: { id: string; nome: string };
           modeloId: string | null;
-          projeto: { id: string; nome: string; descricao: string | null; cidade: string | null; uf: string | null; lat: number | null; lon: number | null; rotacaoGraus: number };
+          projeto: { id: string; nome: string; descricao: string | null; cidade: string | null; uf: string | null; lat: number | null; lon: number | null; rotacaoGraus: number; estiloDecorado: string };
           empresa: string;
           consultora: string;
         }>(
           `SELECT json_build_object('id', b.id, 'nome', b.nome) AS predio, b.modelo_asset_id AS "modeloId",
                   json_build_object('id', p.id, 'nome', p.nome, 'descricao', p.descricao, 'cidade', p.cidade, 'uf', p.uf,
-                                    'lat', ST_Y(p.geom), 'lon', ST_X(p.geom), 'rotacaoGraus', p.rotacao_graus::float8) AS projeto,
+                                    'lat', ST_Y(p.geom), 'lon', ST_X(p.geom), 'rotacaoGraus', p.rotacao_graus::float8, 'estiloDecorado', p.estilo_decorado) AS projeto,
                   t.nome AS empresa, u.nome AS consultora
              FROM buildings b JOIN projects p ON p.id = b.project_id JOIN tenants t ON t.id = b.tenant_id, users u
             WHERE b.id = $1 AND u.id = $2`,
@@ -114,9 +114,9 @@ export function rotasPublicas(app: FastifyInstance, { pool, armazenamento, entor
           [base.projeto.id, base.modeloId],
         )
       ).rows;
-      return { base, andares, unidades, arquivos, giro: await giroDaVitrine(c, l.predioId), lazer: await lazerDoPredio(c, l.predioId) };
+      return { base, andares, unidades, arquivos, giro: await giroDaVitrine(c, l.predioId), lazer: await lazerDoPredio(c, l.predioId), fotos: await fotosNoLugar(c, base.projeto.id) };
     });
-    const { base, andares, unidades, arquivos, giro, lazer } = dados;
+    const { base, andares, unidades, arquivos, giro, lazer, fotos } = dados;
     const modelo = arquivos.find((a) => a.id === base.modeloId && a.tipo === 'modelo_3d');
     return {
       empresa: { nome: base.empresa },
@@ -131,6 +131,7 @@ export function rotasPublicas(app: FastifyInstance, { pool, armazenamento, entor
       interiores: arquivos.filter((a) => a.tipo === 'splat').map((a) => ({ id: a.id, nome: a.nome })),
       giro,
       lazer,
+      fotos,
       // o portal chama o assistente direto na API (resposta em fluxo)
       assistenteUrl: ia.chamar ? `${apiPublica}/publico/links/${(req.params as { token: string }).token}/assistente` : null,
       aoVivoUrl: `${apiPublica}/publico/links/${(req.params as { token: string }).token}/ao-vivo`,
@@ -158,7 +159,8 @@ export function rotasPublicas(app: FastifyInstance, { pool, armazenamento, entor
         await c.query<{ chave: string; nome: string }>(
           `SELECT a.chave, a.nome FROM assets a JOIN buildings b ON b.project_id = a.project_id
             WHERE a.id = $1 AND b.id = $2 AND a.status = 'pronto'
-              AND (a.tipo IN ('splat', 'modelo_3d') OR EXISTS (SELECT 1 FROM giros g WHERE g.zip_asset_id = a.id AND g.building_id = b.id))`,
+              AND (a.tipo IN ('splat', 'modelo_3d') OR EXISTS (SELECT 1 FROM giros g WHERE g.zip_asset_id = a.id AND g.building_id = b.id)
+                   OR (a.tipo = 'imagem' AND a.lat IS NOT NULL AND a.papel IN ('foto', 'fachada', 'render')))`,
           [id, l.predioId],
         )
       ).rows[0],

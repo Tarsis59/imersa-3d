@@ -39,7 +39,7 @@ export function rotasEmpreendimentos(app: FastifyInstance, { pool, exigir }: Dep
       const projeto = await exigirLinha(
         c,
         `SELECT id, nome, descricao, endereco, cidade, uf, ST_Y(geom) AS lat, ST_X(geom) AS lon,
-                altitude_m::float8 AS "altitudeM", rotacao_graus::float8 AS "rotacaoGraus", status
+                altitude_m::float8 AS "altitudeM", rotacao_graus::float8 AS "rotacaoGraus", estilo_decorado AS "estiloDecorado", status
            FROM projects WHERE id = $1`,
         [id],
       );
@@ -82,6 +82,7 @@ export function rotasEmpreendimentos(app: FastifyInstance, { pool, exigir }: Dep
       uf: d.uf,
       altitude_m: d.altitudeM,
       rotacao_graus: d.rotacaoGraus,
+      estilo_decorado: d.estiloDecorado,
       status: d.status,
     };
     const sets: string[] = [];

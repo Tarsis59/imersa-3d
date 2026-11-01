@@ -56,6 +56,8 @@ export type EventoVitrine = { tipo: 'unidade' | 'favorito'; unidadeId: string } 
 
 type EstadoEntorno = { tipo: 'carregando' } | { tipo: 'pronto'; predios: number; atribuicao: string } | { tipo: 'sem_localizacao' } | { tipo: 'indisponivel' };
 
+const SEM_FOTOS: NonNullable<Parameters<typeof Vitrine>[0]['fotos']> = [];
+
 export function Vitrine({
   predioId,
   projetoId,
@@ -66,6 +68,8 @@ export function Vitrine({
   unidades,
   andares,
   rotacaoGraus,
+  estiloDecorado,
+  fotos = SEM_FOTOS,
   lat,
   lon,
   interiores,
@@ -97,6 +101,10 @@ export function Vitrine({
   rotacaoGraus: number;
   lat: number | null;
   lon: number | null;
+  /** Estilo do apartamento decorado gerado ao entrar numa unidade do prédio desenhado. */
+  estiloDecorado?: 'moderno' | 'classico' | 'jovem';
+  /** Fotos do imóvel com GPS: quadros no 3D onde foram tiradas (Plano 11c). */
+  fotos?: Array<{ id: string; nome: string; lat: number; lon: number; rumo: number | null }>;
   /** Splats prontos do projeto (interiores reais). */
   interiores: Array<{ id: string; nome: string }>;
   /** Índice do nível de qualidade a manter fixo; `null` = automático. */
@@ -132,8 +140,8 @@ export function Vitrine({
   const canvas = useRef<HTMLCanvasElement>(null);
   const coluna = useRef<HTMLDivElement>(null);
   const viewer = useRef<Viewer | null>(null);
-  const inicial = useRef({ modeloUrl, unidades, rotacaoGraus, lat, lon, projetoId, predioId, qualidadeFixa, carregarEntorno, comTelemetria });
-  inicial.current = { modeloUrl, unidades, rotacaoGraus, lat, lon, projetoId, predioId, qualidadeFixa, carregarEntorno, comTelemetria };
+  const inicial = useRef({ modeloUrl, unidades, rotacaoGraus, estiloDecorado, lat, lon, projetoId, predioId, qualidadeFixa, carregarEntorno, comTelemetria });
+  inicial.current = { modeloUrl, unidades, rotacaoGraus, estiloDecorado, lat, lon, projetoId, predioId, qualidadeFixa, carregarEntorno, comTelemetria };
   const evento = useRef(aoEvento);
   evento.current = aoEvento;
   const fonteAoVivo = useRef(aoVivo);
@@ -209,6 +217,38 @@ export function Vitrine({
   useEffect(() => {
     if (emImersivo !== 'ar' && sobreposicaoAr.current) sobreposicaoAr.current.hidden = true;
   }, [emImersivo]);
+  // fotos com GPS: quadros no 3D; a imagem chega pelo link assinado; tocar abre em tela cheia
+  const [qtdFotos, setQtdFotos] = useState(0);
+  const [fotoAberta, setFotoAberta] = useState<{ nome: string; url: string } | null>(null);
+  const urlsFotos = useRef(new Map<string, string>());
+  useEffect(() => {
+    const v = viewer.current;
+    if (estado !== 'pronto' || !v) return;
+    setQtdFotos(v.definirFotos(fotos));
+    let vivo = true;
+    for (const f of fotos) {
+      void linkDoArquivo(f.id).then((url) => {
+        if (!vivo || !url) return;
+        urlsFotos.current.set(f.id, url);
+        void v.mostrarFoto(f.id, url);
+      });
+    }
+    v.aoSelecionarFoto((id) => {
+      const f = fotos.find((x) => x.id === id);
+      const url = urlsFotos.current.get(id);
+      if (f && url) setFotoAberta({ nome: f.nome, url });
+    });
+    return () => {
+      vivo = false;
+      v.aoSelecionarFoto(null);
+    };
+  }, [estado, fotos, linkDoArquivo]);
+  useEffect(() => {
+    if (!fotoAberta) return;
+    const fechar = (e: KeyboardEvent) => e.key === 'Escape' && setFotoAberta(null);
+    window.addEventListener('keydown', fechar);
+    return () => window.removeEventListener('keydown', fechar);
+  }, [fotoAberta]);
   // lazer no 3D: marcadores com o nome; tocar num marcador voa até ele
   useEffect(() => {
     if (estado !== 'pronto') return;
@@ -298,7 +338,7 @@ export function Vitrine({
     if (!el) return;
     const c = inicial.current;
     setEstado('carregando');
-    const v = criarViewer(el, { unidades: c.unidades, modeloUrl: c.modeloUrl, rotacaoGraus: c.rotacaoGraus, lat: c.lat ?? undefined, lon: c.lon ?? undefined, decodificadores: DECODIFICADORES,
+    const v = criarViewer(el, { unidades: c.unidades, modeloUrl: c.modeloUrl, rotacaoGraus: c.rotacaoGraus, estiloDecorado: c.estiloDecorado, lat: c.lat ?? undefined, lon: c.lon ?? undefined, decodificadores: DECODIFICADORES,
       ...(c.qualidadeFixa !== null ? { qualidadeInicial: c.qualidadeFixa, qualidadeFixa: true } : {}),
     });
     viewer.current = v;
@@ -683,6 +723,8 @@ export function Vitrine({
         data-imersivo={emImersivo ?? ''}
         data-lazer={itensLazer.length}
         data-moradores={telemetria?.moradores ?? 0}
+        data-decorado={telemetria?.decorado ?? 0}
+        data-fotos={qtdFotos}
         data-nivel={telemetria?.nivel ?? ''}
         data-som={telemetria?.som ? 'ligado' : 'desligado'}
         data-marcando-lazer={marcandoLazer ? 'sim' : ''}
@@ -772,6 +814,15 @@ export function Vitrine({
           />
         )}
         {progressoGiro && <p className="absolute inset-x-0 bottom-12 mx-auto w-fit rounded-md bg-black/70 px-3 py-1 text-sm text-white">{progressoGiro}</p>}
+        {fotoAberta && (
+          <div role="dialog" aria-modal="true" aria-label={`Foto: ${fotoAberta.nome}`} data-testid="foto-aberta" className="fixed inset-0 z-50 grid place-items-center bg-black/85 p-4" onClick={() => setFotoAberta(null)}>
+            {/* eslint-disable-next-line @next/next/no-img-element -- link assinado temporário, fora do otimizador de imagens */}
+            <img src={fotoAberta.url} alt={fotoAberta.nome} className="max-h-[85vh] max-w-full rounded-lg object-contain shadow-2xl" />
+            <button type="button" className="absolute right-4 top-4 rounded-full bg-white/90 px-4 py-2 text-sm font-semibold text-black" onClick={() => setFotoAberta(null)}>
+              Fechar
+            </button>
+          </div>
+        )}
         {interiorAberto && <InteriorSplat arquivo={interiorAberto} linkDoArquivo={linkDoArquivo} aoFechar={() => setInteriorAberto(null)} />}
         {modo === 'primeira-pessoa' && <Joystick aoMover={(e) => viewer.current?.definirEntrada(e)} />}
       </div>

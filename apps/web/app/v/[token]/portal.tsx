@@ -86,6 +86,8 @@ export function PortalVitrine({
         unidades={unidades}
         andares={portal.andares}
         rotacaoGraus={portal.projeto.rotacaoGraus}
+        estiloDecorado={portal.projeto.estiloDecorado}
+        fotos={portal.fotos}
         lat={portal.projeto.lat}
         lon={portal.projeto.lon}
         interiores={portal.interiores}

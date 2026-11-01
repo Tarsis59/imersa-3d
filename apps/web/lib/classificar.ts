@@ -122,6 +122,8 @@ export const pareceDesenho = (c: CoresImagem): boolean => c.brancos >= 0.5 && c.
 
 export interface Exif {
   gps: { lat: number; lon: number } | null;
+  /** Para onde a câmera olhava (graus a partir do norte), quando o celular grava a bússola. */
+  rumo: number | null;
   camera: boolean;
 }
 
@@ -130,7 +132,7 @@ export interface Exif {
  * Nunca lança: arquivo sem EXIF ou corrompido volta vazio.
  */
 export function lerExif(bytes: Uint8Array): Exif {
-  const vazio: Exif = { gps: null, camera: false };
+  const vazio: Exif = { gps: null, rumo: null, camera: false };
   try {
     if (bytes[0] !== 0xff || bytes[1] !== 0xd8) return vazio;
     const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
@@ -165,7 +167,7 @@ function lerTiff(dv: DataView, base: number): Exif {
   const ifd0 = entradas(u32(4));
   const camera = ifd0.has(0x010f) || ifd0.has(0x0110);
   const ptrGps = ifd0.get(0x8825);
-  if (!ptrGps) return { gps: null, camera };
+  if (!ptrGps) return { gps: null, rumo: null, camera };
   const g = entradas(u32(ptrGps.valor));
   const ref = (tag: number) => {
     const e = g.get(tag);
@@ -183,6 +185,14 @@ function lerTiff(dv: DataView, base: number): Exif {
   };
   const lat = graus(2);
   const lon = graus(4);
-  if (lat === null || lon === null || (lat === 0 && lon === 0)) return { gps: null, camera };
-  return { gps: { lat: ref(1) === 'S' ? -lat : lat, lon: ref(3) === 'W' ? -lon : lon }, camera };
+  if (lat === null || lon === null || (lat === 0 && lon === 0)) return { gps: null, rumo: null, camera };
+  // GPSImgDirection (tag 17, um racional): norte verdadeiro ou magnético, tanto faz para pôr um quadro no 3D
+  const d = g.get(0x11);
+  let rumo: number | null = null;
+  if (d && d.tipo === 5 && d.qtd === 1) {
+    const o = u32(d.valor);
+    const den = u32(o + 4);
+    if (den) rumo = ((u32(o) / den) % 360 + 360) % 360;
+  }
+  return { gps: { lat: ref(1) === 'S' ? -lat : lat, lon: ref(3) === 'W' ? -lon : lon }, rumo, camera };
 }

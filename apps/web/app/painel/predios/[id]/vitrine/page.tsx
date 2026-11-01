@@ -2,7 +2,7 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import type { UnidadeViewer } from '@imersa/viewer';
 import { apiNaPagina } from '@/lib/sessao';
-import { ehGestao, type Arquivo, type DetalheProjeto, type Espelho, type GirosDoPredio, type ItemLazer, type LinkCliente, type Me } from '@/lib/tipos';
+import { ehGestao, type Arquivo, type DetalheProjeto, type Espelho, type GirosDoPredio, type ItemLazer, type LinkCliente, type Me, type Portal } from '@/lib/tipos';
 import { Vitrine } from './vitrine';
 import { bilheteAoVivo, carregarEntorno, criarLazer, linkDoArquivo, removerLazer } from './actions';
 
@@ -20,7 +20,7 @@ export default async function PaginaVitrine({ params, searchParams }: { params: 
   if (r.status !== 200) notFound();
   const { predio, andares } = r.dados;
   // independentes entre si: em paralelo (cada ida à API custa uma volta de rede)
-  const [detalhe, lista, download, me, giros, ia, lazer] = await Promise.all([
+  const [detalhe, lista, download, me, giros, ia, lazer, fotos] = await Promise.all([
     apiNaPagina<DetalheProjeto>(`/projetos/${encodeURIComponent(predio.projetoId)}`, volta),
     apiNaPagina<Arquivo[]>(`/projetos/${encodeURIComponent(predio.projetoId)}/arquivos`, volta),
     predio.modeloArquivoId ? apiNaPagina<{ url: string }>(`/arquivos/${predio.modeloArquivoId}/download`, volta) : null,
@@ -28,6 +28,7 @@ export default async function PaginaVitrine({ params, searchParams }: { params: 
     apiNaPagina<GirosDoPredio>(`/predios/${encodeURIComponent(id)}/giros`, volta),
     apiNaPagina<{ ligada: boolean }>('/ia', volta),
     apiNaPagina<ItemLazer[]>(`/predios/${encodeURIComponent(id)}/lazer`, volta),
+    apiNaPagina<Portal['fotos']>(`/predios/${encodeURIComponent(id)}/fotos`, volta),
   ]);
   const empresa = me.dados.empresas.find((e) => e.id === me.dados.tenantId)?.nome ?? '';
   // visita guiada ao vivo: a consultora conduz pelos links ativos dela (a gestão, por todos)
@@ -63,6 +64,8 @@ export default async function PaginaVitrine({ params, searchParams }: { params: 
         unidades={unidades}
         andares={andares.map((a) => ({ numero: a.numero, nome: a.nome }))}
         rotacaoGraus={projeto.rotacaoGraus}
+        estiloDecorado={projeto.estiloDecorado}
+        fotos={fotos.status === 200 ? fotos.dados : []}
         lat={projeto.lat}
         lon={projeto.lon}
         interiores={interiores}
