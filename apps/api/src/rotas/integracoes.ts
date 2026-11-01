@@ -25,6 +25,27 @@ const NovaChave = z.object({ nome: z.string().trim().min(1).max(80) });
 const NovoWebhook = z.object({ url: z.string().trim().min(10).max(2000), eventos: z.array(z.enum(EVENTOS_WEBHOOK)).min(1).max(EVENTOS_WEBHOOK.length) });
 const Desde = z.object({ desde: z.iso.datetime({ offset: true }).optional(), limite: z.coerce.number().int().min(1).max(500).default(100) });
 const PorPredio = z.object({ predioId: z.uuid().optional() });
+const STATUS = ['disponivel', 'reservado', 'vendido', 'bloqueado'] as const;
+/**
+ * CRM → plataforma: situação (e preço) das unidades, em lote. A unidade vem pelo nosso id ou pelo código dela no CRM
+ * (`crmId`); mandar os dois grava o vínculo. Idempotente: repetir o mesmo envio não muda nada.
+ */
+const AtualizacaoCrm = z.object({
+  unidades: z
+    .array(
+      z
+        .object({
+          id: z.uuid().optional(),
+          crmId: z.string().trim().min(1).max(200).optional(),
+          status: z.enum(STATUS),
+          preco: z.number().min(0).max(1e11).nullable().optional(),
+          motivo: z.string().trim().max(300).optional(),
+        })
+        .refine((u) => u.id || u.crmId, { message: 'informe id ou crmId' }),
+    )
+    .min(1)
+    .max(500),
+});
 const ctx = (s: Sessao) => ({ tenantId: s.tenantId, userId: s.userId });
 
 /** `imk_` + 32 bytes: o prefixo aparece na tela para reconhecer a chave; o resto só na criação. */
@@ -189,13 +210,50 @@ export function rotasIntegracoes(app: FastifyInstance, { pool, exigir, chaveCifr
     );
   });
 
+  /** Situação vinda do CRM: chega ao 3D na hora (o gatilho do banco avisa a transmissão ao vivo das Vitrines). */
+  app.post('/v1/unidades/status', { ...porChave, bodyLimit: 512 * 1024 }, async (req) => {
+    const t = await empresaDaChave(req);
+    const d = AtualizacaoCrm.parse(req.body);
+    return withTenant(pool, daEmpresa(t), async (c) => {
+      const resultados: Array<{ id: string | null; crmId: string | null; resultado: 'atualizada' | 'sem_mudanca' | 'nao_encontrada' }> = [];
+      for (const u of d.unidades) {
+        const atual = (
+          await c.query<{ id: string; status: string; preco: number | null; crm_external_id: string | null }>(
+            `SELECT id, status, preco::float8 AS preco, crm_external_id FROM units WHERE ${u.id ? 'id = $1' : 'crm_external_id = $1'} FOR UPDATE`,
+            [u.id ?? u.crmId],
+          )
+        ).rows;
+        // crmId repetido em duas unidades: ambíguo, não mexe em nenhuma
+        if (atual.length !== 1) {
+          resultados.push({ id: u.id ?? null, crmId: u.crmId ?? null, resultado: 'nao_encontrada' });
+          continue;
+        }
+        const x = atual[0]!;
+        const novoPreco = u.preco === undefined ? x.preco : u.preco;
+        const novoCrm = u.id && u.crmId ? u.crmId : x.crm_external_id;
+        if (x.status === u.status && x.preco === novoPreco && x.crm_external_id === novoCrm) {
+          resultados.push({ id: x.id, crmId: novoCrm, resultado: 'sem_mudanca' });
+          continue;
+        }
+        await c.query('UPDATE units SET status = $2, preco = $3, crm_external_id = $4 WHERE id = $1', [x.id, u.status, novoPreco, novoCrm]);
+        if (x.status !== u.status) {
+          await c.query('INSERT INTO unit_status_history (unit_id, de, para, user_id, motivo) VALUES ($1, $2, $3, NULL, $4)', [x.id, x.status, u.status, `CRM${u.motivo ? `: ${u.motivo}` : ''}`.slice(0, 500)]);
+        }
+        await registrarAuditoria(c, { userId: null, acao: 'unidade.crm', entidade: 'unit', entidadeId: x.id, antes: { status: x.status, preco: x.preco }, depois: { status: u.status, preco: novoPreco } });
+        resultados.push({ id: x.id, crmId: novoCrm, resultado: 'atualizada' });
+      }
+      const conta = (r: string) => resultados.filter((x) => x.resultado === r).length;
+      return { atualizadas: conta('atualizada'), semMudanca: conta('sem_mudanca'), naoEncontradas: conta('nao_encontrada'), resultados };
+    });
+  });
+
   app.get('/v1/unidades', porChave, async (req) => {
     const t = await empresaDaChave(req);
     const { predioId } = PorPredio.parse(req.query);
     return withTenant(pool, daEmpresa(t), async (c) =>
       (
         await c.query(
-          `SELECT u.id, u.codigo, u.status, u.preco::float8 AS preco, f.numero AS andar, ty.nome AS tipologia, ty.area_m2::float8 AS "areaM2", ty.quartos,
+          `SELECT u.id, u.crm_external_id AS "crmId", u.codigo, u.status, u.preco::float8 AS preco, f.numero AS andar, ty.nome AS tipologia, ty.area_m2::float8 AS "areaM2", ty.quartos,
                   b.id AS "predioId", b.nome AS predio, p.nome AS empreendimento
              FROM units u JOIN floors f ON f.id = u.floor_id JOIN buildings b ON b.id = u.building_id JOIN projects p ON p.id = b.project_id
              LEFT JOIN unit_types ty ON ty.id = u.unit_type_id

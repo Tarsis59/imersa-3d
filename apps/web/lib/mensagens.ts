@@ -43,6 +43,7 @@ const MENSAGENS: Record<string, string> = {
   leitura_em_andamento: 'Essa planta já está sendo lida.',
   predio_sem_modelo: 'Ligue um modelo 3D ao prédio antes de pedir o giro.',
   giro_em_andamento: 'Já há um giro deste prédio na fila ou sendo renderizado.',
+  video_em_andamento: 'Já há um vídeo deste formato na fila ou sendo renderizado.',
   planta_nao_lida: 'A leitura da planta ainda não terminou.',
   predio_de_outro_empreendimento: 'O prédio é de outro empreendimento.',
 };

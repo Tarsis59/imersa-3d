@@ -2,8 +2,10 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { Cartao } from '@/components/ui';
 import { apiNaPagina } from '@/lib/sessao';
-import { ehGestao, type Arquivo, type Espelho, type GirosDoPredio, type LinkCliente, type Me } from '@/lib/tipos';
-import { criarLink, mudarStatus, pedirGiro, revogarLink, vincularModelo } from './actions';
+import { ehGestao, type Arquivo, type Espelho, type GirosDoPredio, type LinkCliente, type Me, type VideosDoPredio } from '@/lib/tipos';
+import { criarLink, mudarStatus, pedirGiro, pedirVideo, revogarLink, vincularModelo } from './actions';
+import { linkDoArquivo } from './vitrine/actions';
+import { Estudio } from './estudio';
 import { GiroRenderizado } from './giro-renderizado';
 import { LinksClientes } from './links-clientes';
 import { EspelhoVendas } from './espelho';
@@ -13,15 +15,17 @@ export default async function PaginaPredio({ params }: { params: Promise<{ id: s
   const { id } = await params;
   const volta = `/painel/predios/${id}`;
   // independentes entre si: em paralelo (cada ida à API grátis custa centenas de ms)
-  const [r, eu, lGiros] = await Promise.all([
+  const [r, eu, lGiros, lVideos] = await Promise.all([
     apiNaPagina<Espelho>(`/predios/${encodeURIComponent(id)}`, volta),
     apiNaPagina<Me>('/me', volta),
     apiNaPagina<GirosDoPredio>(`/predios/${encodeURIComponent(id)}/giros`, volta),
+    apiNaPagina<VideosDoPredio>(`/predios/${encodeURIComponent(id)}/videos`, volta),
   ]);
   if (r.status !== 200) notFound();
   const espelho = r.dados;
   const me = eu.dados;
   const giros = lGiros.dados;
+  const videos = lVideos.dados;
   // gestão e consultoras geram links para clientes (cada consultora vê só os dela)
   const podeLinks = ehGestao(me.papel) || me.papel === 'consultora';
   const [lArquivos, lLinks] = await Promise.all([
@@ -71,6 +75,9 @@ export default async function PaginaPredio({ params }: { params: Promise<{ id: s
           podeEditar={ehGestao(me.papel) && me.mfa}
           acao={vincularModelo.bind(null, espelho.predio.id)}
         />
+      </Cartao>
+      <Cartao titulo="Estúdio de marketing (vídeos)">
+        <Estudio dados={videos} podePedir={ehGestao(me.papel) && me.mfa} pedir={pedirVideo.bind(null, espelho.predio.id)} linkDoArquivo={linkDoArquivo} />
       </Cartao>
       <Cartao titulo="Giro 360° fotorrealista">
         <GiroRenderizado giros={giros} podePedir={ehGestao(me.papel) && me.mfa} pedir={pedirGiro.bind(null, espelho.predio.id)} />

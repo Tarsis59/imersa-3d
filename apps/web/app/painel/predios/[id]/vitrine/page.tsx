@@ -17,12 +17,13 @@ export default async function PaginaVitrine({ params, searchParams }: { params: 
   if (r.status !== 200) notFound();
   const { predio, andares } = r.dados;
   // independentes entre si: em paralelo (cada ida à API custa uma volta de rede)
-  const [detalhe, lista, download, me, giros] = await Promise.all([
+  const [detalhe, lista, download, me, giros, ia] = await Promise.all([
     apiNaPagina<DetalheProjeto>(`/projetos/${encodeURIComponent(predio.projetoId)}`, volta),
     apiNaPagina<Arquivo[]>(`/projetos/${encodeURIComponent(predio.projetoId)}/arquivos`, volta),
     predio.modeloArquivoId ? apiNaPagina<{ url: string }>(`/arquivos/${predio.modeloArquivoId}/download`, volta) : null,
     apiNaPagina<Me>('/me', volta),
     apiNaPagina<GirosDoPredio>(`/predios/${encodeURIComponent(id)}/giros`, volta),
+    apiNaPagina<{ ligada: boolean }>('/ia', volta),
   ]);
   const empresa = me.dados.empresas.find((e) => e.id === me.dados.tenantId)?.nome ?? '';
   const projeto = detalhe.dados.projeto;
@@ -58,6 +59,7 @@ export default async function PaginaVitrine({ params, searchParams }: { params: 
         lon={projeto.lon}
         interiores={interiores}
         giroRenderizado={giros.status === 200 ? giros.dados.vitrine : null}
+        assistenteUrl={ia.status === 200 && ia.dados.ligada ? `/painel/predios/${predio.id}/assistente` : null}
         qualidadeFixa={fixa >= 0 ? fixa : null}
         carregarEntorno={carregarEntorno.bind(null, predio.projetoId)}
         linkDoArquivo={linkDoArquivo}

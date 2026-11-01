@@ -31,6 +31,11 @@ import { rotasBim } from './rotas/bim';
 import { rotasConfigurador } from './rotas/configurador';
 import { rotasPlantas } from './rotas/plantas';
 import { rotasGiros } from './rotas/giros';
+import { rotasVideos } from './rotas/videos';
+import Anthropic from '@anthropic-ai/sdk';
+import { rotasAssistente, type ConfigIA } from './rotas/assistente';
+import { chamadaReal, type ChamarModelo } from './ia/assistente';
+import { chamadaSimulada } from './ia/simulada';
 import { CanalUnidades } from './tempo-real/canal';
 import { ArmazenamentoLocal, ArmazenamentoS3, type Armazenamento } from './arquivos/armazenamento';
 import { clamav, semAntivirus, type Antivirus } from './arquivos/antivirus';
@@ -46,6 +51,8 @@ export interface Deps {
   armazenamento?: Armazenamento;
   antivirus?: Antivirus;
   mapa?: ServicosMapa;
+  /** Assistente: nos testes, um Claude de mentira; por padrão, a API do Claude se houver chave. */
+  chamarIA?: ChamarModelo;
 }
 
 export function armazenamentoDaConfig(config: Config): Armazenamento {
@@ -63,7 +70,7 @@ const obterHashFalso = () => (hashFalso ??= hashSenha('senha-falsa-apenas-para-i
 
 const ID_VALIDO = /^[\w-]{8,64}$/;
 
-export async function construirApp({ pool, config, logger = false, reportarErro, armazenamento, antivirus, mapa }: Deps): Promise<FastifyInstance> {
+export async function construirApp({ pool, config, logger = false, reportarErro, armazenamento, antivirus, mapa, chamarIA }: Deps): Promise<FastifyInstance> {
   const app = Fastify({
     logger: logger ? { level: 'info', redact: ['req.headers.authorization'] } : false,
     trustProxy: config.TRUST_PROXY,
@@ -371,13 +378,23 @@ export async function construirApp({ pool, config, logger = false, reportarErro,
   rotasConfigurador(app, { pool, exigir });
   rotasPlantas(app, { pool, exigir });
   rotasGiros(app, { pool, exigir });
+  rotasVideos(app, { pool, exigir });
+  if (config.IA_SIMULADA === 'true' && config.AMBIENTE === 'producao') throw new Error('IA_SIMULADA não pode ser usada em produção');
+  const ia: ConfigIA = {
+    chamar:
+      chamarIA ??
+      (config.IA_SIMULADA === 'true' ? chamadaSimulada() : config.ANTHROPIC_API_KEY ? chamadaReal(new Anthropic({ apiKey: config.ANTHROPIC_API_KEY })) : null),
+    modelo: config.IA_MODELO ?? 'claude-opus-5',
+    limiteTokensMes: config.IA_LIMITE_TOKENS_MES ?? 5_000_000,
+  };
+  rotasAssistente(app, { pool, exigir, ia });
   rotasVendas(app, { pool, exigir, webUrl: config.WEB_URL });
   // status ao vivo: uma conexão LISTEN por instância; as transmissões abertas fecham antes de a API parar
   const canal = new CanalUnidades(config.DATABASE_URL);
   app.addHook('preClose', async () => canal.fechar());
   const apiPublica = config.API_URL_PUBLICA ?? `http://localhost:${config.PORT}`;
   rotasAoVivo(app, { pool, exigir, canal, segredo: config.JWT_SECRET, apiPublica });
-  rotasPublicas(app, { pool, armazenamento: arm, entorno: criarEntorno(pool, servicosMapa), canal, apiPublica });
+  rotasPublicas(app, { pool, armazenamento: arm, entorno: criarEntorno(pool, servicosMapa), canal, apiPublica, ia });
   rotasIntegracoes(app, { pool, exigir, chaveCifra: config.TOTP_KEY, permitirLocal: config.WEBHOOK_PERMITIR_LOCAL });
 
   return app;

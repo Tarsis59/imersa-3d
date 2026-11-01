@@ -1,4 +1,4 @@
-# Capturas (fotos/vídeo → 3D) e giros 360° fotorrealistas (Blender) na hospedagem grátis: o serviço da API (Render
+# Capturas (fotos/vídeo → 3D), giros 360° fotorrealistas e vídeos de marketing (Blender) na hospedagem grátis: o serviço da API (Render
 # grátis) desliga sem visitas e mataria um processamento longo no meio. Aqui roda de hora em hora (ou na hora, pelo
 # botão "Run workflow"), processa a fila até esvaziar e termina. O treino e o render rodam na GPU grátis do Kaggle;
 # este job só valida, desfoca rostos, comprime e guarda os resultados.
@@ -38,10 +38,10 @@ jobs:
     steps:
       # checagem de segundos (psql já vem no runner): sem trabalho na fila, termina sem instalar nada e
       # gasta ~1 min dos 2.000 grátis por mês do repositório privado
-      - name: Há captura ou giro na fila?
+      - name: Há captura, giro ou vídeo na fila?
         id: fila
         run: |
-          pendente=$(psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -tAc 'SELECT ha_captura_pendente() OR ha_giro_pendente()')
+          pendente=$(psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -tAc 'SELECT ha_captura_pendente() OR ha_giro_pendente() OR ha_video_pendente()')
           echo "Trabalho na fila: $pendente"
           echo "pendente=$pendente" >> "$GITHUB_OUTPUT"
       - uses: actions/checkout@v4

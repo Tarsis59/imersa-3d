@@ -30,3 +30,21 @@ export async function api<T = unknown>(
   const texto = await r.text();
   return { status: r.status, dados: (texto ? JSON.parse(texto) : {}) as T };
 }
+
+/** Como `api`, mas devolve a resposta sem ler o corpo: para repassar um fluxo (SSE) ao navegador. */
+export async function apiFluxo(caminho: string, opcoes: { corpo: string; token: string }): Promise<Response> {
+  const h = await headers();
+  const ip = h.get('x-forwarded-for') ?? h.get('x-real-ip');
+  const navegador = h.get('user-agent');
+  return fetch(`${API_URL}${caminho}`, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      authorization: `Bearer ${opcoes.token}`,
+      ...(ip ? { 'x-forwarded-for': ip } : {}),
+      ...(navegador ? { 'user-agent': navegador } : {}),
+    },
+    body: opcoes.corpo,
+    cache: 'no-store',
+  });
+}

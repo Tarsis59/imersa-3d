@@ -227,6 +227,8 @@ export interface Portal {
   interiores: Array<{ id: string; nome: string }>;
   /** Giro 360° fotorrealista pronto do prédio (Blender), ou null. */
   giro: { arquivoId: string; unidades: string[] } | null;
+  /** Assistente com IA (direto na API), ou null se desligado. */
+  assistenteUrl: string | null;
   /** Transmissão do status das unidades ao vivo (EventSource direto na API). */
   aoVivoUrl: string;
 }
@@ -264,4 +266,23 @@ export interface GirosDoPredio {
   ultimo: GiroPredio | null;
   pronto: GiroPredio | null;
   vitrine: { arquivoId: string; unidades: string[] } | null;
+}
+
+/** Estúdio de marketing: vídeos do prédio (Blender, fiel ao projeto, com o selo "Imagem ilustrativa"). */
+export interface VideoPredio {
+  id: string;
+  formato: '9:16' | '1:1' | '16:9';
+  status: 'na_fila' | 'processando' | 'pronto' | 'erro';
+  mensagem: string | null;
+  metricas: { largura?: number; altura?: number; segundos?: number; mb?: number; dispositivo?: string };
+  arquivoId: string | null;
+  capaId: string | null;
+  criadoEm: string;
+  atualizadoEm: string;
+  /** Feito com o modelo que o prédio usa hoje. */
+  atual: boolean;
+}
+export interface VideosDoPredio {
+  temModelo: boolean;
+  videos: VideoPredio[];
 }

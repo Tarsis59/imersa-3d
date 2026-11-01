@@ -84,6 +84,28 @@ test('giro 360° fotorrealista: IFC real → pedido na página do prédio → wo
   await page.getByRole('button', { name: '← Voltar ao 3D' }).click();
   await expect(giro).toHaveCount(0);
 
+  // estúdio de marketing: vídeo 9:16 do prédio (Blender, com selo) → assistir e baixar
+  await page.goto(predio);
+  const estudio = page.getByTestId('estudio');
+  await estudio.getByRole('button', { name: 'Gerar vídeo Reels e Stories (9:16)' }).click();
+  await expect(estudio.getByRole('button', { name: /Reels e Stories \(9:16\): na fila/ })).toBeVisible();
+  const itemVideo = estudio.getByTestId('lista-videos').getByRole('listitem').first();
+  await expect
+    .poll(
+      async () => {
+        await page.reload();
+        return itemVideo.getAttribute('data-status-video');
+      },
+      { timeout: 420_000, intervals: [3_000] },
+    )
+    .toBe('pronto');
+  await itemVideo.getByRole('button', { name: 'Assistir' }).click();
+  const video = itemVideo.locator('video');
+  await expect.poll(() => video.evaluate((v: HTMLVideoElement) => v.readyState >= 1 && v.videoHeight > v.videoWidth), { timeout: 30_000 }).toBe(true);
+  const baixado = page.waitForEvent('download');
+  await itemVideo.getByRole('button', { name: 'Baixar MP4' }).click();
+  expect((await baixado).suggestedFilename()).toBe('Casa-reels-stories.mp4');
+
   // link do cliente (sem login): o mesmo giro
   await page.goto(predio);
   await page.getByRole('button', { name: 'Gerar link' }).click();

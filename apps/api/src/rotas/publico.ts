@@ -9,6 +9,7 @@ import type { Armazenamento } from '../arquivos/armazenamento';
 import type { criarEntorno } from './mapa';
 import { transmitirPredio, type CanalUnidades } from '../tempo-real/canal';
 import { giroDaVitrine } from './giros';
+import { responderAssistente, type ConfigIA } from './assistente';
 
 interface Dependencias {
   pool: pg.Pool;
@@ -17,6 +18,7 @@ interface Dependencias {
   canal: CanalUnidades;
   /** Endereço da API visto pelo navegador (status ao vivo). */
   apiPublica: string;
+  ia: ConfigIA;
 }
 
 /** Link aberto pelo cliente: vale 1 h (a página pede outro se precisar). */
@@ -54,7 +56,7 @@ interface Link {
   consultoraId: string;
 }
 
-export function rotasPublicas(app: FastifyInstance, { pool, armazenamento, entorno, canal, apiPublica }: Dependencias): void {
+export function rotasPublicas(app: FastifyInstance, { pool, armazenamento, entorno, canal, apiPublica, ia }: Dependencias): void {
   /** Token → link válido. Desconhecido: 404; revogado ou vencido: 410 (o cliente pede um link novo à consultora). */
   async function resolver(req: FastifyRequest): Promise<Link> {
     const p = TokenLink.safeParse({ token: (req.params as { token?: string }).token });
@@ -127,6 +129,8 @@ export function rotasPublicas(app: FastifyInstance, { pool, armazenamento, entor
         : null,
       interiores: arquivos.filter((a) => a.tipo === 'splat').map((a) => ({ id: a.id, nome: a.nome })),
       giro,
+      // o portal chama o assistente direto na API (resposta em fluxo)
+      assistenteUrl: ia.chamar ? `${apiPublica}/publico/links/${(req.params as { token: string }).token}/assistente` : null,
       aoVivoUrl: `${apiPublica}/publico/links/${(req.params as { token: string }).token}/ao-vivo`,
     };
   });
@@ -180,6 +184,13 @@ export function rotasPublicas(app: FastifyInstance, { pool, armazenamento, entor
       );
     });
     return reply.status(204).send();
+  });
+
+  /** Assistente com IA no portal: só o prédio do link, com limite por IP (cada pergunta custa tokens). */
+  app.post('/publico/links/:token/assistente', limite(20, '10 minutes', 64 * 1024), async (req, reply) => {
+    const l = await resolver(req);
+    const projetoId = await withTenant(pool, daEmpresa(l), async (c) => (await c.query<{ project_id: string }>('SELECT project_id FROM buildings WHERE id = $1', [l.predioId])).rows[0]!.project_id);
+    await responderAssistente(req, reply, { ia, pool, tenantId: l.tenantId, contexto: { predioId: l.predioId, projetoId } });
   });
 
   /** Pedido de contato. LGPD: só com consentimento explícito; guarda o texto aceito, a data, o IP e o navegador como prova. */

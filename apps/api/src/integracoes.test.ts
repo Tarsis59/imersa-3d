@@ -354,3 +354,38 @@ describe('anti-abuso', () => {
     expect(Date.now() - inicio).toBeLessThan(1000);
   });
 });
+
+describe('CRM → 3D (situação das unidades pela API pública)', () => {
+  it('em lote e idempotente, por id ou pelo código do CRM; chega ao 3D ao vivo; outra empresa não acha', async () => {
+    const chave = (await req('POST', '/integracoes/chaves', { nome: 'CRM da construtora' }, gestao)).json.chave as string;
+    const daOutra = (await req('POST', '/integracoes/chaves', { nome: 'CRM X' }, outra)).json.chave as string;
+    const t = (await req('POST', `/predios/${emp.torreA}/ao-vivo`, {}, ana)).json.url;
+    const sse = assistir(naApi(t));
+    expect(await sse.pronto).toBe(200);
+    await sse.esperar(': conectado');
+
+    // 1º envio: vincula o código do CRM e muda a situação (o 3D recebe na hora)
+    const inicio = Date.now();
+    const r = await req('POST', '/v1/unidades/status', { unidades: [{ id: emp.u101, crmId: 'CRM-101', status: 'vendido', motivo: 'contrato assinado' }] }, chave);
+    expect(r.status).toBe(200);
+    expect(r.json).toMatchObject({ atualizadas: 1, semMudanca: 0, naoEncontradas: 0 });
+    await sse.esperar(`"id":"${emp.u101}","status":"vendido"`);
+    expect(Date.now() - inicio).toBeLessThan(60_000);
+    sse.fechar();
+    const hist = (await owner.query('SELECT para, motivo, user_id FROM unit_status_history WHERE unit_id = $1 ORDER BY id DESC LIMIT 1', [emp.u101])).rows[0];
+    expect(hist).toEqual({ para: 'vendido', motivo: 'CRM: contrato assinado', user_id: null });
+
+    // repetir é seguro; depois, só pelo código do CRM (e o preço junto)
+    expect((await req('POST', '/v1/unidades/status', { unidades: [{ id: emp.u101, crmId: 'CRM-101', status: 'vendido' }] }, chave)).json).toMatchObject({ atualizadas: 0, semMudanca: 1 });
+    const porCrm = await req('POST', '/v1/unidades/status', { unidades: [{ crmId: 'CRM-101', status: 'disponivel', preco: 640000 }, { crmId: 'NAO-EXISTE', status: 'vendido' }] }, chave);
+    expect(porCrm.json).toMatchObject({ atualizadas: 1, naoEncontradas: 1 });
+    const u = (await req('GET', `/v1/unidades?predioId=${emp.torreA}`, undefined, chave)).json.find((x: { id: string }) => x.id === emp.u101);
+    expect(u).toMatchObject({ crmId: 'CRM-101', status: 'disponivel', preco: 640000 });
+
+    // isolamento e entrada
+    expect((await req('POST', '/v1/unidades/status', { unidades: [{ id: emp.u101, status: 'vendido' }] }, daOutra)).json).toMatchObject({ atualizadas: 0, naoEncontradas: 1 });
+    expect((await req('POST', '/v1/unidades/status', { unidades: [{ status: 'vendido' }] }, chave)).status).toBe(400);
+    expect((await req('POST', '/v1/unidades/status', { unidades: [{ id: emp.u101, status: 'demolido' }] }, chave)).status).toBe(400);
+    expect((await req('POST', '/v1/unidades/status', { unidades: [{ id: emp.u101, status: 'vendido' }] }, gestao)).status).toBe(401);
+  });
+});

@@ -10,6 +10,7 @@ import { giroDoZip } from '@/lib/giro-zip';
 import type { ResultadoEntorno } from './actions';
 import { InteriorSplat } from './interior';
 import { Giro360 } from './giro';
+import { Assistente, type AcaoAssistente } from './assistente';
 
 const ROTULO_NIVEL = { alto: 'alta', medio: 'média', baixo: 'baixa' } as const;
 const hoje = () => new Date().toISOString().slice(0, 10);
@@ -45,6 +46,8 @@ export function Vitrine({
   aoEvento,
   aoVivo,
   giroRenderizado = null,
+  assistenteUrl = null,
+  aoPedirContato,
 }: {
   predioId: string;
   projetoId: string;
@@ -73,6 +76,10 @@ export function Vitrine({
   aoVivo?: () => Promise<string | null>;
   /** Giro 360° fotorrealista pronto (Blender): ZIP + a unidade de cada cor-ID. */
   giroRenderizado?: { arquivoId: string; unidades: string[] } | null;
+  /** Assistente com IA (null = desligado): no painel, a rota do site; no portal, a API direto. */
+  assistenteUrl?: string | null;
+  /** O assistente pediu o formulário de contato (portal): abre com a unidade e o motivo. */
+  aoPedirContato?: (motivo: 'contato' | 'visita', unidadeId: string | null) => void;
 }) {
   const canvas = useRef<HTMLCanvasElement>(null);
   const viewer = useRef<Viewer | null>(null);
@@ -200,9 +207,14 @@ export function Vitrine({
   const unidadesAtuais = useMemo(() => unidades.map((u) => (statusAoVivo[u.id] ? { ...u, status: statusAoVivo[u.id]! } : u)), [unidades, statusAoVivo]);
   const passam = useMemo(() => filtrar(unidadesAtuais, filtro, favoritos), [unidadesAtuais, filtro, favoritos]);
   const ativo = filtroAtivo(filtro);
+  // unidades que o assistente mostrou: valem até a pessoa mexer nos filtros
+  const [destaqueIA, setDestaqueIA] = useState<ReadonlySet<string> | null>(null);
   useEffect(() => {
-    if (estado === 'pronto') viewer.current?.definirDestaque(ativo ? passam : null, favoritos);
-  }, [estado, passam, ativo, favoritos]);
+    setDestaqueIA(null);
+  }, [filtro]);
+  useEffect(() => {
+    if (estado === 'pronto') viewer.current?.definirDestaque(destaqueIA ?? (ativo ? passam : null), favoritos);
+  }, [estado, passam, ativo, favoritos, destaqueIA]);
   useEffect(() => {
     if (estado === 'pronto') viewer.current?.cortarNoAndar(andarCorte === '' ? null : Number(andarCorte));
   }, [estado, andarCorte]);
@@ -288,6 +300,11 @@ export function Vitrine({
     setSelecionada(id);
     viewer.current?.voarPara(id);
   };
+  const aoAcaoIA = (a: AcaoAssistente) => {
+    if (a.tipo === 'contato') return aoPedirContato?.(a.motivo, a.unidade);
+    setDestaqueIA(a.unidades.length ? new Set(a.unidades) : null);
+    if (a.focar) voar(a.focar);
+  };
 
   return (
     <div className="grid gap-6 lg:grid-cols-[1fr_340px] lg:items-start">
@@ -299,6 +316,7 @@ export function Vitrine({
         data-posicao={telemetria ? `${telemetria.posicao.x.toFixed(1)},${telemetria.posicao.z.toFixed(1)}` : ''}
         data-entorno={entorno.tipo === 'pronto' ? String(entorno.predios) : entorno.tipo}
         data-giro={mostrarGiro ? 'pronto' : progressoGiro ? 'gerando' : 'fechado'}
+        data-destaque-ia={destaqueIA ? [...destaqueIA].sort().join(',') : ''}
         data-ao-vivo={estadoAoVivo}
         className="relative h-[70vh] min-h-96 overflow-hidden rounded-2xl border border-borda bg-fundo lg:sticky lg:top-6"
       >
@@ -369,6 +387,11 @@ export function Vitrine({
           </Cartao>
         )}
 
+        {assistenteUrl && (
+          <Cartao titulo="Pergunte ao assistente">
+            <Assistente url={assistenteUrl} aoAcao={aoAcaoIA} />
+          </Cartao>
+        )}
         <Cartao titulo="Filtros">
           <div className="grid gap-4 text-sm">
             {quartosDisponiveis.length > 0 && (

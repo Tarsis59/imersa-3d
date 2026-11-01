@@ -449,3 +449,62 @@ describe('giro 360° fotorrealista (Blender na GPU do Kaggle)', () => {
     expect((await owner.query('SELECT ha_giro_pendente() AS p')).rows[0].p).toBe(false);
   });
 });
+
+describe('estúdio de marketing: vídeos do prédio (Blender, com selo)', () => {
+  it('pedido por formato (só gestão, com modelo), worker grava MP4 + capa, biblioteca lista; sem selo é descartado', async () => {
+    const { ArmazenamentoLocal } = await import('./arquivos/armazenamento');
+    const { processarProximoVideo } = await import('./videos/worker');
+    const { mkdtemp, writeFile } = await import('node:fs/promises');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+    const pasta = await mkdtemp(join(tmpdir(), 'videos-'));
+    const armazenamento = new ArmazenamentoLocal(join(pasta, 'arq'), 'https://api.exemplo.com', config.JWT_SECRET);
+    const modelo = (
+      await owner.query<{ id: string; chave: string }>(
+        "INSERT INTO assets (tenant_id, project_id, tipo, nome, chave, tamanho_declarado, status) SELECT tenant_id, id, 'modelo_3d', 'video.glb', 't/video.glb', 10, 'pronto' FROM projects WHERE id = $1 RETURNING id, chave",
+        [projeto],
+      )
+    ).rows[0]!;
+    const glb = Buffer.alloc(20 + 120, 0x20);
+    glb.write('glTF', 0);
+    glb.writeUInt32LE(2, 4);
+    glb.writeUInt32LE(140, 8);
+    glb.writeUInt32LE(120, 12);
+    glb.writeUInt32LE(0x4e4f534a, 16);
+    glb.write(JSON.stringify({ asset: { version: '2.0' } }), 20);
+    await armazenamento.salvar(modelo.chave, glb, 'model/gltf-binary');
+    await owner.query('UPDATE buildings SET modelo_asset_id = $2 WHERE id = $1', [casa, modelo.id]);
+
+    expect((await req('POST', `/predios/${casa}/videos`, { formato: '4:3' }, gestaoA)).status).toBe(400);
+    expect((await req('POST', `/predios/${casa}/videos`, { formato: '9:16' }, consultoraA)).status).toBe(403);
+    expect((await req('POST', `/predios/${casa}/videos`, { formato: '9:16' }, gestaoB)).status).toBe(404);
+    const r = await req('POST', `/predios/${casa}/videos`, { formato: '9:16' }, gestaoA);
+    expect(r.status).toBe(201);
+    expect((await req('POST', `/predios/${casa}/videos`, { formato: '9:16' }, gestaoA)).json.erro).toBe('video_em_andamento');
+    const quadrado = (await req('POST', `/predios/${casa}/videos`, { formato: '1:1' }, gestaoA)).json.id;
+
+    const provedor = async (e: { formato: '9:16' | '1:1' | '16:9'; pasta: string }) => {
+      const video = join(e.pasta, 'video.mp4');
+      const capa = join(e.pasta, 'capa.jpg');
+      await writeFile(video, Buffer.from('\0\0\0\x18ftypisom teste'));
+      await writeFile(capa, Buffer.from([0xff, 0xd8, 0xff]));
+      // o 1:1 vem sem selo: tem de ser descartado
+      return { ok: true as const, video, capa, formato: e.formato, largura: 1080, altura: e.formato === '9:16' ? 1920 : 1080, segundos: 10, selo: e.formato === '9:16' ? 'Imagem ilustrativa' : '', dispositivo: 'OPTIX', mb: 4.2 };
+    };
+    expect(await processarProximoVideo({ pool, armazenamento, provedor, pastaTrabalho: pasta })).toBe('ok');
+    expect(await processarProximoVideo({ pool, armazenamento, provedor, pastaTrabalho: pasta })).toBe('erro');
+    expect(await processarProximoVideo({ pool, armazenamento, provedor, pastaTrabalho: pasta })).toBe('vazia');
+
+    const lista = (await req('GET', `/predios/${casa}/videos`, undefined, consultoraA)).json;
+    expect(lista.temModelo).toBe(true);
+    const pronto = lista.videos.find((v: { id: string }) => v.id === r.json.id);
+    expect(pronto).toMatchObject({ formato: '9:16', status: 'pronto', atual: true, metricas: { altura: 1920, dispositivo: 'OPTIX' } });
+    expect(lista.videos.find((v: { id: string }) => v.id === quadrado)).toMatchObject({ status: 'erro', mensagem: expect.stringContaining('sem o selo') });
+    const mp4 = (await req('GET', `/arquivos/${pronto.arquivoId}/download`, undefined, consultoraA)).json;
+    expect(mp4.nome).toBe('Casa-reels-stories.mp4');
+    expect((await req('GET', `/arquivos/${pronto.capaId}/download`, undefined, consultoraA)).status).toBe(200);
+    // o MP4 fica na biblioteca de vídeos do prédio, não na lista de arquivos enviados
+    expect((await req('GET', `/projetos/${projeto}/arquivos`, undefined, gestaoA)).json.some((a: { tipo: string }) => a.tipo === 'video')).toBe(false);
+    expect((await owner.query('SELECT ha_video_pendente() AS p')).rows[0].p).toBe(false);
+  });
+});

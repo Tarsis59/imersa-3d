@@ -10,6 +10,7 @@ import { entregarWebhooks } from '../integracoes/entregas';
 import { conversorPython, processarProximaConversao } from '../bim/worker';
 import { leitorPython, processarProximaPlanta } from '../plantas/worker';
 import { processarProximoGiro, renderizadorPython, renderizadorSimulado } from '../giros/worker';
+import { processarProximoVideo, provedorBlender, provedorSimulado } from '../videos/worker';
 
 export const ConfigWorker = z.object({
   RECONSTRUTOR: z.enum(['python', 'simulado']).default('python'),
@@ -48,6 +49,15 @@ export const ConfigWorker = z.object({
   GIRO_LARGURA: z.coerce.number().int().min(160).max(3840).optional(),
   GIRO_ALTURA: z.coerce.number().int().min(90).max(2160).optional(),
   GIRO_AMOSTRAS: z.coerce.number().int().min(1).max(4096).optional(),
+  /** Vídeos de marketing: Blender (Kaggle, ou o local de GIRO_BLENDER) ou um MP4 pronto (testes). */
+  VIDEO_PROVEDOR: z.enum(['blender', 'simulado']).default('blender'),
+  VIDEO_SIMULADO_MP4: z.string().optional(),
+  VIDEO_SIMULADO_CAPA: z.string().optional(),
+  /** Qualidade (vazio = padrão do serviço: 10 s, 30 quadros/s, 128 amostras, 1080p). */
+  VIDEO_SEGUNDOS: z.coerce.number().positive().max(60).optional(),
+  VIDEO_FPS: z.coerce.number().int().min(6).max(60).optional(),
+  VIDEO_AMOSTRAS: z.coerce.number().int().min(1).max(4096).optional(),
+  VIDEO_ESCALA: z.coerce.number().int().min(10).max(100).optional(),
 });
 export type ConfigWorker = z.infer<typeof ConfigWorker>;
 
@@ -64,6 +74,22 @@ function montarDeps(pool: pg.Pool, config: Config, extra: ConfigWorker) {
       ? reconstrutorSimulado(extra.RECONSTRUTOR_SPLAT_SIMULADO!)
       : reconstrutorPython({ python: extra.RECONSTRUCAO_PYTHON ?? pythonPadrao, diretorio: extra.RECONSTRUCAO_DIR, usuarioKaggle: extra.KAGGLE_USERNAME! });
   return { pool, armazenamento: armazenamentoDaConfig(config), reconstrutor, pastaTrabalho: resolve(extra.WORKER_PASTA) };
+}
+
+function montarVideos(pool: pg.Pool, config: Config, extra: ConfigWorker) {
+  const pythonPadrao = resolve(extra.RECONSTRUCAO_DIR, process.platform === 'win32' ? '.venv/Scripts/python.exe' : '.venv/bin/python');
+  if (extra.VIDEO_PROVEDOR === 'simulado' && !extra.VIDEO_SIMULADO_MP4) throw new Error('Defina VIDEO_SIMULADO_MP4');
+  const provedor =
+    extra.VIDEO_PROVEDOR === 'simulado'
+      ? provedorSimulado(extra.VIDEO_SIMULADO_MP4!, extra.VIDEO_SIMULADO_CAPA ?? null)
+      : provedorBlender({
+          python: extra.RECONSTRUCAO_PYTHON ?? pythonPadrao,
+          diretorio: extra.RECONSTRUCAO_DIR,
+          usuarioKaggle: extra.KAGGLE_USERNAME,
+          blender: extra.GIRO_BLENDER,
+          qualidade: { segundos: extra.VIDEO_SEGUNDOS, fps: extra.VIDEO_FPS, amostras: extra.VIDEO_AMOSTRAS, escala: extra.GIRO_BLENDER ? extra.VIDEO_ESCALA : undefined },
+        });
+  return { pool, armazenamento: armazenamentoDaConfig(config), provedor, pastaTrabalho: resolve(extra.WORKER_PASTA) };
 }
 
 /** Giro 360° fotorrealista: mesmo serviço Python (e mesma conta do Kaggle) das capturas; longo como elas. */
@@ -90,14 +116,17 @@ function montarGiros(pool: pg.Pool, config: Config, extra: ConfigWorker) {
 export async function processarFila(pool: pg.Pool, config: Config, extra: ConfigWorker): Promise<number> {
   const deps = montarDeps(pool, config, extra);
   const giros = montarGiros(pool, config, extra);
+  const videos = montarVideos(pool, config, extra);
   let n = 0;
   for (;;) {
     const r = await processarProxima(deps);
     if (r !== 'vazia') console.info(`[worker] captura processada: ${r}`);
     const g = await processarProximoGiro(giros);
     if (g !== 'vazia') console.info(`[worker] giro 360° renderizado: ${g}`);
-    if (r === 'vazia' && g === 'vazia') return n;
-    n += Number(r !== 'vazia') + Number(g !== 'vazia');
+    const v = await processarProximoVideo(videos);
+    if (v !== 'vazia') console.info(`[worker] vídeo de marketing renderizado: ${v}`);
+    if (r === 'vazia' && g === 'vazia' && v === 'vazia') return n;
+    n += Number(r !== 'vazia') + Number(g !== 'vazia') + Number(v !== 'vazia');
   }
 }
 
@@ -115,6 +144,7 @@ function montarPlantas(pool: pg.Pool, config: Config, extra: ConfigWorker) {
 export function iniciarWorker(pool: pg.Pool, config: Config, extra: ConfigWorker) {
   const deps = extra.WORKER_CAPTURAS ? montarDeps(pool, config, extra) : null;
   const giros = extra.WORKER_CAPTURAS ? montarGiros(pool, config, extra) : null;
+  const videos = extra.WORKER_CAPTURAS ? montarVideos(pool, config, extra) : null;
   const bim = extra.WORKER_BIM ? montarBim(pool, config, extra) : null;
   const plantas = extra.WORKER_BIM ? montarPlantas(pool, config, extra) : null;
   const retencao = periodica(6 * 3600 * 1000, async () => {
@@ -146,7 +176,9 @@ export function iniciarWorker(pool: pg.Pool, config: Config, extra: ConfigWorker
         if (r !== 'vazia') console.info(`[worker] captura processada: ${r}`);
         const giro = giros ? await processarProximoGiro(giros) : 'vazia';
         if (giro !== 'vazia') console.info(`[worker] giro 360° renderizado: ${giro}`);
-        if (r === 'vazia' && conversao === 'vazia' && planta === 'vazia' && giro === 'vazia' && ativo) await esperar(extra.WORKER_INTERVALO_S * 1000);
+        const video = videos ? await processarProximoVideo(videos) : 'vazia';
+        if (video !== 'vazia') console.info(`[worker] vídeo de marketing renderizado: ${video}`);
+        if (r === 'vazia' && conversao === 'vazia' && planta === 'vazia' && giro === 'vazia' && video === 'vazia' && ativo) await esperar(extra.WORKER_INTERVALO_S * 1000);
       } catch (e) {
         console.error('[worker] erro inesperado', e);
         if (ativo) await esperar(extra.WORKER_INTERVALO_S * 1000);

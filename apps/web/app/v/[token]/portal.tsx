@@ -67,6 +67,8 @@ export function PortalVitrine({
 }) {
   const registrar = useEventos(token);
   const [unidadeVista, setUnidadeVista] = useState('');
+  // pedido do assistente: abre o formulário com a unidade e o motivo (os dados pessoais a pessoa digita lá)
+  const [pedidoContato, setPedidoContato] = useState<{ motivo: 'contato' | 'visita'; unidadeId: string | null; vez: number } | null>(null);
   const aoEvento = (e: EventoVitrine) => {
     registrar(e);
     if (e.tipo === 'unidade') setUnidadeVista(e.unidadeId);
@@ -88,18 +90,30 @@ export function PortalVitrine({
         lon={portal.projeto.lon}
         interiores={portal.interiores}
         giroRenderizado={portal.giro}
+        assistenteUrl={portal.assistenteUrl}
+        aoPedirContato={(motivo, unidadeId) => setPedidoContato((p) => ({ motivo, unidadeId, vez: (p?.vez ?? 0) + 1 }))}
         carregarEntorno={carregarEntorno}
         linkDoArquivo={linkDoArquivo}
         telemetria={false}
         aoEvento={aoEvento}
         aoVivo={async () => portal.aoVivoUrl}
       />
-      <FormularioLead portal={portal} unidadeVista={unidadeVista} enviarLead={enviarLead} />
+      <FormularioLead portal={portal} unidadeVista={unidadeVista} enviarLead={enviarLead} pedido={pedidoContato} />
     </>
   );
 }
 
-function FormularioLead({ portal, unidadeVista, enviarLead }: { portal: Portal; unidadeVista: string; enviarLead: (d: DadosLead) => Promise<{ ok: true } | { ok: false; erro: string }> }) {
+function FormularioLead({
+  portal,
+  unidadeVista,
+  enviarLead,
+  pedido,
+}: {
+  portal: Portal;
+  unidadeVista: string;
+  enviarLead: (d: DadosLead) => Promise<{ ok: true } | { ok: false; erro: string }>;
+  pedido: { motivo: 'contato' | 'visita'; unidadeId: string | null; vez: number } | null;
+}) {
   const textoConsentimento = `Autorizo ${portal.empresa.nome} e ${portal.consultora.nome} a usar meu nome e meus contatos para falar comigo sobre o ${portal.projeto.nome}. Posso pedir a exclusão dos meus dados a qualquer momento.`;
   // unidadeId null = a pessoa ainda não escolheu: vale a última unidade vista no 3D
   const [d, setD] = useState<Omit<DadosLead, 'unidadeId' | 'textoConsentimento'> & { unidadeId: string | null }>({
@@ -111,6 +125,16 @@ function FormularioLead({ portal, unidadeVista, enviarLead }: { portal: Portal; 
     consentimento: false,
     site: '',
   });
+  // o assistente pediu o contato: preenche unidade e motivo e leva a pessoa até o formulário
+  useEffect(() => {
+    if (!pedido) return;
+    setD((x) => ({
+      ...x,
+      unidadeId: pedido.unidadeId ?? x.unidadeId,
+      mensagem: x.mensagem || (pedido.motivo === 'visita' ? 'Quero agendar uma visita.' : ''),
+    }));
+    document.getElementById('contato')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }, [pedido]);
   const [enviando, setEnviando] = useState(false);
   const [resultado, setResultado] = useState<{ ok: true } | { ok: false; erro: string } | null>(null);
   const unidade = d.unidadeId ?? unidadeVista;

@@ -41,6 +41,14 @@ const Esquema = z.object({
     .enum(['true', 'false'])
     .default('false')
     .transform((v) => v === 'true'),
+  /** Assistente com IA (Plano 08): sem chave, o assistente fica desligado (o resto funciona igual). */
+  ANTHROPIC_API_KEY: z.string().optional(),
+  /** Testes e demonstração: assistente com regras fixas no lugar do Claude (sem custo). Recusado em produção. */
+  IA_SIMULADA: z.enum(['true', 'false']).optional(),
+  /** Padrão: claude-opus-5. */
+  IA_MODELO: z.string().optional(),
+  /** Tokens por empresa por mês (entrada + saída + cache), para a conta da API não disparar. Padrão: 5 milhões. */
+  IA_LIMITE_TOKENS_MES: z.coerce.number().int().positive().optional(),
 });
 
 export type Config = z.infer<typeof Esquema>;

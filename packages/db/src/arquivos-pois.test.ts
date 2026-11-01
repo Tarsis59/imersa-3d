@@ -287,3 +287,23 @@ describe('giros 360° fotorrealistas', () => {
     await expect(comoA((c) => c.query('DELETE FROM giros WHERE id = $1', [gA]))).rejects.toThrow(/permission denied/);
   });
 });
+
+describe('vídeos de marketing', () => {
+  it('isolado por empresa, um ativo por prédio e formato, fila entre empresas, só os formatos das redes', async () => {
+    const modelo = (c: pg.PoolClient, projeto: string, chave: string) =>
+      c.query<{ id: string }>("INSERT INTO assets (project_id, tipo, nome, chave, tamanho_declarado) VALUES ($1, 'modelo_3d', 'm.glb', $2, 1000) RETURNING id", [projeto, chave]).then((r) => r.rows[0]!.id);
+    const mA = await comoA((c) => modelo(c, projA, 'a/video.glb'));
+    const mB = await comoB((c) => modelo(c, projB, 'b/video.glb'));
+    const novo = (c: pg.PoolClient, m: string, formato: string) => c.query<{ id: string }>('INSERT INTO videos (building_id, modelo_asset_id, formato) VALUES ($1, $2, $3) RETURNING id', [predioA, m, formato]).then((r) => r.rows[0]!.id);
+    await expect(comoA((c) => novo(c, mB, '9:16'))).rejects.toThrow(/foreign key/);
+    await expect(comoA((c) => novo(c, mA, '4:3'))).rejects.toThrow(/check/);
+    const v916 = await comoA((c) => novo(c, mA, '9:16'));
+    await expect(comoA((c) => novo(c, mA, '9:16'))).rejects.toThrow(/videos_ativo_uk/);
+    await comoA((c) => novo(c, mA, '1:1')); // outro formato do mesmo prédio pode
+    expect(await comoB(async (c) => (await c.query('SELECT * FROM videos')).rowCount)).toBe(0);
+    await comoA((c) => c.query("INSERT INTO assets (project_id, tipo, nome, chave, tamanho_declarado) VALUES ($1, 'video', 'v.mp4', 'a/v.mp4', 10)", [projA]));
+    expect((await app.query('SELECT ha_video_pendente() AS p')).rows[0].p).toBe(true);
+    expect((await app.query<{ id: string }>('SELECT * FROM pegar_proximo_video()')).rows[0]!.id).toBe(v916);
+    await expect(comoA((c) => c.query('DELETE FROM videos WHERE id = $1', [v916]))).rejects.toThrow(/permission denied/);
+  });
+});

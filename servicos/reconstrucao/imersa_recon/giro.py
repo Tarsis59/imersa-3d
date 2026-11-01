@@ -85,15 +85,26 @@ def preparar_kernel(t: TrabalhoGiro) -> Path:
     return destino
 
 
-def _esperar(nuvem: Nuvem, t: TrabalhoGiro) -> None:
+def _esperar(nuvem: Nuvem, t, preparar=None) -> None:
+    """Dataset pronto → envia o notebook (`preparar(t)` monta a pasta dele) → acompanha até terminar."""
     inicio = time.monotonic()
     while not nuvem.dataset_pronto(t.id_dataset):
         if time.monotonic() - inicio > t.limite_s:
             raise ErroPipeline("tempo_esgotado", "O envio do modelo para a nuvem não terminou a tempo.")
         time.sleep(t.intervalo_s)
-    nuvem.enviar_kernel(preparar_kernel(t))
+    nuvem.enviar_kernel((preparar or preparar_kernel)(t))
+    falhas = 0
     while True:
-        estado = nuvem.status(t.id_kernel).lower()
+        try:
+            estado = nuvem.status(t.id_kernel).lower()
+            falhas = 0
+        except RuntimeError:
+            # notebook recém-criado: o Kaggle leva alguns segundos (às vezes minutos) para mostrá-lo
+            falhas += 1
+            if falhas > 10:
+                raise
+            time.sleep(t.intervalo_s)
+            continue
         if "complete" in estado:
             return
         if any(x in estado for x in ("error", "cancel")):
