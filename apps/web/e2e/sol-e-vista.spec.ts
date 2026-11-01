@@ -83,8 +83,9 @@ test('sol e vista: horas de sol por unidade (com a sombra dos prédios reais), f
   await vitrine.screenshot({ path: test.info().outputPath('dentro-601.png') });
   // tocar no chão: anda até lá (a posição muda) sem sair do apartamento
   const antes = await vitrine.getAttribute('data-posicao');
-  const caixa = (await vitrine.boundingBox())!;
-  await page.mouse.click(caixa.x + caixa.width * 0.5, caixa.y + caixa.height * 0.72);
+  // toque em cima do texto da faixa de dica: ela não pode "comer" o toque (em tela pequena, cobre o piso)
+  const dica = (await vitrine.getByText(/toque no chão para andar/).boundingBox())!;
+  await page.mouse.click(dica.x + dica.width / 2, dica.y + dica.height / 2);
   await expect.poll(() => vitrine.getAttribute('data-posicao'), { timeout: 15_000 }).not.toBe(antes);
   await page.getByRole('button', { name: 'Sair do apartamento' }).click();
   await expect(vitrine).toHaveAttribute('data-interior', '');

@@ -723,11 +723,12 @@ export function Vitrine({
         )}
         {interior && !elevador && (
           <div className="pointer-events-none absolute inset-x-0 bottom-9 z-10 flex justify-center px-28">
-            <div className="pointer-events-auto flex flex-wrap items-center justify-center gap-2 rounded-2xl bg-black/65 px-3 py-1.5 text-center text-xs text-white backdrop-blur sm:text-sm">
+            {/* o toque passa pela faixa (é chão para andar, em tela pequena ela cobre o piso); só o botão recebe */}
+            <div className="flex flex-wrap items-center justify-center gap-2 rounded-2xl bg-black/65 px-3 py-1.5 text-center text-xs text-white backdrop-blur sm:text-sm">
               <span>
                 Dentro da unidade {unidadesAtuais.find((u) => u.id === interior)?.codigo} · toque no chão para andar · arraste para olhar
               </span>
-              <button type="button" onClick={sairDoApartamento} className="rounded-full bg-white px-3 py-1 font-semibold text-slate-900 hover:bg-white/90">
+              <button type="button" onClick={sairDoApartamento} className="pointer-events-auto rounded-full bg-white px-3 py-1 font-semibold text-slate-900 hover:bg-white/90">
                 Sair do apartamento
               </button>
             </div>
