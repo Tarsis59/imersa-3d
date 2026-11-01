@@ -17,7 +17,7 @@ const linhas = ['predio;andar;codigo;tipologia;area_m2;quartos;preco;status'];
 for (let a = 1; a <= 10; a++) for (let f = 1; f <= 4; f++) linhas.push(`Torre A;${a};${a}0${f};Tipo ${f % 2 ? 2 : 3}Q;${f % 2 ? 70 : 98};${f % 2 ? 2 : 3};${600 + a * 10 + f}.000,00;${ST[(a + f) % 5]}`);
 
 test('aparência da Vitrine 3D em celular, tablet e computador', async ({ page, request }) => {
-  test.setTimeout(300_000);
+  test.setTimeout(480_000); // 5 imagens, duas com acabamento de imagem: no CI o 3D é desenhado por software
   await entrarComoAdminComMfa(page, request, 'visual');
   await page.getByLabel('Nome do projeto').fill('Residencial Paulista');
   await page.getByRole('button', { name: 'Criar projeto' }).click();
