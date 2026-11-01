@@ -78,6 +78,7 @@ test('sol e vista: horas de sol por unidade (com a sombra dos prédios reais), f
   await expect(vitrine).toHaveAttribute('data-interior', id!, { timeout: 15_000 });
   await expect(page.getByTestId('elevador')).toHaveCount(0);
   await expect(vitrine).toHaveAttribute('data-modo', 'primeira-pessoa');
+  await expect(page.getByTestId('minimapa')).toBeVisible(); // você está aqui, com o prédio e os vizinhos reais
   await page.waitForTimeout(1200);
   await vitrine.screenshot({ path: test.info().outputPath('dentro-601.png') });
   // tocar no chão: anda até lá (a posição muda) sem sair do apartamento

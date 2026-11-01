@@ -1,6 +1,6 @@
 'use client';
 import { useEffect, useMemo, useRef, useState, type PointerEvent as EventoPonteiro } from 'react';
-import { criarViewer, filtrar, type Clima, type EstudoSolar, type PeriodoDeSol, type Giro, filtroVazio, pontoCardeal, vetorJoystick, type EstadoViewer, type Filtro, type UnidadeViewer, type Viewer } from '@imersa/viewer';
+import { criarViewer, filtrar, type Caixa, type Clima, type EstudoSolar, type PeriodoDeSol, type Giro, filtroVazio, pontoCardeal, vetorJoystick, type EstadoViewer, type Filtro, type UnidadeViewer, type Viewer } from '@imersa/viewer';
 import type { StatusUnidade } from '@/lib/tipos';
 import { Botao, Campo, Cartao, Selecao } from '@/components/ui';
 import { alternarFavorito, lerFavoritos, salvarFavoritos } from '@/lib/favoritos';
@@ -523,6 +523,9 @@ export function Vitrine({
             </div>
           </div>
         )}
+        {modo === 'primeira-pessoa' && telemetria && viewer.current && !elevador && (
+          <Minimapa mapa={viewer.current.mapaDoLote()} posicao={{ x: telemetria.posicao.x, z: telemetria.posicao.z }} direcao={telemetria.direcao} />
+        )}
         {elevador && (
           <div data-testid="elevador" className="absolute inset-0 z-20 grid place-items-center bg-slate-950/90 text-white" role="status" aria-live="polite">
             <div className="grid justify-items-center gap-2">
@@ -533,7 +536,7 @@ export function Vitrine({
           </div>
         )}
         {interior && !elevador && (
-          <div className="pointer-events-none absolute inset-x-0 bottom-3 z-10 flex justify-center px-28">
+          <div className="pointer-events-none absolute inset-x-0 bottom-9 z-10 flex justify-center px-28">
             <div className="pointer-events-auto flex flex-wrap items-center justify-center gap-2 rounded-2xl bg-black/65 px-3 py-1.5 text-center text-xs text-white backdrop-blur sm:text-sm">
               <span>
                 Dentro da unidade {unidadesAtuais.find((u) => u.id === interior)?.codigo} · toque no chão para andar · arraste para olhar
@@ -957,6 +960,29 @@ function Apresentacao({ unidade, nomeAndar }: { unidade: UnidadeViewer | null; n
       )}
       <p className="animate-pulse rounded-full bg-white/20 px-5 py-2 text-lg font-semibold backdrop-blur">Toque na tela para explorar</p>
     </div>
+  );
+}
+
+/** Minimapa (primeira pessoa): o prédio, os vizinhos reais e você, com a seta para onde olha. */
+function Minimapa({ mapa, posicao, direcao }: { mapa: { predio: Caixa; vizinhos: Caixa[] }; posicao: { x: number; z: number }; direcao: { x: number; z: number } }) {
+  const p = mapa.predio;
+  const meio = { x: (p.minX + p.maxX) / 2, z: (p.minZ + p.maxZ) / 2 };
+  const alcance = Math.max(p.maxX - p.minX, p.maxZ - p.minZ) / 2 + 35; // metros do centro até a borda do mapa
+  const L = 140;
+  const px = (x: number) => ((x - meio.x) / alcance) * (L / 2) + L / 2;
+  const pz = (z: number) => ((z - meio.z) / alcance) * (L / 2) + L / 2;
+  const caixa = (c: Caixa, cor: string, chave: string) => (
+    <rect key={chave} x={px(c.minX)} y={pz(c.minZ)} width={((c.maxX - c.minX) / alcance) * (L / 2)} height={((c.maxZ - c.minZ) / alcance) * (L / 2)} fill={cor} />
+  );
+  const x = Math.min(L - 6, Math.max(6, px(posicao.x)));
+  const y = Math.min(L - 6, Math.max(6, pz(posicao.z)));
+  return (
+    <svg data-testid="minimapa" width={L} height={L} viewBox={`0 0 ${L} ${L}`} className="absolute bottom-9 right-3 rounded-xl border border-white/40 bg-slate-900/70 shadow" role="img" aria-label="Minimapa: você está no ponto azul">
+      {mapa.vizinhos.map((c, i) => caixa(c, '#64748b', `v${i}`))}
+      {caixa(p, '#e2e8f0', 'predio')}
+      <circle cx={x} cy={y} r={5} fill="#0ea5e9" stroke="#fff" strokeWidth={2} />
+      <line x1={x} y1={y} x2={x + direcao.x * 14} y2={y + direcao.z * 14} stroke="#0ea5e9" strokeWidth={3} strokeLinecap="round" />
+    </svg>
   );
 }
 

@@ -54,6 +54,8 @@ export interface EstadoViewer {
   posicao: { x: number; y: number; z: number };
   /** Acabamento de imagem (sombra de contato, brilho, antisserrilhado) ligado. */
   acabamento: boolean;
+  /** Para onde a câmera olha no chão (x, z normalizados): seta do minimapa. */
+  direcao: { x: number; z: number };
 }
 
 /** Resumo da visita para a telemetria. */
@@ -106,6 +108,8 @@ export interface Viewer {
   entrarNaUnidade(unidadeId: string): boolean;
   /** Onde está a câmera e para onde olha (tour guiado ao vivo: a consultora transmite). */
   poseCamera(): { posicao: [number, number, number]; alvo: [number, number, number] };
+  /** Minimapa: o prédio e os prédios vizinhos até 150 m (caixas no chão, eixos da cena). */
+  mapaDoLote(): { predio: Caixa; vizinhos: Caixa[] };
   /** Segue a câmera de outra pessoa (cliente no tour guiado), suave; `null` devolve o controle. */
   seguirPose(pose: { posicao: [number, number, number]; alvo: [number, number, number] } | null): void;
   /** Céu limpo (sol e sombra fortes) ou nublado (luz difusa, céu cinza, sombra fraca). */
@@ -856,6 +860,7 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
       modo,
       posicao: { x: camera.position.x, y: camera.position.y, z: camera.position.z },
       acabamento: pos !== null,
+      direcao: { x: direcaoCamera.x / (Math.hypot(direcaoCamera.x, direcaoCamera.z) || 1), z: direcaoCamera.z / (Math.hypot(direcaoCamera.x, direcaoCamera.z) || 1) },
     });
   };
   renderer.setAnimationLoop((agora: number) => {
@@ -1003,6 +1008,13 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
       }
       estudo = calculado;
       return calculado;
+    },
+    mapaDoLote() {
+      const predio = caixaDoPredio();
+      const cx = (predio.minX + predio.maxX) / 2;
+      const cz = (predio.minZ + predio.maxZ) / 2;
+      const vizinhos = obstaculos.filter((o) => Math.hypot((o.minX + o.maxX) / 2 - cx, (o.minZ + o.maxZ) / 2 - cz) < 150);
+      return { predio, vizinhos };
     },
     poseCamera() {
       const alvo = modo === 'orbita' ? orbita.target.clone() : camera.getWorldDirection(new THREE.Vector3()).multiplyScalar(5).add(camera.position);
