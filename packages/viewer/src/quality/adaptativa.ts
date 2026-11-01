@@ -3,13 +3,15 @@ export interface NivelQualidade {
   pixelRatioMax: number;
   sombras: boolean;
   tamanhoSombra: number;
+  /** Sombra de contato, brilho suave e antisserrilhado de pós-processamento (só onde sobra placa de vídeo). */
+  posProcessamento: boolean;
 }
 
 /** Do mais bonito ao mais leve. */
 export const NIVEIS: readonly NivelQualidade[] = [
-  { nome: 'alto', pixelRatioMax: 2, sombras: true, tamanhoSombra: 2048 },
-  { nome: 'medio', pixelRatioMax: 1.5, sombras: true, tamanhoSombra: 1024 },
-  { nome: 'baixo', pixelRatioMax: 1, sombras: false, tamanhoSombra: 0 },
+  { nome: 'alto', pixelRatioMax: 2, sombras: true, tamanhoSombra: 2048, posProcessamento: true },
+  { nome: 'medio', pixelRatioMax: 1.5, sombras: true, tamanhoSombra: 1024, posProcessamento: false },
+  { nome: 'baixo', pixelRatioMax: 1, sombras: false, tamanhoSombra: 0, posProcessamento: false },
 ];
 
 export interface OpcoesQualidade {

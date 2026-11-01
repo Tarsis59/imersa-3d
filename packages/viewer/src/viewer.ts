@@ -3,8 +3,12 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { CSM } from 'three/addons/csm/CSM.js';
 import { ORIGEM_PAULISTA } from './geo/project';
 import { sunDirection, horaSaoPauloParaUtc } from './sun/sun';
+import { criarCeu, type Clima } from './ambiente/ceu';
+import type { PosProcessamento } from './ambiente/pos';
 import { rumoDaCamera, paraReferenciaDoProjeto } from './sun/bussola';
 import { massaDoPredio } from './units/massa';
+import { planejarFachada } from './units/fachada';
+import { malhasDaFachada, materiaisDaFachada, texturaDeJanelas } from './units/janelas';
 import { buildCityMesh } from './city/cityMesh';
 import { entornoParaLocal, type Entorno } from './city/entorno';
 import { alturaDoCorte, planoDeCorte } from './units/corte';
@@ -45,6 +49,8 @@ export interface EstadoViewer {
   rumo: number;
   modo: ModoCamera;
   posicao: { x: number; y: number; z: number };
+  /** Acabamento de imagem (sombra de contato, brilho, antisserrilhado) ligado. */
+  acabamento: boolean;
 }
 
 /** Resumo da visita para a telemetria. */
@@ -65,7 +71,7 @@ export interface Giro {
   altura: number;
 }
 
-export type Clima = 'limpo' | 'nublado';
+export type { Clima };
 
 export interface Viewer {
   /** Resolve quando o prédio está na tela; rejeita se o modelo não carregar. */
@@ -170,6 +176,9 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
   cena.fog = new THREE.Fog(0xbfd9f2, 700, 1800);
   const ceu = new THREE.HemisphereLight(0xffffff, 0x8a8f99, 0.9);
   cena.add(ceu);
+  // céu físico com nuvens e estrelas; o mapa de reflexos sai do próprio céu
+  const atmosfera = criarCeu(renderer, cena);
+  cena.add(atmosfera.objeto);
 
   const camera = new THREE.PerspectiveCamera(50, 1, 0.1, 4000);
   camera.position.set(60, 50, 60);
@@ -196,7 +205,8 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
     csm.setupMaterial(m);
   };
 
-  const chao = new THREE.Mesh(new THREE.PlaneGeometry(2000, 2000), new THREE.MeshStandardMaterial({ color: 0xd6d3cc }));
+  // chão até além da neblina: no horizonte ele some na cor do céu, sem borda
+  const chao = new THREE.Mesh(new THREE.PlaneGeometry(8000, 8000), new THREE.MeshStandardMaterial({ color: 0xd6d3cc }));
   chao.rotation.x = -Math.PI / 2;
   chao.receiveShadow = true;
   prepararMaterial(chao.material);
@@ -261,6 +271,16 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
     };
   }
 
+  /** 0 de dia → 1 à noite: janelas acesas nas unidades (só no prédio desenhado pela fachada procedural). */
+  let luzNoturna = 0;
+  const LUZ_JANELA = 0xffb46b;
+  /** Unidade com luz acesa à noite (fixo por unidade, ~60%): o prédio parece habitado sem piscar. */
+  const acesaANoite = (id: string) => {
+    let h = 0;
+    for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) | 0;
+    return Math.abs(h) % 10 < 6;
+  };
+
   function pintar(): void {
     for (const [id, p] of pecas) {
       const passa = destaque === null || destaque.has(id);
@@ -268,7 +288,18 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
       p.material.transparent = true;
       p.material.opacity = passa ? (p.ambiente ? OPACIDADE_AMBIENTE : 0.92) : OPACIDADE_ESMAECIDA;
       p.material.depthWrite = passa && !p.ambiente;
-      p.material.emissive.setHex(id === selecionada ? COR_SELECAO : favoritos.has(id) ? COR_FAVORITA : 0x000000);
+      const marcada = id === selecionada ? COR_SELECAO : favoritos.has(id) ? COR_FAVORITA : null;
+      // à noite, janelas acesas (luz quente atrás do vidro; os caixilhos da textura continuam escuros)
+      const acesa = marcada === null && luzNoturna > 0 && p.material.map !== null && (p.unidade.status === 'disponivel' || acesaANoite(id));
+      if (marcada !== null || !acesa) p.material.emissive.setHex(marcada ?? 0x000000);
+      // luz quente puxada para a cor da situação: à noite continua dando para ver o que está à venda
+      else p.material.emissive.setHex(LUZ_JANELA).lerp(new THREE.Color(COR_UNIDADE[p.unidade.status]), 0.45);
+      const mapa = acesa ? p.material.map : null;
+      if (p.material.emissiveMap !== mapa) {
+        p.material.emissiveMap = mapa;
+        p.material.needsUpdate = true; // muda o shader só quando acende ou apaga
+      }
+      p.material.emissiveIntensity = acesa ? luzNoturna * 0.85 : 1;
       p.malha.castShadow = passa;
     }
   }
@@ -278,10 +309,12 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
     for (const u of config.unidades) porAndar.set(u.andar, [...(porAndar.get(u.andar) ?? []), u.id]);
     const caixas = massaDoPredio([...porAndar].map(([numero, unidades]) => ({ numero, unidades })));
     const grupo = new THREE.Group();
+    // cada unidade é um pano de vidro com caixilhos (tingido pela situação); em volta, a fachada de verdade
+    const janelas = texturaDeJanelas();
     for (const u of config.unidades) {
       const c = caixas.get(u.id);
       if (!c) continue;
-      const material = new THREE.MeshStandardMaterial({ roughness: 0.7 });
+      const material = new THREE.MeshStandardMaterial({ roughness: 0.18, metalness: 0.2, map: janelas });
       prepararMaterial(material, true);
       const malha = new THREE.Mesh(new THREE.BoxGeometry(c.maxX - c.minX, c.maxY - c.minY, c.maxZ - c.minZ), material);
       malha.position.set((c.minX + c.maxX) / 2, (c.minY + c.maxY) / 2, (c.minZ + c.maxZ) / 2);
@@ -290,6 +323,9 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
       grupo.add(malha);
       pecas.set(u.id, { unidade: u, malha, material, caixa: c });
     }
+    const materiaisFachada = materiaisDaFachada();
+    for (const m of Object.values(materiaisFachada)) prepararMaterial(m, true);
+    for (const malha of malhasDaFachada(planejarFachada(caixas.values()), materiaisFachada)) grupo.add(malha);
     cena.add(grupo);
     bloqueado = bloqueioPorCaixas([...caixas.values()], 0.3, ALTURA_OLHOS_M);
   }
@@ -458,21 +494,40 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
   }
 
   // -------------------------------------------------------------- sol
-  let dia = true;
   let clima: Clima = 'limpo';
-  const COR_CEU = { limpo: 0xbfd9f2, nublado: 0xc9ced6 } as const;
-  /** Luz do sol e do céu a partir da hora e do clima (nublado: o céu claro espalha a luz e a sombra quase some). */
+  /** Direção PARA o sol (referencial da cena). */
+  const sol = new THREE.Vector3(1, 1, 1).normalize();
+  const COR_SOL_ALTO = new THREE.Color(0xfff6ea);
+  const COR_SOL_BAIXO = new THREE.Color(0xffa45c);
+  /**
+   * Luz do sol, do céu e dos reflexos a partir da hora e do clima: o sol nasce fraco e alaranjado e fica branco no
+   * alto; nublado espalha a luz (sombra quase some); à noite sobra a luz azulada do céu.
+   */
   function aplicarLuz(): void {
-    for (const l of csm.lights) l.intensity = !dia ? 0 : clima === 'limpo' ? 2.2 : 0.45;
-    ceu.intensity = !dia ? 0.35 : clima === 'limpo' ? 0.9 : 1.5;
-    (cena.background as THREE.Color).setHex(COR_CEU[clima]);
-    cena.fog?.color.setHex(COR_CEU[clima]);
+    const elevacao = sol.y;
+    const forca = THREE.MathUtils.smoothstep(elevacao, -0.02, 0.25); // 0 de noite → 1 com o sol a ~15°
+    const corSol = COR_SOL_BAIXO.clone().lerp(COR_SOL_ALTO, THREE.MathUtils.smoothstep(elevacao, 0.02, 0.35));
+    for (const l of csm.lights) {
+      l.intensity = forca * (clima === 'limpo' ? 2.4 : 0.45);
+      l.color.copy(corSol);
+    }
+    const noite = 1 - THREE.MathUtils.smoothstep(elevacao, -0.12, 0.05);
+    ceu.intensity = THREE.MathUtils.lerp(clima === 'limpo' ? 0.4 : 0.95, 0.42, noite); // à noite: luar azulado
+    ceu.color.setHex(noite > 0.5 ? 0x8ea4d8 : 0xffffff);
+    // o céu físico é muito mais claro que o resto da cena: os reflexos entram fracos (só dão o brilho do vidro)
+    cena.environmentIntensity = THREE.MathUtils.lerp(clima === 'limpo' ? 0.28 : 0.4, 0.1, noite);
+    atmosfera.atualizar(sol, clima);
+    const antes = luzNoturna;
+    luzNoturna = Math.round(noite * 20) / 20;
+    if (luzNoturna !== antes && pecas.size) pintar();
+    (cena.background as THREE.Color).copy(atmosfera.horizonte);
+    cena.fog?.color.copy(atmosfera.horizonte);
   }
   function definirSol(dataISO: string, hora: number): void {
     const mundo = sunDirection(horaSaoPauloParaUtc(dataISO, hora), lat, lon);
     const local = paraReferenciaDoProjeto(mundo, rotacao);
     csm.lightDirection.copy(local).negate();
-    dia = local.y > 0;
+    sol.copy(local).normalize();
     aplicarLuz();
   }
   function definirClima(novo: Clima): void {
@@ -492,7 +547,33 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
       }
     }
     for (const m of materiais) m.needsUpdate = true;
+    ajustarPos(n);
   }
+
+  // acabamento de imagem: carregado à parte (não pesa na 1ª imagem) e só no nível alto
+  let pos: PosProcessamento | null = null;
+  let carregandoPos = false;
+  let destruido = false;
+  function ajustarPos(n: NivelQualidade): void {
+    if (!n.posProcessamento) {
+      pos?.destruir();
+      pos = null;
+      return;
+    }
+    if (pos || carregandoPos) return;
+    carregandoPos = true;
+    void import('./ambiente/pos')
+      .then((m) => {
+        if (destruido || !qualidade.nivel.posProcessamento) return;
+        pos = m.criarPos(renderer, cena, camera);
+        const pai = canvas.parentElement ?? canvas;
+        pos.redimensionar(Math.max(1, pai.clientWidth), Math.max(1, pai.clientHeight), renderer.getPixelRatio());
+      })
+      .catch(() => erros++) // sem o acabamento, a imagem continua normal
+      .finally(() => (carregandoPos = false));
+  }
+  /** O quadro com o acabamento quando há; senão, o desenho direto. */
+  const desenhar = () => (pos ? pos.desenhar() : renderer.render(cena, camera));
 
   // -------------------------------------------------------------- tamanho e laço
   const redimensionar = () => {
@@ -505,6 +586,7 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
     camera.aspect = w / h;
     camera.updateProjectionMatrix();
     csm.updateFrustums();
+    pos?.redimensionar(w, h, renderer.getPixelRatio());
   };
   const observador = new ResizeObserver(redimensionar);
   observador.observe(canvas.parentElement ?? canvas);
@@ -582,19 +664,30 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
         const materiaisOriginais = new Map<THREE.Mesh, THREE.Material | THREE.Material[]>();
         const fundo = cena.background;
         const neblina = cena.fog;
+        const escondidos: THREE.Object3D[] = [];
         cena.traverse((o) => {
           if (!(o instanceof THREE.Mesh)) return;
+          if (o.userData.foraDaMascara && o.visible) {
+            o.visible = false;
+            escondidos.push(o);
+            return;
+          }
           materiaisOriginais.set(o, o.material);
           o.material = deMascara.get(o) ?? preto;
         });
         if (cidade) cidade.visible = false; // o raio-x já tira a cidade da frente na imagem colorida
         cena.background = new THREE.Color(0x000000);
         cena.fog = null;
+        // sem reflexos: o mapa do céu também tingiria as cores exatas da máscara
+        const reflexos = cena.environment;
+        cena.environment = null;
         renderer.setRenderTarget(alvoMascara);
         renderer.render(cena, camera);
         renderer.readRenderTargetPixels(alvoMascara, 0, 0, w, h, pixels);
         renderer.setRenderTarget(null);
         for (const [m, mat] of materiaisOriginais) m.material = mat;
+        for (const o of escondidos) o.visible = true;
+        cena.environment = reflexos;
         if (cidade) cidade.visible = true;
         cena.background = fundo;
         cena.fog = neblina;
@@ -634,6 +727,7 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
       rumo: Math.round(rumoDaCamera(direcaoCamera, rotacao)),
       modo,
       posicao: { x: camera.position.x, y: camera.position.y, z: camera.position.z },
+      acabamento: pos !== null,
     });
   };
   renderer.setAnimationLoop((agora: number) => {
@@ -671,8 +765,9 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
     }
 
     atualizarRaioX(modo === 'orbita' ? orbita.target : null);
+    atmosfera.quadro(camera, agora / 1000);
     csm.update();
-    renderer.render(cena, camera);
+    desenhar();
     if (esperandoQuadro.length) for (const ok of esperandoQuadro.splice(0)) ok(performance.now());
 
     avisar(agora);
@@ -681,6 +776,7 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
   const pronto = (config.modeloUrl ? montarModelo(config.modeloUrl) : Promise.resolve(montarVolumes())).then(() => {
     pintar();
     enquadrarPredio();
+    ajustarPos(qualidade.nivel);
   });
   pronto.then(
     () => (cargaMs = Math.round(performance.now() - criadoEm)),
@@ -824,7 +920,7 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
     },
     capturar(dados) {
       // desenha e copia na mesma tarefa: depois o navegador pode limpar o buffer do WebGL
-      renderer.render(cena, camera);
+      desenhar();
       const w = canvas.width;
       const h = canvas.height;
       const l = layoutMarca(w, h);
@@ -861,6 +957,8 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
       cbMudanca = cb;
     },
     destruir() {
+      destruido = true;
+      pos?.destruir();
       renderer.setAnimationLoop(null);
       observador.disconnect();
       vigia?.disconnect();
@@ -874,6 +972,7 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
       configurador?.destruir();
       for (const ok of esperandoQuadro.splice(0)) ok(performance.now());
       csm.dispose();
+      atmosfera.destruir();
       cena.traverse((o) => {
         if (o instanceof THREE.Mesh) o.geometry.dispose();
       });

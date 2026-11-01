@@ -88,8 +88,9 @@ test('giro 360° fotorrealista: IFC real → pedido na página do prédio → wo
   await page.goto(predio);
   const estudio = page.getByTestId('estudio');
   await estudio.getByRole('button', { name: 'Gerar vídeo Reels e Stories (9:16)' }).click();
-  await expect(estudio.getByRole('button', { name: /Reels e Stories \(9:16\): na fila/ })).toBeVisible();
+  // o pedido entra na lista (o worker do teste pega em 2 s: "na fila" pode já ter passado quando a tela atualiza)
   const itemVideo = estudio.getByTestId('lista-videos').getByRole('listitem').first();
+  await expect(itemVideo).toHaveAttribute('data-status-video', /na_fila|processando|pronto/);
   await expect
     .poll(
       async () => {

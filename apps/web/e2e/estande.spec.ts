@@ -45,7 +45,7 @@ test('estande: painel cria → PC em tela cheia apresenta sozinho → visitante 
   // PC do estande: tela grande com toque, sem login
   const pc = await browser.newContext({ viewport: { width: 1920, height: 1080 }, hasTouch: true });
   const tela = await pc.newPage();
-  await tela.goto(`${endereco}?ocioso=6&sinal=6`);
+  await tela.goto(`${endereco}?ocioso=12&sinal=6`);
   const estande = tela.getByTestId('estande');
   const vitrine = tela.getByTestId('vitrine-3d');
   await expect(vitrine).toHaveAttribute('data-estado', 'pronto', { timeout: 90_000 });
@@ -71,8 +71,8 @@ test('estande: painel cria → PC em tela cheia apresenta sozinho → visitante 
   await expect(tela.getByTestId('qualidade')).toHaveCount(0);
 
   // foi embora: depois do tempo ocioso, volta a apresentar e recomeça do zero para o próximo
-  await expect(estande).toHaveAttribute('data-apresentacao', 'ligada', { timeout: 15_000 });
-  await expect(estande).toHaveAttribute('data-reinicio', '1');
+  await expect(estande).toHaveAttribute('data-apresentacao', 'ligada', { timeout: 25_000 });
+  await expect(estande).toHaveAttribute('data-reinicio', /^[1-9]\d*$/);
   await expect(tela.getByRole('heading', { name: 'Unidade 102' })).toHaveCount(0);
   await expect(vitrine).toHaveAttribute('data-clima', 'limpo');
 

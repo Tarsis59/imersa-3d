@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { corDoIndice, indiceDaCor, quadroPorArrasto, poseNoGiro, MAX_UNIDADES_GIRO } from './giro';
+import { corDoIndice, indiceDaCor, indiceMaisProximo, quadroPorArrasto, poseNoGiro, MAX_UNIDADES_GIRO } from './giro';
 
 describe('cor-ID (máscara de unidades)', () => {
   it('ida e volta exata, inclusive nos extremos', () => {
@@ -43,5 +43,35 @@ describe('giro: quadros e arrasto', () => {
     const a0 = Math.atan2(p0.posicao.x - centro.x, p0.posicao.z - centro.z);
     const a18 = Math.atan2(p18.posicao.x - centro.x, p18.posicao.z - centro.z);
     expect(Math.abs(Math.abs(a18 - a0) - Math.PI / 2)).toBeLessThan(1e-6);
+  });
+});
+
+describe('toque no giro: unidade mais próxima', () => {
+  const mascara = (l: number, a: number, pintar: (x: number, y: number) => number | null) => {
+    const px = new Uint8ClampedArray(l * a * 4);
+    for (let y = 0; y < a; y++)
+      for (let x = 0; x < l; x++) {
+        const i = pintar(x, y);
+        if (i === null) continue;
+        const [r, g, b] = corDoIndice(i);
+        px.set([r, g, b, 255], (y * l + x) * 4);
+      }
+    return px;
+  };
+
+  it('no ponto da unidade, ela mesma', () => {
+    const px = mascara(20, 20, (x) => (x < 10 ? 0 : 1));
+    expect(indiceMaisProximo(px, 20, 20, 3, 5, 4)).toBe(0);
+    expect(indiceMaisProximo(px, 20, 20, 15, 5, 4)).toBe(1);
+  });
+
+  it('na laje (preto) entre duas unidades, a mais perto; longe demais, nenhuma', () => {
+    // unidade 0 em y<8, laje preta de 8 a 11, unidade 1 em y≥12
+    const px = mascara(20, 20, (_, y) => (y < 8 ? 0 : y >= 12 ? 1 : null));
+    expect(indiceMaisProximo(px, 20, 20, 5, 8, 4)).toBe(0);
+    expect(indiceMaisProximo(px, 20, 20, 5, 11, 4)).toBe(1);
+    expect(indiceMaisProximo(mascara(20, 20, () => null), 20, 20, 5, 5, 4)).toBeNull();
+    const longe = mascara(40, 40, (x) => (x > 30 ? 2 : null));
+    expect(indiceMaisProximo(longe, 40, 40, 5, 5, 4)).toBeNull();
   });
 });

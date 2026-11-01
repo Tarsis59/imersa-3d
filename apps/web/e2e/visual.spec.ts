@@ -56,4 +56,22 @@ test('aparência da Vitrine 3D em celular, tablet e computador', async ({ page, 
       mask: [page.getByTestId('qualidade')], // o número de FPS muda a cada rodada
     });
   }
+
+  // qualidade alta: céu, reflexos e acabamento de imagem (sombra de contato, brilho, antisserrilhado)
+  url.searchParams.set('qualidade', 'alto');
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto(url.toString());
+  const vitrine = page.getByTestId('vitrine-3d');
+  await expect(vitrine).toHaveAttribute('data-estado', 'pronto', { timeout: 45_000 });
+  await expect(vitrine).toHaveAttribute('data-entorno', /^\d+$/, { timeout: 45_000 });
+  await expect(vitrine).toHaveAttribute('data-acabamento', 'ligado', { timeout: 30_000 });
+  await page.getByLabel('Dia do sol').fill('2026-06-21');
+  await page.getByLabel(/^Hora/).fill('15');
+  await page.evaluate(() => window.scrollTo(0, 0));
+  await page.waitForTimeout(1500);
+  await expect(vitrine).toHaveScreenshot('vitrine-computador-alta.png', { maxDiffPixelRatio: 0.01, timeout: 60_000, mask: [page.getByTestId('qualidade')] });
+  // noite: céu escuro com estrelas e janelas acesas (as disponíveis sempre acesas)
+  await page.getByLabel(/^Hora/).fill('21');
+  await page.waitForTimeout(1500);
+  await expect(vitrine).toHaveScreenshot('vitrine-computador-noite.png', { maxDiffPixelRatio: 0.01, timeout: 60_000, mask: [page.getByTestId('qualidade')] });
 });

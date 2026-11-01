@@ -372,6 +372,7 @@ export function Vitrine({
         data-destaque-ia={destaqueIA ? [...destaqueIA].sort().join(',') : ''}
         data-ao-vivo={estadoAoVivo}
         data-clima={clima}
+        data-acabamento={telemetria?.acabamento ? 'ligado' : 'desligado'}
         data-apresentacao={apresentando ? 'ligada' : 'desligada'}
         data-unidade-da-vez={vitrineDaVez ?? ''}
         className={`relative ${estande ? 'h-[calc(100dvh-7rem)]' : 'h-[70vh]'} min-h-96 overflow-hidden rounded-2xl border border-borda bg-fundo lg:sticky lg:top-6`}
@@ -571,7 +572,7 @@ export function Vitrine({
               <Campo id="data-sol" rotulo="Dia do sol" type="date" value={dataSol} onChange={(e) => e.target.value && setDataSol(e.target.value)} />
               <label htmlFor="hora-sol" className="grid gap-1">
                 <span className="font-medium">Hora: {horaLegivel(horaSol)}</span>
-                <input id="hora-sol" type="range" min={6} max={19} step={0.25} value={horaSol} onChange={(e) => setHoraSol(Number(e.target.value))} />
+                <input id="hora-sol" type="range" min={5} max={22} step={0.25} value={horaSol} onChange={(e) => setHoraSol(Number(e.target.value))} />
               </label>
             </div>
             <fieldset className="grid gap-2">
