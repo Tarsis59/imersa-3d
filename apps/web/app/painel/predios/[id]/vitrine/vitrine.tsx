@@ -1,6 +1,6 @@
 'use client';
 import { useEffect, useMemo, useRef, useState, type PointerEvent as EventoPonteiro } from 'react';
-import { criarViewer, filtrar, suporteImersivo, type SuporteImersivo, type Caixa, type Clima, type EstudoSolar, type PeriodoDeSol, type Giro, filtroVazio, pontoCardeal, vetorJoystick, type EstadoViewer, type Filtro, type UnidadeViewer, type Viewer } from '@imersa/viewer';
+import { criarViewer, filtrar, suporteImersivo, temWebGpu, type SuporteImersivo, type Caixa, type Clima, type EstudoSolar, type PeriodoDeSol, type Giro, filtroVazio, pontoCardeal, vetorJoystick, type EstadoViewer, type Filtro, type UnidadeViewer, type Viewer } from '@imersa/viewer';
 import type { ItemLazer, StatusUnidade } from '@/lib/tipos';
 import { Botao, Campo, Cartao, Selecao } from '@/components/ui';
 import { alternarFavorito, lerFavoritos, salvarFavoritos } from '@/lib/favoritos';
@@ -306,11 +306,13 @@ export function Vitrine({
     v.aoSelecionar((id) => setSelecionada(id));
     // telemetria: uma vez por visita, ao sair da página (ou trocar de página dentro do site)
     let enviado = false;
+    let webgpu: boolean | null = null;
+    void temWebGpu().then((w) => (webgpu = w));
     const enviarTelemetria = () => {
       const m = v.metricas();
       if (!c.comTelemetria || enviado || (m.cargaMs === null && m.erros === 0)) return;
       enviado = true;
-      const corpo = JSON.stringify({ predioId: c.predioId, ...m, celular: window.matchMedia('(pointer: coarse)').matches });
+      const corpo = JSON.stringify({ predioId: c.predioId, ...m, celular: window.matchMedia('(pointer: coarse)').matches, webgpu });
       navigator.sendBeacon?.('/api/telemetria', new Blob([corpo], { type: 'application/json' }));
     };
     const aoEsconder = () => document.visibilityState === 'hidden' && enviarTelemetria();

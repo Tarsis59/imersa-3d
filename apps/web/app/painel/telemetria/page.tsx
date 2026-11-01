@@ -10,6 +10,7 @@ interface Resumo {
   taxaErro: number;
   porNivel: { alto: number; medio: number; baixo: number };
   celular: { sessoes: number; fpsP50: number | null };
+  webgpu: { visitas: number; medidas: number };
 }
 
 const segundos = (ms: number | null) => (ms === null ? '—' : `${(ms / 1000).toLocaleString('pt-BR', { maximumFractionDigits: 1 })} s`);
@@ -48,6 +49,12 @@ export default async function PaginaTelemetria() {
           <Numero rotulo="Fluidez (mediana)" valor={fps(d.fps.p50)} detalhe={`5% piores: ${fps(d.fps.p05)}`} />
           <Numero rotulo="Visitas com erro" valor={`${(d.taxaErro * 100).toLocaleString('pt-BR', { maximumFractionDigits: 1 })}%`} />
           <Numero rotulo="Pelo celular" valor={String(d.celular.sessoes)} detalhe={`fluidez mediana: ${fps(d.celular.fpsP50)}`} />
+          <Numero
+            rotulo="Aparelhos com WebGPU"
+            valor={d.webgpu.medidas ? `${Math.round((d.webgpu.visitas / d.webgpu.medidas) * 100)}%` : '—'}
+            detalhe={`${d.webgpu.visitas} de ${d.webgpu.medidas} visitas medidas: base da migração do 3D para WebGPU`}
+            testid="telemetria-webgpu"
+          />
           <Numero
             rotulo="Qualidade usada"
             valor={`${d.porNivel.alto} / ${d.porNivel.medio} / ${d.porNivel.baixo}`}

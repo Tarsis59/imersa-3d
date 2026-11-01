@@ -21,6 +21,7 @@ from pathlib import Path
 
 from .giro import _esperar
 from .kaggle_cli import KaggleCli
+from .narracao import VOZES
 from .pipeline import RAIZ, ErroPipeline, Nuvem
 
 FORMATOS = ("9:16", "1:1", "16:9")
@@ -56,6 +57,7 @@ def preparar_dataset(glb: Path, config: dict, t: TrabalhoVideo) -> Path:
     shutil.copy(glb, destino / "modelo.glb")
     (destino / "config.json").write_text(json.dumps(config))
     shutil.copy(RAIZ / "kaggle" / "video_blender.py", destino / "video_blender.py")
+    shutil.copy(RAIZ / "imersa_recon" / "narracao.py", destino / "narracao.py")  # locução (Kokoro) no notebook
     (destino / "dataset-metadata.json").write_text(
         json.dumps({"title": f"imersa-video-{t.id}", "id": t.id_dataset, "isPrivate": True, "licenses": [{"name": "other"}]})
     )
@@ -98,6 +100,8 @@ def conferir_video(pasta: Path, config: dict) -> dict:
     mb = video.stat().st_size / 2**20
     if mb > MAX_MB:
         raise ErroPipeline("video_grande_demais", f"O vídeo ficou com {mb:.0f} MB (máximo {MAX_MB}).")
+    if config.get("narracao") and not info.get("narracao"):
+        raise ErroPipeline("falha_na_narracao", "O vídeo saiu sem a narração pedida.")
     return {**info, "mb": round(mb, 2), "capa": (pasta / "capa.jpg").exists()}
 
 
@@ -131,7 +135,21 @@ def executar_local(glb: Path, config: dict, pasta: Path, blender: str, escala: i
     r = subprocess.run(comando, capture_output=True, text=True)
     if r.returncode != 0:
         raise ErroPipeline("falha_no_render", "O Blender não terminou o vídeo.", (r.stderr or r.stdout or "").strip().splitlines()[-5:])
-    return saida, {**conferir_video(saida, config), "tempos_s": {"render": round(time.monotonic() - inicio, 1)}}
+    tempos = {"render": round(time.monotonic() - inicio, 1)}
+    if config.get("narracao"):
+        inicio = time.monotonic()
+        try:
+            from .narracao import narrar_video
+
+            info = narrar_video(saida / "video.mp4", config["narracao"]["texto"], config["narracao"]["voz"], pasta / "narracao")
+        except ImportError as e:
+            raise ErroPipeline("narracao_indisponivel", "A narração (kokoro-onnx) não está instalada nesta máquina.") from e
+        except (OSError, RuntimeError, subprocess.CalledProcessError) as e:
+            raise ErroPipeline("falha_na_narracao", f"A narração não foi gerada: {e}"[:300]) from e
+        arquivo = saida / "video.json"
+        arquivo.write_text(json.dumps({**json.loads(arquivo.read_text(encoding="utf-8")), "narracao": info}, ensure_ascii=False), encoding="utf-8")
+        tempos["narracao"] = round(time.monotonic() - inicio, 1)
+    return saida, {**conferir_video(saida, config), "tempos_s": tempos}
 
 
 def principal(argv: list[str] | None = None, nuvem: Nuvem | None = None) -> int:
@@ -150,6 +168,7 @@ def principal(argv: list[str] | None = None, nuvem: Nuvem | None = None) -> int:
     p.add_argument("--segundos", type=float, default=PADRAO["segundos"])
     p.add_argument("--fps", type=int, default=PADRAO["fps"])
     p.add_argument("--amostras", type=int, default=PADRAO["amostras"])
+    p.add_argument("--narracao", type=Path, help='JSON {"texto": "...", "voz": "pf_dora"}: locução em português com legenda')
     a = p.parse_args(argv)
     if not re.fullmatch(r"[a-z0-9-]{4,40}", a.id):
         p.error("--id: só letras minúsculas, números e hífen (4 a 40)")
@@ -166,6 +185,12 @@ def principal(argv: list[str] | None = None, nuvem: Nuvem | None = None) -> int:
 
     config = {"formato": a.formato, "segundos": a.segundos, "fps": a.fps, "amostras": a.amostras, "selo": SELO}
     try:
+        if a.narracao:
+            n = json.loads(a.narracao.read_text(encoding="utf-8"))
+            texto, voz = str(n.get("texto", "")).strip(), n.get("voz")
+            if voz not in VOZES or not 10 <= len(texto) <= 600:
+                return responder({"ok": False, "erro": "entrada_invalida", "mensagem": "Narração inválida (voz ou texto).", "detalhes": []}, 2)
+            config["narracao"] = {"texto": texto, "voz": voz}
         if a.blender:
             pasta, info = executar_local(a.glb, config, a.saida, a.blender, a.escala)
         else:

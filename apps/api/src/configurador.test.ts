@@ -506,5 +506,27 @@ describe('estúdio de marketing: vídeos do prédio (Blender, com selo)', () => 
     // o MP4 fica na biblioteca de vídeos do prédio, não na lista de arquivos enviados
     expect((await req('GET', `/projetos/${projeto}/arquivos`, undefined, gestaoA)).json.some((a: { tipo: string }) => a.tipo === 'video')).toBe(false);
     expect((await owner.query('SELECT ha_video_pendente() AS p')).rows[0].p).toBe(false);
+
+    // narração: voz inválida não passa; sem texto, o roteiro sai dos dados do empreendimento
+    expect((await req('POST', `/predios/${casa}/videos`, { formato: '16:9', narracao: { voz: 'robo' } }, gestaoA)).status).toBe(400);
+    expect((await req('POST', `/predios/${casa}/videos`, { formato: '16:9', narracao: { voz: 'pf_dora', texto: 'curto' } }, gestaoA)).status).toBe(400);
+    const narrado = (await req('POST', `/predios/${casa}/videos`, { formato: '16:9', narracao: { voz: 'pm_alex' } }, gestaoA)).json.id;
+    const pedido = (await req('GET', `/predios/${casa}/videos`, undefined, gestaoA)).json.videos.find((v: { id: string }) => v.id === narrado);
+    expect(pedido.narracao.voz).toBe('pm_alex');
+    expect(pedido.narracao.texto).toMatch(/^Conheça o .+\. .*Agende sua visita\.$/);
+    const recebidos: Array<{ voz: string; texto: string } | null> = [];
+    let narrar = false;
+    const comVoz = async (e: { formato: '9:16' | '1:1' | '16:9'; pasta: string; narracao: { voz: string; texto: string } | null }) => {
+      recebidos.push(e.narracao);
+      const r = await provedor(e);
+      // 1ª vez: o vídeo volta mudo (não pode passar como pronto); 2ª: com a locução
+      return narrar ? { ...r, selo: 'Imagem ilustrativa', narracao: { voz: e.narracao!.voz, segundos: 7.4, frases: 3, legenda: 'queimada' } } : { ...r, selo: 'Imagem ilustrativa' };
+    };
+    expect(await processarProximoVideo({ pool, armazenamento, provedor: comVoz, pastaTrabalho: pasta })).toBe('erro');
+    expect(recebidos[0]).toEqual(pedido.narracao); // o roteiro chega inteiro ao provedor
+    narrar = true;
+    expect(await processarProximoVideo({ pool, armazenamento, provedor: comVoz, pastaTrabalho: pasta })).toBe('ok'); // mudo é transitório: tentou de novo
+    const feito = (await req('GET', `/predios/${casa}/videos`, undefined, gestaoA)).json.videos.find((v: { id: string }) => v.id === narrado);
+    expect(feito).toMatchObject({ status: 'pronto', metricas: { narracao: { voz: 'pm_alex', legenda: 'queimada' } } });
   });
 });

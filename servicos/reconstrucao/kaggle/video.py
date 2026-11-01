@@ -4,7 +4,9 @@ Vídeo de marketing do prédio na GPU gratuita do Kaggle (Blender Cycles; o Blen
 Entrada (dataset privado anexado ao notebook, montado em /kaggle/input/<dataset>/):
   modelo.glb        modelo 3D do prédio, já sem compressão (o importador do Blender não lê Meshopt)
   video_blender.py  o roteiro que roda dentro do Blender
-  config.json       {"formato": "9:16", "segundos": 10, "fps": 30, "amostras": 48, "selo": "Imagem ilustrativa"}
+  narracao.py       a locução (Kokoro-82M em ONNX, Apache-2.0) e a legenda, quando pedidas
+  config.json       {"formato": "9:16", "segundos": 10, "fps": 30, "amostras": 48, "selo": "Imagem ilustrativa",
+                     "narracao": {"texto": "...", "voz": "pf_dora"}}   (narracao é opcional)
 
 Saída (/kaggle/working/, baixada pelo orquestrador):
   video.mp4, capa.jpg, video.json
@@ -82,6 +84,26 @@ def baixar_blender() -> Path:
     return exe
 
 
+def narrar(entrada: Path, pasta: Path, pedido: dict) -> None:
+    """Kokoro (voz em português) + legenda no vídeo do Blender."""
+    try:
+        # kokoro-onnx: o mesmo modelo em ONNX (o pacote em PyTorch não instala no Python 3.13 do Kaggle); traz o espeak-ng
+        subprocess.run([sys.executable, "-m", "pip", "install", "-q", "kokoro-onnx>=0.4", "soundfile"], capture_output=True, timeout=1200, check=True)
+    except (OSError, subprocess.SubprocessError) as e:
+        falhar("falha_na_narracao", f"Não foi possível instalar a narração (Kokoro): {e}"[:300])
+    sys.path.insert(0, str(entrada))
+    import narracao  # o mesmo módulo do serviço (vem no dataset)
+
+    try:
+        info = narracao.narrar_video(pasta / "video.mp4", pedido["texto"], pedido["voz"], TEMP / "narracao")
+    except Exception as e:  # noqa: BLE001 - qualquer falha da locução vira mensagem para a tela
+        falhar("falha_na_narracao", f"A narração não foi gerada: {e}"[:300])
+        raise
+    arquivo = pasta / "video.json"
+    arquivo.write_text(json.dumps({**json.loads(arquivo.read_text()), "narracao": info}, ensure_ascii=False))
+    print("[imersa] narração:", json.dumps(info, ensure_ascii=False), flush=True)
+
+
 def principal() -> None:
     SAIDA.mkdir(parents=True, exist_ok=True)
     entrada = achar_entrada()
@@ -111,6 +133,11 @@ def principal() -> None:
     if r.returncode != 0 or not (pasta / "video.json").exists() or not (pasta / "video.mp4").exists():
         print((r.stdout or "")[-4000:], (r.stderr or "")[-4000:], flush=True)
         falhar("falha_no_render", "O Blender não terminou o vídeo. " + ((r.stderr or r.stdout or "").strip().splitlines() or [""])[-1][:300])
+    if config.get("narracao"):
+        gravar(etapa="narrando")
+        t0 = time.time()
+        narrar(entrada, pasta, config["narracao"])
+        RESULTADO["tempos_s"]["narracao"] = round(time.time() - t0, 1)
     for nome in ("video.mp4", "capa.jpg", "video.json"):
         shutil.copy(pasta / nome, SAIDA / nome)
     info = json.loads((pasta / "video.json").read_text())

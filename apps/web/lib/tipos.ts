@@ -306,7 +306,9 @@ export interface VideoPredio {
   formato: '9:16' | '1:1' | '16:9';
   status: 'na_fila' | 'processando' | 'pronto' | 'erro';
   mensagem: string | null;
-  metricas: { largura?: number; altura?: number; segundos?: number; mb?: number; dispositivo?: string };
+  metricas: { largura?: number; altura?: number; segundos?: number; mb?: number; dispositivo?: string; narracao?: { voz: string; legenda?: string } };
+  /** Locução pedida (voz e roteiro falado), ou null. */
+  narracao: { voz: 'pf_dora' | 'pm_alex'; texto: string } | null;
   arquivoId: string | null;
   capaId: string | null;
   criadoEm: string;

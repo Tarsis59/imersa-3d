@@ -13,14 +13,32 @@ export const FORMATOS_VIDEO = ['9:16', '1:1', '16:9'] as const;
 export type FormatoVideo = (typeof FORMATOS_VIDEO)[number];
 
 export type ResultadoVideo =
-  | { ok: true; video: string; capa: string | null; formato: string; largura: number; altura: number; segundos: number; selo: string; dispositivo: string; mb: number; tempos_s?: Record<string, number> }
+  | {
+      ok: true;
+      video: string;
+      capa: string | null;
+      formato: string;
+      largura: number;
+      altura: number;
+      segundos: number;
+      selo: string;
+      dispositivo: string;
+      mb: number;
+      tempos_s?: Record<string, number>;
+      /** Locução feita (voz, duração, frases e como foi a legenda). */
+      narracao?: Record<string, unknown>;
+    }
   | { ok: false; erro: string; mensagem: string };
 
 /**
  * Quem faz o vídeo. Hoje, o Blender (grátis e fiel ao projeto); um provedor de vídeo com IA entraria como outro
  * `ProvedorVideo` com a mesma entrada e a mesma saída (MP4 + selo), sem mudar fila, telas nem armazenamento.
  */
-export type ProvedorVideo = (e: { glb: string; formato: FormatoVideo; id: string; pasta: string }) => Promise<ResultadoVideo>;
+export type ProvedorVideo = (e: { glb: string; formato: FormatoVideo; id: string; pasta: string; narracao: Narracao | null }) => Promise<ResultadoVideo>;
+export interface Narracao {
+  voz: string;
+  texto: string;
+}
 
 export interface DepsVideo {
   pool: pg.Pool;
@@ -30,7 +48,7 @@ export interface DepsVideo {
   intervaloSinalMs?: number;
 }
 
-const TRANSITORIOS = new Set(['falha_na_gpu', 'tempo_esgotado', 'falha_inesperada', 'falha_no_render', 'sem_internet']);
+const TRANSITORIOS = new Set(['falha_na_gpu', 'tempo_esgotado', 'falha_inesperada', 'falha_no_render', 'sem_internet', 'falha_na_narracao']);
 const MAX_TENTATIVAS = 2;
 const SELO = 'Imagem ilustrativa';
 const falhaInesperada = (mensagem: string): ResultadoVideo => ({ ok: false, erro: 'falha_inesperada', mensagem });
@@ -43,8 +61,8 @@ export async function processarProximoVideo(d: DepsVideo): Promise<'vazia' | 'ok
   const ctx = { tenantId: alvo.tenant_id, userId: null };
   const v = await withTenant(d.pool, ctx, async (c) =>
     (
-      await c.query<{ building_id: string; formato: FormatoVideo; tentativas: number; project_id: string; predio: string; chave: string }>(
-        `SELECT v.building_id, v.formato, v.tentativas, b.project_id, b.nome AS predio, a.chave
+      await c.query<{ building_id: string; formato: FormatoVideo; tentativas: number; project_id: string; predio: string; chave: string; narracao: Narracao | null }>(
+        `SELECT v.building_id, v.formato, v.tentativas, v.narracao, b.project_id, b.nome AS predio, a.chave
            FROM videos v JOIN buildings b ON b.id = v.building_id JOIN assets a ON a.id = v.modelo_asset_id WHERE v.id = $1`,
         [alvo.id],
       )
@@ -60,12 +78,14 @@ export async function processarProximoVideo(d: DepsVideo): Promise<'vazia' | 'ok
     try {
       const glb = join(pasta, 'modelo.glb');
       await writeFile(glb, await glbParaBlender(new Uint8Array(await buffer(await d.armazenamento.abrirLeitura(v.chave)))));
-      r = await d.provedor({ glb, formato: v.formato, id: `${alvo.id.slice(0, 8)}-t${v.tentativas}`, pasta });
+      r = await d.provedor({ glb, formato: v.formato, id: `${alvo.id.slice(0, 8)}-t${v.tentativas}`, pasta, narracao: v.narracao });
     } catch (e) {
       r = e instanceof ModeloSemRender ? { ok: false, erro: 'modelo_invalido', mensagem: e.message } : falhaInesperada('Falha inesperada no render do vídeo. Uma nova tentativa será feita.');
     }
     // vídeo sem o selo não sai, venha de onde vier
     if (r.ok && r.selo !== SELO) r = { ok: false, erro: 'sem_selo', mensagem: 'O vídeo saiu sem o selo "Imagem ilustrativa" e foi descartado.' };
+    // narração pedida e não feita: não entrega vídeo mudo como se estivesse certo
+    if (r.ok && v.narracao && !r.narracao) r = { ok: false, erro: 'falha_na_narracao', mensagem: 'O vídeo saiu sem a narração pedida.' };
 
     if (r.ok) {
       const ok = r;
@@ -79,7 +99,7 @@ export async function processarProximoVideo(d: DepsVideo): Promise<'vazia' | 'ok
       };
       const video = await salvar(ok.video, `${base}.mp4`, 'video/mp4');
       const capa = ok.capa ? await salvar(ok.capa, `${base}-capa.jpg`, 'image/jpeg') : null;
-      const metricas = { largura: ok.largura, altura: ok.altura, segundos: ok.segundos, mb: ok.mb, dispositivo: ok.dispositivo, tempos_s: ok.tempos_s ?? {} };
+      const metricas = { largura: ok.largura, altura: ok.altura, segundos: ok.segundos, mb: ok.mb, dispositivo: ok.dispositivo, tempos_s: ok.tempos_s ?? {}, ...(ok.narracao ? { narracao: ok.narracao } : {}) };
       const gravou = await withTenant(d.pool, ctx, async (c) => {
         const st = (await c.query<{ status: string }>('SELECT status FROM videos WHERE id = $1 FOR UPDATE', [alvo.id])).rows[0]?.status;
         if (st !== 'processando') return false;
@@ -122,15 +142,24 @@ export function provedorBlender(o: { python: string; diretorio: string; usuarioK
       const resultado = join(e.pasta, 'resultado.json');
       const args = ['-m', 'imersa_recon.filme', '--glb', e.glb, '--formato', e.formato, '--id', e.id, '--saida', join(e.pasta, 'trabalho'), '--resultado', resultado];
       for (const [chave, valor] of Object.entries(o.qualidade ?? {})) if (valor !== undefined) args.push(`--${chave}`, String(valor));
+      const pedido = join(e.pasta, 'narracao.json');
+      if (e.narracao) args.push('--narracao', pedido);
       if (o.blender) args.push('--blender', o.blender);
       else args.push('--usuario', o.usuarioKaggle ?? '');
-      const p = spawn(o.python, args, { cwd: o.diretorio, stdio: 'ignore', env: { ...process.env, PYTHONIOENCODING: 'utf-8' } });
-      p.on('error', () => ok(falhaInesperada('Não foi possível iniciar o render do vídeo.')));
-      p.on('close', () => {
-        readFile(resultado, 'utf8')
-          .then((t) => ok(JSON.parse(t) as ResultadoVideo))
-          .catch(() => ok(falhaInesperada('O render do vídeo terminou sem resultado.')));
-      });
+      // o roteiro vai num arquivo (texto livre não passa pela linha de comando)
+      const preparar = e.narracao ? writeFile(pedido, JSON.stringify(e.narracao)) : Promise.resolve();
+      preparar.then(
+        () => {
+          const p = spawn(o.python, args, { cwd: o.diretorio, stdio: 'ignore', env: { ...process.env, PYTHONIOENCODING: 'utf-8' } });
+          p.on('error', () => ok(falhaInesperada('Não foi possível iniciar o render do vídeo.')));
+          p.on('close', () => {
+            readFile(resultado, 'utf8')
+              .then((t) => ok(JSON.parse(t) as ResultadoVideo))
+              .catch(() => ok(falhaInesperada('O render do vídeo terminou sem resultado.')));
+          });
+        },
+        () => ok(falhaInesperada('Não foi possível preparar a narração.')),
+      );
     });
 }
 
@@ -145,6 +174,8 @@ export function provedorSimulado(video: string, capa: string | null): ProvedorVi
       await copyFile(capa, capaDestino);
     }
     const [largura, altura] = e.formato === '9:16' ? [1080, 1920] : e.formato === '1:1' ? [1080, 1080] : [1920, 1080];
-    return { ok: true, video: destino, capa: capaDestino, formato: e.formato, largura, altura, segundos: 10, selo: SELO, dispositivo: 'simulado', mb: 0 };
+    // narração simulada: o vídeo pronto não tem voz; registra o pedido (a voz de verdade é feita no Kaggle)
+    const narracao = e.narracao ? { voz: e.narracao.voz, frases: e.narracao.texto.split(/(?<=[.!?])\s+/).length, legenda: 'simulada' } : undefined;
+    return { ok: true, video: destino, capa: capaDestino, formato: e.formato, largura, altura, segundos: 10, selo: SELO, dispositivo: 'simulado', mb: 0, ...(narracao ? { narracao } : {}) };
   };
 }

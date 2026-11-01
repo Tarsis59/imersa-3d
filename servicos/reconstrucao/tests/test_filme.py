@@ -14,6 +14,10 @@ CONFIG = {"formato": "9:16", "segundos": 1.0, "fps": 6, "amostras": 4, "selo": S
 MP4 = b"\x00\x00\x00\x18ftypisom" + b"\x00" * 64
 
 
+#: nome único por cópia (o id() de objeto já coletado pode se repetir e colidir na mesma pasta)
+_COPIAS = iter(range(10**6))
+
+
 class KaggleFalso:
     def __init__(self, resultado: dict, info: dict | None = None):
         self.resultado, self.info = resultado, info
@@ -21,7 +25,7 @@ class KaggleFalso:
         self.kernels: list[Path] = []
 
     def criar_dataset(self, pasta: Path) -> None:
-        self.datasets.append(Path(shutil.copytree(pasta, pasta.parent / f"_recebido_{id(self)}_{len(self.datasets)}")))
+        self.datasets.append(Path(shutil.copytree(pasta, pasta.parent / f"_recebido_{next(_COPIAS)}")))
 
     def dataset_pronto(self, id_dataset: str) -> bool:
         return True
@@ -30,7 +34,7 @@ class KaggleFalso:
         return True
 
     def enviar_kernel(self, pasta: Path) -> None:
-        self.kernels.append(Path(shutil.copytree(pasta, pasta.parent / f"_kernel_{id(self)}_{len(self.kernels)}")))
+        self.kernels.append(Path(shutil.copytree(pasta, pasta.parent / f"_kernel_{next(_COPIAS)}")))
 
     def status(self, id_kernel: str) -> str:
         return "complete"
@@ -49,7 +53,7 @@ def test_envia_privado_e_confere_formato_e_selo(tmp_path: Path):
     nuvem = KaggleFalso({"etapa": "pronto", "tempos_s": {"render": 600}}, {"formato": "9:16", "selo": SELO, "dispositivo": "OPTIX", "segundos": 10})
     pasta, info = executar(glb, CONFIG, TrabalhoVideo(id="abc123", usuario="fulano", pasta=tmp_path / "t", intervalo_s=0), nuvem)
     ds = nuvem.datasets[0]
-    assert sorted(p.name for p in ds.iterdir()) == ["config.json", "dataset-metadata.json", "modelo.glb", "video_blender.py"]
+    assert sorted(p.name for p in ds.iterdir()) == ["config.json", "dataset-metadata.json", "modelo.glb", "narracao.py", "video_blender.py"]
     assert json.loads((ds / "dataset-metadata.json").read_text())["isPrivate"] is True
     assert json.loads((ds / "config.json").read_text())["selo"] == "Imagem ilustrativa"
     meta = json.loads((nuvem.kernels[0] / "kernel-metadata.json").read_text())
@@ -69,6 +73,30 @@ def test_sem_selo_ou_formato_errado_nao_passa(tmp_path: Path):
     with pytest.raises(ErroPipeline) as e:
         executar(glb, CONFIG, t, KaggleFalso({"etapa": "erro", "erro": "sem_gpu", "mensagem": "x"}))
     assert e.value.codigo == "sem_gpu"
+
+
+def test_narracao_vai_no_pedido_e_o_video_sem_ela_nao_passa(tmp_path: Path):
+    glb = _glb(tmp_path, [])
+    config = {**CONFIG, "narracao": {"texto": "Conheça o Residencial Paulista.", "voz": "pf_dora"}}
+    t = TrabalhoVideo(id="abc123", usuario="u", pasta=tmp_path / "t", intervalo_s=0)
+    info = {"formato": "9:16", "selo": SELO, "dispositivo": "OPTIX"}
+    with pytest.raises(ErroPipeline) as e:
+        executar(glb, config, t, KaggleFalso({"etapa": "pronto"}, info))
+    assert e.value.codigo == "falha_na_narracao"
+    nuvem = KaggleFalso({"etapa": "pronto"}, {**info, "narracao": {"voz": "pf_dora", "segundos": 6.2, "frases": 2, "legenda": "queimada"}})
+    _, ok = executar(glb, config, TrabalhoVideo(id="abc124", usuario="u", pasta=tmp_path / "t2", intervalo_s=0), nuvem)
+    assert ok["narracao"]["legenda"] == "queimada"
+    assert json.loads((nuvem.datasets[0] / "config.json").read_text())["narracao"]["voz"] == "pf_dora"
+
+
+def test_pedido_de_narracao_invalido(tmp_path: Path):
+    glb = _glb(tmp_path, [])
+    pedido = tmp_path / "n.json"
+    resultado = tmp_path / "r.json"
+    for ruim in ({"texto": "curto", "voz": "pf_dora"}, {"texto": "Um texto bom o bastante.", "voz": "robo"}):
+        pedido.write_text(json.dumps(ruim))
+        codigo = principal(["--glb", str(glb), "--formato", "9:16", "--id", "abc123", "--saida", str(tmp_path / "s"), "--resultado", str(resultado), "--usuario", "u", "--narracao", str(pedido)])
+        assert codigo == 2 and json.loads(resultado.read_text())["erro"] == "entrada_invalida"
 
 
 BLENDER = os.environ.get("IMERSA_BLENDER")

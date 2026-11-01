@@ -11,6 +11,11 @@ const FORMATOS = [
   { formato: '16:9', nome: 'YouTube e site (16:9)' },
 ] as const;
 const ROTULO = { na_fila: 'Na fila', processando: 'Renderizando na GPU', pronto: 'Pronto', erro: 'Erro' } as const;
+const VOZES = [
+  { voz: '', nome: 'Sem narração' },
+  { voz: 'pf_dora', nome: 'Voz feminina (Dora)' },
+  { voz: 'pm_alex', nome: 'Voz masculina (Alex)' },
+] as const;
 const quando = (iso: string) => new Date(iso).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' });
 
 /**
@@ -25,13 +30,16 @@ export function Estudio({
 }: {
   dados: VideosDoPredio;
   podePedir: boolean;
-  pedir: (formato: (typeof FORMATOS)[number]['formato']) => Promise<{ erro?: string }>;
+  pedir: (formato: (typeof FORMATOS)[number]['formato'], narracao: { voz: 'pf_dora' | 'pm_alex'; texto?: string } | null) => Promise<{ erro?: string }>;
   linkDoArquivo: (arquivoId: string) => Promise<string | null>;
 }) {
   const router = useRouter();
   const [erro, setErro] = useState<string | null>(null);
   const [enviando, iniciar] = useTransition();
   const [tocando, setTocando] = useState<{ id: string; url: string; capa: string | null } | null>(null);
+  // narração em português (Kokoro): voz e, se quiser, o roteiro; vazio = roteiro automático com os dados do prédio
+  const [voz, setVoz] = useState<'' | 'pf_dora' | 'pm_alex'>('');
+  const [roteiro, setRoteiro] = useState('');
   const andamento = dados.videos.some((v) => v.status === 'na_fila' || v.status === 'processando');
   useAtualizarEnquanto(andamento, 60_000);
   const emAndamento = (f: string) => dados.videos.some((v) => v.formato === f && (v.status === 'na_fila' || v.status === 'processando'));
@@ -56,6 +64,35 @@ export function Estudio({
       </p>
       {!dados.temModelo && <Aviso tipo="info">Ligue um modelo 3D ao prédio para gerar vídeos.</Aviso>}
       {podePedir && dados.temModelo && (
+        <fieldset className="grid gap-2 rounded-lg border border-borda p-3" data-testid="narracao-video">
+          <legend className="px-1 font-medium">Narração</legend>
+          <label className="grid gap-1">
+            <span>Voz</span>
+            <select value={voz} onChange={(e) => setVoz(e.target.value as typeof voz)} className="rounded-lg border border-borda bg-superficie px-3 py-2">
+              {VOZES.map((v) => (
+                <option key={v.voz} value={v.voz}>
+                  {v.nome}
+                </option>
+              ))}
+            </select>
+          </label>
+          {voz && (
+            <label className="grid gap-1">
+              <span>Roteiro (opcional)</span>
+              <textarea
+                value={roteiro}
+                maxLength={600}
+                rows={3}
+                onChange={(e) => setRoteiro(e.target.value)}
+                placeholder="Em branco: o roteiro sai dos dados do prédio (unidades disponíveis, preço a partir de e o lazer)."
+                className="rounded-lg border border-borda bg-superficie px-3 py-2"
+              />
+              <span className="text-xs text-suave">Locução em português com legenda. Para 10 s, até umas 23 palavras.</span>
+            </label>
+          )}
+        </fieldset>
+      )}
+      {podePedir && dados.temModelo && (
         <div className="flex flex-wrap gap-2">
           {FORMATOS.map((f) => (
             <Botao
@@ -66,7 +103,7 @@ export function Estudio({
               onClick={() =>
                 iniciar(async () => {
                   setErro(null);
-                  const r = await pedir(f.formato);
+                  const r = await pedir(f.formato, voz ? { voz, texto: roteiro } : null);
                   if (r.erro) setErro(r.erro);
                   else router.refresh();
                 })
@@ -85,6 +122,7 @@ export function Estudio({
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <span>
                   <strong>{FORMATOS.find((f) => f.formato === v.formato)?.nome ?? v.formato}</strong> · {ROTULO[v.status]} · {quando(v.criadoEm)}
+                  {v.narracao && <span data-testid="video-narrado"> · narração: {VOZES.find((x) => x.voz === v.narracao!.voz)?.nome ?? v.narracao.voz}</span>}
                   {v.status === 'pronto' && v.metricas.mb ? ` · ${v.metricas.mb.toLocaleString('pt-BR')} MB` : ''}
                   {v.status === 'pronto' && !v.atual ? ' · modelo antigo do prédio' : ''}
                 </span>
