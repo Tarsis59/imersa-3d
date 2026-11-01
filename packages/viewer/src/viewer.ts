@@ -15,7 +15,7 @@ import { entornoParaLocal, type Entorno } from './city/entorno';
 import { alturaDoCorte, planoDeCorte } from './units/corte';
 import { COR_UNIDADE, type Caixa, type StatusUnidade, type UnidadeViewer } from './units/tipos';
 import { planejarVoo, enquadrar, type Pose } from './cameras/voo';
-import { passoPrimeiraPessoa, bloqueioPorCaixas, type Entrada, type EstadoPessoa, type OpcoesPasso } from './cameras/primeiraPessoa';
+import { passoPrimeiraPessoa, bloqueioPorCaixas, seguirPiso, rumoAoAlvo, yawPara, entradaDoControle, type Entrada, type EstadoPessoa, type OpcoesPasso, type Ponto2D } from './cameras/primeiraPessoa';
 import { QualidadeAdaptativa, type NivelQualidade } from './quality/adaptativa';
 import { criarCarregadorGltf, type Decodificadores } from './carregador';
 import { layoutMarca, textoDaMarca, type DadosMarca } from './captura/marca';
@@ -97,6 +97,11 @@ export interface Viewer {
   estudoSolar(): Map<string, EstudoSolar>;
   /** Câmera na varanda (janela) da unidade, na altura dos olhos, olhando para fora; arrastar olha em volta. */
   vistaDaUnidade(unidadeId: string): boolean;
+  /**
+   * Primeira pessoa dentro da unidade (no piso dela, olhando para a janela). No prédio desenhado pela fachada, o vidro
+   * da unidade fica claro por dentro. Sai com `definirModo` ou `visaoGeral`.
+   */
+  entrarNaUnidade(unidadeId: string): boolean;
   /** Céu limpo (sol e sombra fortes) ou nublado (luz difusa, céu cinza, sombra fraca). */
   definirClima(clima: Clima): void;
   /** Apresentação automática (estande sem ninguém mexendo): a câmera gira devagar em volta do prédio. */
@@ -221,6 +226,8 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
   cena.add(chao);
 
   const pecas = new Map<string, PecaUnidade>();
+  /** Além das peças sólidas e do chão, onde dá para pisar (lajes da fachada procedural). */
+  const pisosExtras: THREE.Object3D[] = [];
   /** Malhas que bloqueiam a primeira pessoa no modo GLB (paredes, lajes...). */
   const solidos: THREE.Object3D[] = [];
   let destaque: ReadonlySet<string> | null = null;
@@ -271,7 +278,7 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
     return (de, para) => {
       const distancia = Math.hypot(para.x - de.x, para.z - de.z);
       if (distancia === 0) return false;
-      origem.set(de.x, ALTURA_OLHOS_M - 0.6, de.z);
+      origem.set(de.x, (de.y ?? 0) + ALTURA_OLHOS_M - 0.6, de.z);
       direcao.set(para.x - de.x, 0, para.z - de.z).normalize();
       raio.set(origem, direcao);
       raio.far = distancia + 0.3;
@@ -292,10 +299,16 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
   function pintar(): void {
     for (const [id, p] of pecas) {
       const passa = destaque === null || destaque.has(id);
-      p.material.color.setHex(COR_UNIDADE[p.unidade.status]);
+      const dentroDela = id === interior;
+      p.material.color.setHex(dentroDela ? 0xe4ecf2 : COR_UNIDADE[p.unidade.status]);
       p.material.transparent = true;
-      p.material.opacity = passa ? (p.ambiente ? OPACIDADE_AMBIENTE : 0.92) : OPACIDADE_ESMAECIDA;
-      p.material.depthWrite = passa && !p.ambiente;
+      p.material.opacity = dentroDela ? 0.3 : passa ? (p.ambiente ? OPACIDADE_AMBIENTE : 0.92) : OPACIDADE_ESMAECIDA;
+      p.material.depthWrite = passa && !p.ambiente && !dentroDela;
+      const lado = dentroDela ? THREE.DoubleSide : THREE.FrontSide; // por dentro, o vidro também aparece
+      if (p.material.side !== lado) {
+        p.material.side = lado;
+        p.material.needsUpdate = true;
+      }
       const marcada = id === selecionada ? COR_SELECAO : favoritos.has(id) ? COR_FAVORITA : null;
       // à noite, janelas acesas (luz quente atrás do vidro; os caixilhos da textura continuam escuros)
       const acesa = marcada === null && luzNoturna > 0 && p.material.map !== null && (p.unidade.status === 'disponivel' || acesaANoite(id));
@@ -333,7 +346,10 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
     }
     const materiaisFachada = materiaisDaFachada();
     for (const m of Object.values(materiaisFachada)) prepararMaterial(m, true);
-    for (const malha of malhasDaFachada(planejarFachada(caixas.values()), materiaisFachada)) grupo.add(malha);
+    for (const malha of malhasDaFachada(planejarFachada(caixas.values()), materiaisFachada)) {
+      grupo.add(malha);
+      if (malha.name === 'fachada-concreto') pisosExtras.push(malha); // lajes: dá para pisar
+    }
     cena.add(grupo);
     bloqueado = bloqueioPorCaixas([...caixas.values()], 0.3, ALTURA_OLHOS_M);
   }
@@ -400,7 +416,23 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
   // -------------------------------------------------------------- câmera
   let modo: ModoCamera = 'orbita';
   let voo: { trajeto: (t: number) => Pose; inicio: number } | null = null;
-  const pessoa: EstadoPessoa & { pitch: number } = { x: 0, z: 0, yaw: 0, pitch: 0 };
+  const pessoa: EstadoPessoa & { pitch: number; y: number } = { x: 0, z: 0, y: 0, yaw: 0, pitch: 0 };
+  /** Tocar no chão para ir (primeira pessoa). */
+  let alvoCaminhada: Ponto2D | null = null;
+  let paradoMs = 0;
+  /** Unidade onde a pessoa entrou (vidro claro por dentro). */
+  let interior: string | null = null;
+  const raioPiso = new THREE.Raycaster();
+  const baixo = new THREE.Vector3(0, -1, 0);
+  /** Altura do piso sob (x, z), procurando de `deY` para baixo (peças sólidas, lajes e chão). */
+  function alturaDoPiso(x: number, z: number, deY: number): number | null {
+    raioPiso.set(new THREE.Vector3(x, deY, z), baixo);
+    for (const h of raioPiso.intersectObjects([...solidos, chao, ...pisosExtras], false)) {
+      if (!h.face) continue;
+      if (normalMundo.copy(h.face.normal).transformDirection(h.object.matrixWorld).y > 0.7) return h.point.y;
+    }
+    return null;
+  }
   const teclas = new Set<string>();
   let joystick: Entrada = { frente: 0, lado: 0 };
 
@@ -429,10 +461,15 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
     modo = novo;
     voo = null;
     orbita.enabled = novo === 'orbita';
+    alvoCaminhada = null;
+    if (interior) {
+      interior = null;
+      pintar();
+    }
     if (novo === 'primeira-pessoa') {
       const c = caixaDoPredio();
       // na calçada ao sul do prédio, olhando para ele (norte)
-      Object.assign(pessoa, { x: (c.minX + c.maxX) / 2, z: c.maxZ + 6, yaw: 0, pitch: 0.15 });
+      Object.assign(pessoa, { x: (c.minX + c.maxX) / 2, z: c.maxZ + 6, y: 0, yaw: 0, pitch: 0.15 });
     } else {
       enquadrarPredio();
     }
@@ -493,6 +530,19 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
           normalMundo.copy(acerto.face.normal).transformDirection(acerto.object.matrixWorld);
           if (normalMundo.y > 0.7) cbPiso({ x: acerto.point.x, y: acerto.point.y, z: acerto.point.z });
         }
+        return;
+      }
+    }
+    if (modo === 'primeira-pessoa') {
+      // tocar no chão: caminha até lá (se não houver unidade mais perto no mesmo toque)
+      const chaoTocado = raycaster.intersectObjects([...solidos, chao, ...pisosExtras], false).find((h) => {
+        if (!h.face) return false;
+        return normalMundo.copy(h.face.normal).transformDirection(h.object.matrixWorld).y > 0.7;
+      });
+      const unidadeTocada = raycaster.intersectObjects([...pecas.values()].map((p) => p.malha), false)[0];
+      if (chaoTocado && chaoTocado.distance < 60 && (!unidadeTocada || chaoTocado.distance < unidadeTocada.distance || interior !== null)) {
+        alvoCaminhada = { x: chaoTocado.point.x, z: chaoTocado.point.z };
+        paradoMs = 0;
         return;
       }
     }
@@ -815,8 +865,35 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
     } else if (modo === 'orbita') {
       orbita.update();
     } else {
-      Object.assign(pessoa, passoPrimeiraPessoa(pessoa, entradaAtual(), Math.min(dtMs, 100) / 1000, { velocidade: VELOCIDADE_M_S, bloqueado: (de, para) => bloqueado(de, para) || bloqueadoCidade(de, para) }));
-      camera.position.set(pessoa.x, ALTURA_OLHOS_M, pessoa.z);
+      const dt = Math.min(dtMs, 100) / 1000;
+      let entrada = entradaAtual();
+      // controle de videogame: alavanca esquerda anda, direita olha
+      const controle = navigator.getGamepads?.().find((g) => g?.connected);
+      if (controle) {
+        const c = entradaDoControle(controle.axes);
+        entrada = { frente: entrada.frente + c.andar.frente, lado: entrada.lado + c.andar.lado };
+        pessoa.yaw -= c.girar * dt * 2.2;
+        pessoa.pitch = THREE.MathUtils.clamp(pessoa.pitch - c.inclinar * dt * 1.6, -1.2, 1.2);
+      }
+      // tocar no chão para ir: só enquanto ninguém usa teclado, joystick ou controle
+      if (entrada.frente !== 0 || entrada.lado !== 0) alvoCaminhada = null;
+      else if (alvoCaminhada) {
+        const r = rumoAoAlvo(pessoa, alvoCaminhada, dt);
+        pessoa.yaw = r.yaw;
+        entrada = r.entrada;
+        if (r.chegou) alvoCaminhada = null;
+      }
+      const antes = { x: pessoa.x, z: pessoa.z };
+      Object.assign(pessoa, passoPrimeiraPessoa(pessoa, entrada, dt, { velocidade: VELOCIDADE_M_S, bloqueado: (de, para) => bloqueado(de, para) || bloqueadoCidade(de, para) }));
+      // preso (parede no caminho do toque): desiste em 0,6 s
+      if (alvoCaminhada && entrada.frente > 0) {
+        paradoMs = pessoa.x === antes.x && pessoa.z === antes.z ? paradoMs + dtMs : 0;
+        if (paradoMs > 600) alvoCaminhada = null;
+      }
+      // os pés seguem o piso: sobe escada e rampa, desce suave
+      const piso = seguirPiso(pessoa.y, pessoa.x, pessoa.z, alturaDoPiso);
+      pessoa.y = piso > pessoa.y ? piso : pessoa.y + (piso - pessoa.y) * Math.min(1, dt * 10);
+      camera.position.set(pessoa.x, pessoa.y + ALTURA_OLHOS_M, pessoa.z);
       camera.rotation.set(pessoa.pitch, pessoa.yaw, 0, 'YXZ');
     }
 
@@ -897,6 +974,25 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
       }
       estudo = calculado;
       return calculado;
+    },
+    entrarNaUnidade(id) {
+      const p = pecas.get(id);
+      if (!p) return false;
+      sairDaVista();
+      definirModo('primeira-pessoa');
+      const c = p.caixa;
+      const x = (c.minX + c.maxX) / 2;
+      const z = (c.minZ + c.maxZ) / 2;
+      const face = faceDaUnidade(p);
+      // de frente para a janela (sem face externa, para o norte); um passo atrás do meio, para ver o cômodo
+      const yaw = face ? yawPara(face.normal.x, face.normal.z) : 0;
+      const recuo = face ? 1.2 : 0;
+      const y = solidos.length ? (alturaDoPiso(x, z, c.maxY - 0.2) ?? c.minY) : c.minY;
+      Object.assign(pessoa, { x: x - (face?.normal.x ?? 0) * recuo, z: z - (face?.normal.z ?? 0) * recuo, y, yaw, pitch: -0.2 });
+      interior = id;
+      selecionada = id;
+      pintar();
+      return true;
     },
     vistaDaUnidade(id) {
       const p = pecas.get(id);
@@ -1011,7 +1107,7 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
     },
     pisoAbaixo(x, z, deY = ALTURA_OLHOS_M) {
       const r = new THREE.Raycaster(new THREE.Vector3(x, deY, z), new THREE.Vector3(0, -1, 0));
-      for (const h of r.intersectObjects([...solidos, chao], false)) {
+      for (const h of r.intersectObjects([...solidos, chao, ...pisosExtras], false)) {
         if (!h.face) continue;
         if (normalMundo.copy(h.face.normal).transformDirection(h.object.matrixWorld).y > 0.7) return { x: h.point.x, y: h.point.y, z: h.point.z };
       }

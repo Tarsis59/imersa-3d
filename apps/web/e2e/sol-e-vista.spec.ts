@@ -55,4 +55,21 @@ test('sol e vista: horas de sol por unidade (com a sombra dos prédios reais), f
   await vitrine.screenshot({ path: test.info().outputPath('vista-601.png') });
   await page.getByRole('button', { name: 'Voltar ao prédio' }).click();
   await expect(vitrine).toHaveAttribute('data-vista', '');
+
+  // entrar no apartamento: elevador sobe até o 6º, a porta abre e a pessoa está na sala, olhando para a janela
+  await page.getByRole('button', { name: 'Entrar no apartamento' }).click();
+  await expect(page.getByTestId('elevador')).toBeVisible();
+  await expect(vitrine).toHaveAttribute('data-interior', id!, { timeout: 15_000 });
+  await expect(page.getByTestId('elevador')).toHaveCount(0);
+  await expect(vitrine).toHaveAttribute('data-modo', 'primeira-pessoa');
+  await page.waitForTimeout(1200);
+  await vitrine.screenshot({ path: test.info().outputPath('dentro-601.png') });
+  // tocar no chão: anda até lá (a posição muda) sem sair do apartamento
+  const antes = await vitrine.getAttribute('data-posicao');
+  const caixa = (await vitrine.boundingBox())!;
+  await page.mouse.click(caixa.x + caixa.width * 0.5, caixa.y + caixa.height * 0.72);
+  await expect.poll(() => vitrine.getAttribute('data-posicao'), { timeout: 15_000 }).not.toBe(antes);
+  await page.getByRole('button', { name: 'Sair do apartamento' }).click();
+  await expect(vitrine).toHaveAttribute('data-interior', '');
+  await expect(vitrine).toHaveAttribute('data-modo', 'orbita');
 });

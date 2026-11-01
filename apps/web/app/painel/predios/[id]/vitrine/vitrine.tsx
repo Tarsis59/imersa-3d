@@ -226,6 +226,35 @@ export function Vitrine({
   const ativo = filtroAtivo(filtro) || filtroSol.length > 0;
   // vista da janela da unidade (câmera na varanda)
   const [vista, setVista] = useState<string | null>(null);
+  // dentro do apartamento (primeira pessoa) e o elevador que leva até ele
+  const [interior, setInterior] = useState<string | null>(null);
+  const [elevador, setElevador] = useState<{ destino: number; atual: number; nome: string } | null>(null);
+  const entrar = (u: UnidadeViewer) => {
+    if (elevador) return;
+    setVista(null);
+    const destino = Math.max(0, u.andar);
+    const passos = Math.max(1, destino);
+    let atual = 0;
+    setElevador({ destino, atual, nome: nomeAndar.get(u.andar) ?? `${u.andar}º andar` });
+    // o número do andar sobe em ~2 s (mais rápido em prédio alto), depois a porta "abre" na sala
+    const t = setInterval(
+      () => {
+        atual = Math.min(destino, atual + 1);
+        setElevador((e) => (e ? { ...e, atual } : e));
+        if (atual < destino) return;
+        clearInterval(t);
+        setTimeout(() => {
+          if (viewer.current?.entrarNaUnidade(u.id)) setInterior(u.id);
+          setElevador(null);
+        }, 450);
+      },
+      Math.max(120, 1800 / passos),
+    );
+  };
+  const sairDoApartamento = () => {
+    setInterior(null);
+    viewer.current?.definirModo('orbita');
+  };
   // unidades que o assistente mostrou: valem até a pessoa mexer nos filtros
   const [destaqueIA, setDestaqueIA] = useState<ReadonlySet<string> | null>(null);
   // apresentação do estande: a unidade disponível da vez
@@ -256,6 +285,8 @@ export function Vitrine({
     setFiltro(filtroVazio);
     setFiltroSol([]);
     setVista(null);
+    setInterior(null);
+    setElevador(null);
     setSelecionada(null);
     setAndarCorte('');
     setInteriorAberto(null);
@@ -367,6 +398,7 @@ export function Vitrine({
   };
   const voar = (id: string) => {
     setVista(null);
+    setInterior(null);
     setSelecionada(id);
     viewer.current?.voarPara(id);
   };
@@ -390,6 +422,8 @@ export function Vitrine({
         data-ao-vivo={estadoAoVivo}
         data-clima={clima}
         data-vista={vista ?? ''}
+        data-interior={interior ?? ''}
+        data-elevador={elevador ? String(elevador.atual) : ''}
         data-acabamento={telemetria?.acabamento ? 'ligado' : 'desligado'}
         data-apresentacao={apresentando ? 'ligada' : 'desligada'}
         data-unidade-da-vez={vitrineDaVez ?? ''}
@@ -401,6 +435,27 @@ export function Vitrine({
           aria-label="Prédio em 3D. Arraste para girar, role para aproximar, toque numa unidade para ver os detalhes."
         />
         {estado === 'carregando' && <p className="absolute inset-0 grid place-items-center text-suave">Carregando o 3D…</p>}
+        {elevador && (
+          <div data-testid="elevador" className="absolute inset-0 z-20 grid place-items-center bg-slate-950/90 text-white" role="status" aria-live="polite">
+            <div className="grid justify-items-center gap-2">
+              <span className="text-sm uppercase tracking-[0.3em] text-white/70">Elevador</span>
+              <span className="text-7xl font-bold tabular-nums">{elevador.atual === 0 ? 'T' : `${elevador.atual}º`}</span>
+              <span className="text-white/80">{elevador.atual < elevador.destino ? 'Subindo…' : `${elevador.nome}: a porta está abrindo`}</span>
+            </div>
+          </div>
+        )}
+        {interior && !elevador && (
+          <div className="pointer-events-none absolute inset-x-0 bottom-3 z-10 flex justify-center px-28">
+            <div className="pointer-events-auto flex flex-wrap items-center justify-center gap-2 rounded-2xl bg-black/65 px-3 py-1.5 text-center text-xs text-white backdrop-blur sm:text-sm">
+              <span>
+                Dentro da unidade {unidadesAtuais.find((u) => u.id === interior)?.codigo} · toque no chão para andar · arraste para olhar
+              </span>
+              <button type="button" onClick={sairDoApartamento} className="rounded-full bg-white px-3 py-1 font-semibold text-slate-900 hover:bg-white/90">
+                Sair do apartamento
+              </button>
+            </div>
+          </div>
+        )}
         {apresentando && <Apresentacao unidade={unidadesAtuais.find((u) => u.id === vitrineDaVez) ?? null} nomeAndar={(n) => nomeAndar.get(n) ?? `${n}º andar`} />}
         {estado === 'erro' && <p className="absolute inset-0 grid place-items-center text-perigo">Não foi possível carregar o modelo 3D.</p>}
         {telemetria && (
@@ -475,6 +530,11 @@ export function Vitrine({
                 <Botao type="button" variante="secundario" onClick={() => voar(unidade.id)}>
                   Ir até ela
                 </Botao>
+                {interior !== unidade.id && (
+                  <Botao type="button" variante="secundario" disabled={estado !== 'pronto' || elevador !== null} onClick={() => entrar(unidade)}>
+                    Entrar no apartamento
+                  </Botao>
+                )}
                 {solar.has(unidade.id) &&
                   (vista === unidade.id ? (
                     <Botao
@@ -676,6 +736,7 @@ export function Vitrine({
             {modo === 'orbita' ? (
               <Botao type="button" variante="secundario" disabled={estado !== 'pronto'} onClick={() => {
                   setVista(null);
+                  setInterior(null);
                   viewer.current?.definirModo('primeira-pessoa');
                 }}>
                 Andar a pé (1ª pessoa)
@@ -685,6 +746,7 @@ export function Vitrine({
                 <p className="text-suave">WASD ou setas para andar, arraste para olhar. No celular, use o controle no canto da tela.</p>
                 <Botao type="button" variante="secundario" onClick={() => {
                   setVista(null);
+                  setInterior(null);
                   viewer.current?.definirModo('orbita');
                 }}>
                   Voltar para a vista de cima
