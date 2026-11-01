@@ -17,6 +17,9 @@ interface Dependencias {
 }
 
 export const STATUS_LEAD = ['novo', 'em_contato', 'convertido', 'descartado'] as const;
+const Ponto = z.tuple([z.number().finite().min(-10_000).max(10_000), z.number().finite().min(-10_000).max(10_000), z.number().finite().min(-10_000).max(10_000)]);
+/** Câmera da consultora no tour guiado ao vivo. */
+const Conducao = z.object({ ativo: z.boolean(), posicao: Ponto.optional(), alvo: Ponto.optional(), unidade: z.uuid().nullable().optional() });
 const NovoLink = z.object({ titulo: z.string().trim().min(1).max(120).optional(), dias: z.number().int().min(1).max(90).default(30) });
 const MudarLead = z.object({ status: z.enum(STATUS_LEAD) });
 const FiltroLeads = z.object({ projetoId: z.uuid().optional(), status: z.enum(STATUS_LEAD).optional() });
@@ -75,6 +78,25 @@ export function rotasVendas(app: FastifyInstance, { pool, exigir, webUrl }: Depe
       await registrarAuditoria(c, { userId: s.userId, acao: 'link.revogar', entidade: 'share_link', entidadeId: id });
       return { status: 'revogado' };
     });
+  });
+
+  /**
+   * Tour guiado ao vivo: a consultora conduz e a câmera do cliente (no portal do link) segue a dela. A posição vai pelo
+   * mesmo canal do status ao vivo (NOTIFY), só para quem assiste aquele link. Várias vezes por segundo: limite alto.
+   */
+  app.post('/links/:id/conducao', { config: { rateLimit: { max: 900, timeWindow: '1 minute' } }, bodyLimit: 2048 }, async (req, reply) => {
+    const s = await exigir(req, 'link:criar');
+    const { id } = IdParam.parse(req.params);
+    const d = Conducao.parse(req.body);
+    await withTenant(pool, ctx(s), async (c) => {
+      const r = await c.query(
+        "SELECT 1 FROM share_links WHERE id = $1 AND tipo = 'cliente' AND revogado_em IS NULL AND expira_em > now() AND ($2::uuid IS NULL OR criado_por = $2)",
+        [id, soDela(s)],
+      );
+      if (!r.rowCount) throw new ErroHttp(404, 'nao_encontrado');
+      await c.query('SELECT pg_notify($1, $2)', ['imersa_conducao', JSON.stringify({ t: s.tenantId, l: id, ...d })]);
+    });
+    return reply.status(204).send();
   });
 
   app.get('/leads', async (req) => {

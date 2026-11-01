@@ -12,6 +12,24 @@ function rodar(q: QualidadeAdaptativa, fps: number, ms: number): string[] {
   return trocas;
 }
 
+describe('aparelho muito lento (quadros de vários décimos de segundo)', () => {
+  it('três quadros longos seguidos descem um nível; um só (travada) não', () => {
+    const q = new QualidadeAdaptativa({ inicial: 0 });
+    expect(q.registrar(800)).toBeNull();
+    expect(q.registrar(16)).toBeNull(); // voltou ao normal: zera a contagem
+    expect(q.registrar(800)).toBeNull();
+    expect(q.registrar(900)).toBeNull();
+    expect(q.registrar(700)?.nome).toBe('medio');
+  });
+
+  it('pausa longa (aba escondida) e qualidade fixa não contam', () => {
+    const q = new QualidadeAdaptativa({ inicial: 0 });
+    for (let i = 0; i < 5; i++) expect(q.registrar(60_000)).toBeNull();
+    const fixa = new QualidadeAdaptativa({ inicial: 0, fixo: true });
+    for (let i = 0; i < 5; i++) expect(fixa.registrar(800)).toBeNull();
+  });
+});
+
 describe('qualidade adaptativa', () => {
   it('níveis do mais bonito ao mais leve', () => {
     expect(NIVEIS.map((n) => n.nome)).toEqual(['alto', 'medio', 'baixo']);

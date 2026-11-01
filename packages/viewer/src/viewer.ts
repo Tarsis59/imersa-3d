@@ -104,6 +104,10 @@ export interface Viewer {
    * da unidade fica claro por dentro. Sai com `definirModo` ou `visaoGeral`.
    */
   entrarNaUnidade(unidadeId: string): boolean;
+  /** Onde está a câmera e para onde olha (tour guiado ao vivo: a consultora transmite). */
+  poseCamera(): { posicao: [number, number, number]; alvo: [number, number, number] };
+  /** Segue a câmera de outra pessoa (cliente no tour guiado), suave; `null` devolve o controle. */
+  seguirPose(pose: { posicao: [number, number, number]; alvo: [number, number, number] } | null): void;
   /** Céu limpo (sol e sombra fortes) ou nublado (luz difusa, céu cinza, sombra fraca). */
   definirClima(clima: Clima): void;
   /** Apresentação automática (estande sem ninguém mexendo): a câmera gira devagar em volta do prédio. */
@@ -435,6 +439,8 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
   /** Tocar no chão para ir (primeira pessoa). */
   let alvoCaminhada: Ponto2D | null = null;
   let paradoMs = 0;
+  /** Tour guiado ao vivo: a câmera segue a da consultora. */
+  let poseSeguida: { posicao: THREE.Vector3; alvo: THREE.Vector3 } | null = null;
   /** Unidade onde a pessoa entrou (vidro claro por dentro). */
   let interior: string | null = null;
   const raioPiso = new THREE.Raycaster();
@@ -878,6 +884,12 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
         voo = null;
         orbita.enabled = modo === 'orbita';
       }
+    } else if (poseSeguida && modo === 'orbita') {
+      // tour guiado: chega suave na câmera da consultora (sem tranco a cada pacote)
+      const k = 1 - Math.exp(-dtMs / 180);
+      camera.position.lerp(poseSeguida.posicao, k);
+      orbita.target.lerp(poseSeguida.alvo, k);
+      camera.lookAt(orbita.target);
     } else if (modo === 'orbita') {
       orbita.update();
     } else {
@@ -914,7 +926,7 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
     }
 
     atualizarRaioX(modo === 'orbita' && !emVista ? orbita.target : null);
-    atmosfera.quadro(camera, agora / 1000);
+    atmosfera.quadro(camera, config.qualidadeFixa ? 0 : agora / 1000); // qualidade fixa = cena determinística (nuvens paradas)
     csm.update();
     desenhar();
     if (esperandoQuadro.length) for (const ok of esperandoQuadro.splice(0)) ok(performance.now());
@@ -991,6 +1003,24 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
       }
       estudo = calculado;
       return calculado;
+    },
+    poseCamera() {
+      const alvo = modo === 'orbita' ? orbita.target.clone() : camera.getWorldDirection(new THREE.Vector3()).multiplyScalar(5).add(camera.position);
+      const r = (v: THREE.Vector3): [number, number, number] => [Math.round(v.x * 100) / 100, Math.round(v.y * 100) / 100, Math.round(v.z * 100) / 100];
+      return { posicao: r(camera.position), alvo: r(alvo) };
+    },
+    seguirPose(pose) {
+      if (!pose) {
+        poseSeguida = null;
+        orbita.enabled = modo === 'orbita';
+        return;
+      }
+      if (modo !== 'orbita') definirModo('orbita');
+      sairDaVista();
+      voo = null;
+      orbita.autoRotate = false;
+      orbita.enabled = false;
+      poseSeguida = { posicao: new THREE.Vector3(...pose.posicao), alvo: new THREE.Vector3(...pose.alvo) };
     },
     entrarNaUnidade(id) {
       const p = pecas.get(id);

@@ -138,7 +138,7 @@ export function rotasPublicas(app: FastifyInstance, { pool, armazenamento, entor
   /** Status das unidades ao vivo para o cliente (uma unidade vendida agora muda de cor na tela dele). */
   app.get('/publico/links/:token/ao-vivo', limite(30, '1 minute'), async (req, reply) => {
     const l = await resolver(req);
-    await transmitirPredio(req, reply, canal, { tenantId: l.tenantId, predioId: l.predioId });
+    await transmitirPredio(req, reply, canal, { tenantId: l.tenantId, predioId: l.predioId, linkId: l.linkId });
   });
 
   app.get('/publico/links/:token/entorno', limite(60, '1 minute'), async (req) => {

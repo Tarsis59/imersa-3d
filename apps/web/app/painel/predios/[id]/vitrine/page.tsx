@@ -2,7 +2,7 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import type { UnidadeViewer } from '@imersa/viewer';
 import { apiNaPagina } from '@/lib/sessao';
-import type { Arquivo, DetalheProjeto, Espelho, GirosDoPredio, Me } from '@/lib/tipos';
+import { ehGestao, type Arquivo, type DetalheProjeto, type Espelho, type GirosDoPredio, type LinkCliente, type Me } from '@/lib/tipos';
 import { Vitrine } from './vitrine';
 import { bilheteAoVivo, carregarEntorno, linkDoArquivo } from './actions';
 
@@ -26,6 +26,10 @@ export default async function PaginaVitrine({ params, searchParams }: { params: 
     apiNaPagina<{ ligada: boolean }>('/ia', volta),
   ]);
   const empresa = me.dados.empresas.find((e) => e.id === me.dados.tenantId)?.nome ?? '';
+  // visita guiada ao vivo: a consultora conduz pelos links ativos dela (a gestão, por todos)
+  const podeConduzir = ehGestao(me.dados.papel) || me.dados.papel === 'consultora';
+  const links = podeConduzir ? await apiNaPagina<LinkCliente[]>(`/predios/${encodeURIComponent(id)}/links`, volta) : null;
+  const linksAtivos = (links?.dados ?? []).filter((l) => l.status === 'ativo').map((l) => ({ id: l.id, titulo: l.titulo }));
   const projeto = detalhe.dados.projeto;
   const modeloUrl = download?.status === 200 ? download.dados.url : null;
   const interiores = lista.dados.filter((a) => a.tipo === 'splat' && a.status === 'pronto').map((a) => ({ id: a.id, nome: a.nome }));
@@ -64,6 +68,7 @@ export default async function PaginaVitrine({ params, searchParams }: { params: 
         carregarEntorno={carregarEntorno.bind(null, predio.projetoId)}
         linkDoArquivo={linkDoArquivo}
         aoVivo={bilheteAoVivo.bind(null, predio.id)}
+        linksParaConduzir={linksAtivos}
       />
     </>
   );

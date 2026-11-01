@@ -75,6 +75,7 @@ export function Vitrine({
   assistenteUrl = null,
   aoPedirContato,
   estande = null,
+  linksParaConduzir = [],
 }: {
   predioId: string;
   projetoId: string;
@@ -112,6 +113,8 @@ export function Vitrine({
    * unidades disponíveis aparecem uma a uma; cada `reinicio` novo volta tudo ao começo (próximo visitante).
    */
   estande?: { apresentando: boolean; reinicio: number } | null;
+  /** Painel: links ativos de clientes que a consultora pode conduzir ao vivo (a câmera do cliente segue a dela). */
+  linksParaConduzir?: Array<{ id: string; titulo: string | null }>;
 }) {
   const canvas = useRef<HTMLCanvasElement>(null);
   const coluna = useRef<HTMLDivElement>(null);
@@ -127,6 +130,12 @@ export function Vitrine({
   const statusAoVivoRef = useRef(statusAoVivo);
   statusAoVivoRef.current = statusAoVivo;
   const [estadoAoVivo, setEstadoAoVivo] = useState<'desligado' | 'conectando' | 'conectado'>('desligado');
+  // tour guiado ao vivo, lado do cliente: a câmera segue a da consultora até ele escolher explorar sozinho
+  const [conducao, setConducao] = useState<{ ativo: boolean; posicao?: [number, number, number]; alvo?: [number, number, number]; unidade?: string | null } | null>(null);
+  const [soltou, setSoltou] = useState(false);
+  // lado da consultora: qual link está conduzindo
+  const [conduzindo, setConduzindo] = useState<string | null>(null);
+  const [linkEscolhido, setLinkEscolhido] = useState('');
   const [estado, setEstado] = useState<'carregando' | 'pronto' | 'erro'>('carregando');
   const [telemetria, setTelemetria] = useState<EstadoViewer | null>(null);
   const [filtro, setFiltro] = useState<Filtro>(filtroVazio);
@@ -220,6 +229,7 @@ export function Vitrine({
       if (!url) return reconectar();
       fonte = new EventSource(url);
       fonte.onopen = () => vivo && setEstadoAoVivo('conectado');
+      fonte.addEventListener('conducao', (e) => setConducao(JSON.parse((e as MessageEvent<string>).data)));
       fonte.addEventListener('unidade', (e) => {
         const m = JSON.parse((e as MessageEvent<string>).data) as { id: string; status: StatusUnidade };
         setStatusAoVivo((s) => ({ ...s, [m.id]: m.status }));
@@ -302,6 +312,43 @@ export function Vitrine({
   useEffect(() => {
     if (estado === 'pronto') viewer.current?.definirClima(clima);
   }, [estado, clima]);
+  // cliente: segue a câmera da consultora (e a unidade que ela abrir)
+  useEffect(() => {
+    if (estado !== 'pronto') return;
+    if (!conducao?.ativo) {
+      viewer.current?.seguirPose(null);
+      setSoltou(false);
+      return;
+    }
+    if (soltou) return viewer.current?.seguirPose(null);
+    if (conducao.posicao && conducao.alvo) viewer.current?.seguirPose({ posicao: conducao.posicao, alvo: conducao.alvo });
+    if (conducao.unidade !== undefined) {
+      setSelecionada(conducao.unidade);
+      viewer.current?.selecionar(conducao.unidade);
+    }
+  }, [estado, conducao, soltou]);
+  // consultora: manda a câmera ~3 vezes por segundo enquanto conduz (só quando muda); ao parar, avisa o cliente
+  const selecionadaRef = useRef(selecionada);
+  selecionadaRef.current = selecionada;
+  useEffect(() => {
+    if (!conduzindo) return;
+    const url = `/painel/links/${conduzindo}/conducao`;
+    const enviar = (corpo: object) => fetch(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(corpo), keepalive: true }).catch(() => undefined);
+    let ultimo = '';
+    const t = setInterval(() => {
+      const pose = viewer.current?.poseCamera();
+      if (!pose) return;
+      const corpo = { ativo: true, ...pose, unidade: selecionadaRef.current };
+      const chave = JSON.stringify(corpo);
+      if (chave === ultimo) return;
+      ultimo = chave;
+      void enviar(corpo);
+    }, 330);
+    return () => {
+      clearInterval(t);
+      void enviar({ ativo: false });
+    };
+  }, [conduzindo]);
   useEffect(() => {
     if (estado === 'pronto' && entorno.tipo !== 'carregando' && viewer.current) setSolar(viewer.current.estudoSolar());
   }, [estado, entorno.tipo]);
@@ -453,6 +500,7 @@ export function Vitrine({
         data-clima={clima}
         data-vista={vista ?? ''}
         data-interior={interior ?? ''}
+        data-conducao={conducao?.ativo ? (soltou ? 'solto' : 'seguindo') : conduzindo ? 'conduzindo' : ''}
         data-elevador={elevador ? String(elevador.atual) : ''}
         data-acabamento={telemetria?.acabamento ? 'ligado' : 'desligado'}
         data-apresentacao={apresentando ? 'ligada' : 'desligada'}
@@ -465,6 +513,16 @@ export function Vitrine({
           aria-label="Prédio em 3D. Arraste para girar, role para aproximar, toque numa unidade para ver os detalhes."
         />
         {estado === 'carregando' && <p className="absolute inset-0 grid place-items-center text-suave">Carregando o 3D…</p>}
+        {conducao?.ativo && (
+          <div className="pointer-events-none absolute inset-x-0 top-3 z-10 flex justify-center px-16">
+            <div className="pointer-events-auto flex flex-wrap items-center justify-center gap-2 rounded-2xl bg-acento px-3 py-1.5 text-center text-sm text-acento-texto shadow" role="status">
+              <span>{soltou ? 'A consultora está conduzindo a visita.' : 'A consultora está conduzindo a visita: você vê o que ela mostra.'}</span>
+              <button type="button" onClick={() => setSoltou((x) => !x)} className="rounded-full bg-white px-3 py-1 font-semibold text-slate-900 hover:bg-white/90">
+                {soltou ? 'Seguir a consultora' : 'Explorar sozinho'}
+              </button>
+            </div>
+          </div>
+        )}
         {elevador && (
           <div data-testid="elevador" className="absolute inset-0 z-20 grid place-items-center bg-slate-950/90 text-white" role="status" aria-live="polite">
             <div className="grid justify-items-center gap-2">
@@ -650,6 +708,32 @@ export function Vitrine({
               <Botao type="button" variante="secundario" className="mt-2" onClick={() => setComparar([])}>
                 Limpar comparação
               </Botao>
+            </div>
+          </Cartao>
+        )}
+        {linksParaConduzir.length > 0 && (
+          <Cartao titulo="Visita guiada ao vivo">
+            <div className="grid gap-3 text-sm" data-testid="conduzir">
+              <p className="text-suave">Ligue com o cliente e conduza: quem estiver com o link aberto vê exatamente o que você mostra aqui, em tempo real.</p>
+              {conduzindo ? (
+                <Botao type="button" variante="perigo" onClick={() => setConduzindo(null)}>
+                  Encerrar visita guiada
+                </Botao>
+              ) : (
+                <>
+                  <Selecao id="link-conduzir" rotulo="Link do cliente" value={linkEscolhido} onChange={(e) => setLinkEscolhido(e.target.value)}>
+                    <option value="">Escolha…</option>
+                    {linksParaConduzir.map((l) => (
+                      <option key={l.id} value={l.id}>
+                        {l.titulo ?? 'Link sem nome'}
+                      </option>
+                    ))}
+                  </Selecao>
+                  <Botao type="button" disabled={!linkEscolhido} onClick={() => setConduzindo(linkEscolhido)}>
+                    Conduzir ao vivo
+                  </Botao>
+                </>
+              )}
             </div>
           </Cartao>
         )}
