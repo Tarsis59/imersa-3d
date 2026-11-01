@@ -13,6 +13,13 @@ function rodar(q: QualidadeAdaptativa, fps: number, ms: number): string[] {
 }
 
 describe('aparelho muito lento (quadros de vários décimos de segundo)', () => {
+  it('quadros de vários segundos seguidos (desenho por software com acabamento) também descem', () => {
+    const q = new QualidadeAdaptativa({ inicial: 0 });
+    expect(q.registrar(7000)).toBeNull();
+    expect(q.registrar(6500)).toBeNull();
+    expect(q.registrar(8000)?.nome).toBe('medio');
+  });
+
   it('três quadros longos seguidos descem um nível; um só (travada) não', () => {
     const q = new QualidadeAdaptativa({ inicial: 0 });
     expect(q.registrar(800)).toBeNull();
@@ -22,9 +29,12 @@ describe('aparelho muito lento (quadros de vários décimos de segundo)', () => 
     expect(q.registrar(700)?.nome).toBe('medio');
   });
 
-  it('pausa longa (aba escondida) e qualidade fixa não contam', () => {
+  it('volta de aba escondida (uma pausa longa e depois normal) e qualidade fixa não contam', () => {
     const q = new QualidadeAdaptativa({ inicial: 0 });
-    for (let i = 0; i < 5; i++) expect(q.registrar(60_000)).toBeNull();
+    for (let i = 0; i < 5; i++) {
+      expect(q.registrar(60_000)).toBeNull();
+      expect(q.registrar(16)).toBeNull();
+    }
     const fixa = new QualidadeAdaptativa({ inicial: 0, fixo: true });
     for (let i = 0; i < 5; i++) expect(fixa.registrar(800)).toBeNull();
   });

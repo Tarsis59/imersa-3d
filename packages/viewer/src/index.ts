@@ -18,3 +18,5 @@ export { MOVEIS_PADRAO, movelPadrao, ajustarPose, LICENCA_PADRAO, type MovelPadr
 export { blocosDaPlanta, subtrairIntervalos, type EdicaoPlanta, type SegmentoPx, type AberturaPx, type Bloco } from './planta/planta3d';
 export { montarPlanta3d, exportarGlb } from './planta/exportar';
 export { estudoSolar, type EstudoSolar, type PeriodoDeSol } from './sun/insolacao';
+export { suporteImersivo, type SuporteImersivo } from './xr/suporte';
+export { escalaDaMaquete, gestoDeDoisDedos, pontoDeEntrada, TAMANHO_MAQUETE_M } from './xr/maquete';

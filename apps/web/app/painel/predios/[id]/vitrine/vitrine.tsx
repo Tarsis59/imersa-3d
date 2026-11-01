@@ -1,6 +1,6 @@
 'use client';
 import { useEffect, useMemo, useRef, useState, type PointerEvent as EventoPonteiro } from 'react';
-import { criarViewer, filtrar, type Caixa, type Clima, type EstudoSolar, type PeriodoDeSol, type Giro, filtroVazio, pontoCardeal, vetorJoystick, type EstadoViewer, type Filtro, type UnidadeViewer, type Viewer } from '@imersa/viewer';
+import { criarViewer, filtrar, suporteImersivo, type SuporteImersivo, type Caixa, type Clima, type EstudoSolar, type PeriodoDeSol, type Giro, filtroVazio, pontoCardeal, vetorJoystick, type EstadoViewer, type Filtro, type UnidadeViewer, type Viewer } from '@imersa/viewer';
 import type { StatusUnidade } from '@/lib/tipos';
 import { Botao, Campo, Cartao, Selecao } from '@/components/ui';
 import { alternarFavorito, lerFavoritos, salvarFavoritos } from '@/lib/favoritos';
@@ -148,9 +148,62 @@ export function Vitrine({
   const [clima, setClima] = useState<Clima>('limpo');
   const [entorno, setEntorno] = useState<EstadoEntorno>({ tipo: 'carregando' });
   const [interiorAberto, setInteriorAberto] = useState<{ id: string; nome: string } | null>(null);
+  // VR no óculos, maquete na mesa (Android) e AR do iPhone: só o que o aparelho abre
+  const [imersivo, setImersivo] = useState<SuporteImersivo>({ vr: false, ar: false, quickLook: false });
+  const [usdz, setUsdz] = useState<string | null>(null);
+  const [erroImersivo, setErroImersivo] = useState<string | null>(null);
+  const sobreposicaoAr = useRef<HTMLDivElement>(null);
 
   // depois da hidratação: o servidor não conhece o navegador de quem vê
   useEffect(() => setFavoritos(lerFavoritos(predioId)), [predioId]);
+  useEffect(() => {
+    let vivo = true;
+    void suporteImersivo().then((s) => vivo && setImersivo(s));
+    return () => {
+      vivo = false;
+    };
+  }, []);
+  // iPhone: o arquivo da maquete fica pronto antes do toque (o Quick Look abre direto pelo link), refeito quando a
+  // situação de alguma unidade muda ao vivo
+  useEffect(() => {
+    if (!imersivo.quickLook || estado !== 'pronto') return;
+    let vivo = true;
+    let url: string | null = null;
+    const t = setTimeout(() => {
+      void viewer.current
+        ?.arquivoUsdz()
+        .then((b) => {
+          if (!vivo) return;
+          url = URL.createObjectURL(b);
+          setUsdz(url);
+        })
+        .catch(() => viewer.current?.registrarErro());
+    }, 800);
+    return () => {
+      vivo = false;
+      clearTimeout(t);
+      if (url) URL.revokeObjectURL(url);
+    };
+  }, [imersivo.quickLook, estado, statusAoVivo]);
+  // a sessão de AR acabou (pelo botão, pelo "voltar" do Android ou pelo navegador): a camada some
+  const emImersivo = telemetria?.imersivo ?? null;
+  useEffect(() => {
+    if (emImersivo !== 'ar' && sobreposicaoAr.current) sobreposicaoAr.current.hidden = true;
+  }, [emImersivo]);
+  const entrarEmVr = async () => {
+    setErroImersivo(null);
+    if (!(await viewer.current?.entrarEmVr())) setErroImersivo('O óculos não abriu a visita. Confira se ele está ligado e se o navegador dele tem permissão para VR.');
+  };
+  const entrarEmAr = async () => {
+    const camada = sobreposicaoAr.current;
+    if (!camada) return;
+    setErroImersivo(null);
+    camada.hidden = false; // antes do pedido: o navegador mostra esta camada por cima da câmera
+    if (!(await viewer.current?.entrarEmAr(camada))) {
+      camada.hidden = true;
+      setErroImersivo('A câmera não abriu. Permita o uso da câmera para ver a maquete na mesa.');
+    }
+  };
 
   // um viewer por modelo
   useEffect(() => {
@@ -487,6 +540,13 @@ export function Vitrine({
 
   return (
     <div className="grid gap-6 lg:grid-cols-[1fr_340px] lg:items-start">
+      {/* camada por cima da câmera no AR (o navegador a mostra em tela cheia durante a sessão) */}
+      <div ref={sobreposicaoAr} hidden data-testid="camada-ar" className="fixed inset-0 z-50 flex flex-col items-center justify-between bg-transparent p-4 text-white">
+        <p className="rounded-2xl bg-black/60 px-4 py-2 text-center text-sm">Aponte para a mesa e toque para colocar a maquete. Com dois dedos: aumentar, diminuir e girar.</p>
+        <button type="button" onClick={() => void viewer.current?.sairDoImersivo()} className="rounded-full bg-white px-6 py-3 font-semibold text-slate-900 shadow">
+          Sair da maquete
+        </button>
+      </div>
       <div
         data-testid="vitrine-3d"
         data-estado={estado}
@@ -503,6 +563,7 @@ export function Vitrine({
         data-conducao={conducao?.ativo ? (soltou ? 'solto' : 'seguindo') : conduzindo ? 'conduzindo' : ''}
         data-elevador={elevador ? String(elevador.atual) : ''}
         data-acabamento={telemetria?.acabamento ? 'ligado' : 'desligado'}
+        data-imersivo={emImersivo ?? ''}
         data-apresentacao={apresentando ? 'ligada' : 'desligada'}
         data-unidade-da-vez={vitrineDaVez ?? ''}
         className={`relative ${estande ? 'h-[calc(100dvh-7rem)]' : 'h-[70vh]'} min-h-96 overflow-hidden rounded-2xl border border-borda bg-fundo lg:sticky lg:top-6`}
@@ -938,6 +999,43 @@ export function Vitrine({
             )}
           </div>
         </Cartao>
+        {(imersivo.vr || imersivo.ar || imersivo.quickLook) && (
+          <Cartao titulo="Realidade virtual e aumentada">
+            <div className="grid gap-3 text-sm" data-testid="imersivo">
+              {imersivo.vr && (
+                <>
+                  <p className="text-suave">No óculos de VR: ande pelo empreendimento em tamanho real. Aponte o controle para o chão e solte o gatilho para ir até lá; aponte para uma unidade para abri-la.</p>
+                  <Botao type="button" disabled={estado !== 'pronto' || emImersivo !== null} onClick={() => void entrarEmVr()}>
+                    Ver em VR
+                  </Botao>
+                </>
+              )}
+              {imersivo.ar && (
+                <>
+                  <p className="text-suave">Pela câmera do celular, a maquete do prédio aparece sobre a mesa, com a situação de cada unidade.</p>
+                  <Botao type="button" variante="secundario" disabled={estado !== 'pronto' || emImersivo !== null} onClick={() => void entrarEmAr()}>
+                    Ver a maquete na mesa (AR)
+                  </Botao>
+                </>
+              )}
+              {imersivo.quickLook &&
+                (usdz ? (
+                  // Quick Look da Apple: o link precisa ter uma imagem dentro para abrir em AR
+                  <a rel="ar" href={usdz} data-testid="link-quick-look" className="flex items-center gap-3 rounded-lg border border-borda px-3 py-2 font-medium hover:bg-fundo">
+                    <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='%230369a1' d='M12 2 3 7v10l9 5 9-5V7zm0 2.3 6.5 3.6L12 11.5 5.5 7.9zM5 9.6l6 3.3v6.8l-6-3.3zm8 10.1v-6.8l6-3.3v6.8z'/%3E%3C/svg%3E" alt="" width={28} height={28} />
+                    Ver a maquete na mesa (AR do iPhone)
+                  </a>
+                ) : (
+                  <p className="text-suave">Preparando a maquete para o AR do iPhone…</p>
+                ))}
+              {erroImersivo && (
+                <p role="alert" className="text-perigo">
+                  {erroImersivo}
+                </p>
+              )}
+            </div>
+          </Cartao>
+        )}
       </div>
     </div>
   );

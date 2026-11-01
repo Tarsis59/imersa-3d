@@ -72,9 +72,10 @@ export class QualidadeAdaptativa {
   registrar(dtMs: number): NivelQualidade | null {
     if (!(dtMs > 0)) return null;
     if (dtMs > this.o.quadroMaxMs) {
-      // um quadro longo é travada pontual ou aba escondida; vários seguidos (até 5 s cada) é o aparelho que não dá
-      // conta: desce um nível na hora (sem isso, um aparelho muito lento nunca baixava a qualidade)
-      if (dtMs > 5000 || this.o.fixo) return null;
+      // um quadro longo sozinho é travada ou a volta de uma aba escondida (que não desenha nada enquanto escondida);
+      // vários seguidos, de qualquer tamanho, é o aparelho que não dá conta: desce um nível na hora. Sem teto: no
+      // desenho por software, com o acabamento de imagem, um quadro passa de 5 s e travava a página inteira
+      if (this.o.fixo) return null;
       this.longos++;
       if (this.longos >= 3 && this.indice < NIVEIS.length - 1) return this.trocar(this.indice + 1);
       return null;

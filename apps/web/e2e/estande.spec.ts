@@ -44,6 +44,11 @@ test('estande: painel cria → PC em tela cheia apresenta sozinho → visitante 
 
   // PC do estande: tela grande com toque, sem login
   const pc = await browser.newContext({ viewport: { width: 1920, height: 1080 }, hasTouch: true });
+  // "sem internet" do teste de estande offline (ligado por uma marca na própria página)
+  await pc.addInitScript(() => {
+    const real = Object.getOwnPropertyDescriptor(Navigator.prototype, 'onLine')!;
+    Object.defineProperty(Navigator.prototype, 'onLine', { configurable: true, get() { return localStorage.getItem('e2e-sem-rede') === '1' ? false : real.get!.call(this); } });
+  });
   const tela = await pc.newPage();
   await tela.goto(`${endereco}?ocioso=12&sinal=6`);
   const estande = tela.getByTestId('estande');
@@ -102,6 +107,28 @@ test('estande: painel cria → PC em tela cheia apresenta sozinho → visitante 
   await item.getByRole('button', { name: 'Recarregar' }).click();
   await tela.waitForFunction(() => !(window as unknown as { antes?: boolean }).antes, undefined, { timeout: 30_000 });
   await expect(vitrine).toHaveAttribute('data-estado', 'pronto', { timeout: 90_000 });
+
+  // estande offline: o PC já guardou página, código e 3D; sem internet, recarregar (como na recarga das 12 h) abre
+  // o 3D do guardado, com o aviso de dados possivelmente desatualizados
+  await expect(tela.getByTestId('estande')).toHaveAttribute('data-offline', 'pronto');
+  // internet caída: todo pedido do PC falha (também os do service worker, que cai no guardado) e o aparelho se vê
+  // sem rede. Só a conexão de recarga do Next (que só existe no modo de desenvolvimento) não passa por aqui.
+  const cair = (r: import('@playwright/test').Route) => r.abort('internetdisconnected');
+  await pc.route('**/*', cair);
+  await tela.evaluate(() => localStorage.setItem('e2e-sem-rede', '1'));
+  const semRede = await tela.reload();
+  expect(semRede?.fromServiceWorker()).toBe(true);
+  // a página guardada só "acorda" (hidrata) no site de produção: o servidor de desenvolvimento do Next não hidrata
+  // uma página entregue sem ele. Conferido com E2E_PRODUCAO=1 (E2E_SEM_BUILD=1 em máquina com pouca memória)
+  if (process.env.E2E_PRODUCAO === '1') {
+    await expect(vitrine).toHaveAttribute('data-estado', 'pronto', { timeout: 90_000 });
+    await expect(tela.getByText('Sem internet: os dados podem estar desatualizados')).toBeVisible();
+  }
+  await pc.unroute('**/*', cair);
+  await tela.evaluate(() => localStorage.removeItem('e2e-sem-rede'));
+  await tela.reload();
+  await expect(vitrine).toHaveAttribute('data-estado', 'pronto', { timeout: 90_000 });
+  await expect(tela.getByText('Sem internet: os dados podem estar desatualizados')).toBeHidden();
 
   // desativar: confirmação em dois passos; o PC mostra o aviso no próximo sinal
   await item.getByRole('button', { name: 'Desativar' }).click();

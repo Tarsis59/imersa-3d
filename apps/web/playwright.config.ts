@@ -3,7 +3,10 @@ import { defineConfig, devices } from '@playwright/test';
 
 const DB_APP = 'postgres://imersa_app:imersa_app_dev@localhost:55432/imersa_e2e';
 /** Prédios reais da Av. Paulista já baixados: o entorno funciona sem internet e sem usar o Overpass público. */
-/** E2E_PRODUCAO=1: site em modo de produção (build otimizado), para medir desempenho como a cliente vai ver. */
+/**
+ * E2E_PRODUCAO=1: site em modo de produção (build otimizado), para medir desempenho como a cliente vai ver.
+ * E2E_SEM_BUILD=1 junto: usa o build já feito (máquina com pouca memória: build e testes separados).
+ */
 const PRODUCAO = process.env.E2E_PRODUCAO === '1';
 /**
  * 3D no Chromium sem tela: por padrão desenhado por software (SwiftShader), que roda em qualquer máquina e no CI.
@@ -59,7 +62,7 @@ export default defineConfig({
       env: { DATABASE_URL: DB_APP, ARMAZENAMENTO_PASTA: 'armazenamento-e2e', API_URL_PUBLICA: 'http://localhost:3334', RECONSTRUTOR: 'simulado', RECONSTRUTOR_SPLAT_SIMULADO: SPLAT_SIMULADO, WORKER_PORTA: '3335', WORKER_INTERVALO_S: '2', WORKER_PASTA: 'trabalho-worker-e2e', WEBHOOK_PERMITIR_LOCAL: 'true', ...GIRO },
     },
     {
-      command: PRODUCAO ? 'pnpm build && pnpm exec next start -p 3100' : 'node scripts/decodificadores.mjs && pnpm exec next dev -p 3100',
+      command: PRODUCAO ? `${process.env.E2E_SEM_BUILD === '1' ? '' : 'pnpm build && '}pnpm exec next start -p 3100` : 'node scripts/decodificadores.mjs && pnpm exec next dev -p 3100',
       url: 'http://localhost:3100/login',
       reuseExistingServer: false,
       timeout: PRODUCAO ? 600_000 : 180_000,

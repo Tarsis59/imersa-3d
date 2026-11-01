@@ -25,6 +25,8 @@ import { corDoIndice, poseNoGiro } from './giro/giro';
 import { criarConfigurador, type Configurador, type FonteMovel, type Superficie } from './configurador/cena';
 import type { Acabamento } from './configurador/padroes';
 import { ajustarPose, type PoseMovel } from './configurador/moveis';
+import { exportarUsdz, montarMaquete } from './xr/maquete';
+import { iniciarAr, iniciarVr, type ContextoXr, type SessaoXr, type TipoXr } from './xr/sessao';
 
 export type ModoCamera = 'orbita' | 'primeira-pessoa';
 
@@ -56,6 +58,8 @@ export interface EstadoViewer {
   acabamento: boolean;
   /** Para onde a câmera olha no chão (x, z normalizados): seta do minimapa. */
   direcao: { x: number; z: number };
+  /** Passeio no óculos (`vr`) ou maquete na mesa pela câmera (`ar`); `null` = tela normal. */
+  imersivo: TipoXr | null;
 }
 
 /** Resumo da visita para a telemetria. */
@@ -112,6 +116,16 @@ export interface Viewer {
   mapaDoLote(): { predio: Caixa; vizinhos: Caixa[] };
   /** Segue a câmera de outra pessoa (cliente no tour guiado), suave; `null` devolve o controle. */
   seguirPose(pose: { posicao: [number, number, number]; alvo: [number, number, number] } | null): void;
+  /**
+   * Passeio em tamanho real no óculos de VR (WebXR). Chamar direto no clique. Resolve `false` se o aparelho não
+   * abriu a sessão (sem óculos, recusado). Sai pelo óculos ou com `sairDoImersivo`.
+   */
+  entrarEmVr(): Promise<boolean>;
+  /** Maquete na mesa pela câmera (WebXR AR, Chrome no Android). `sobreposicao` = camada da página por cima da câmera. */
+  entrarEmAr(sobreposicao: HTMLElement): Promise<boolean>;
+  sairDoImersivo(): Promise<void>;
+  /** Maquete em USDZ para o AR do iPhone (Quick Look), com a situação atual das unidades. */
+  arquivoUsdz(): Promise<Blob>;
   /** Céu limpo (sol e sombra fortes) ou nublado (luz difusa, céu cinza, sombra fraca). */
   definirClima(clima: Clima): void;
   /** Apresentação automática (estande sem ninguém mexendo): a câmera gira devagar em volta do prédio. */
@@ -180,6 +194,9 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
   const rotacao = config.rotacaoGraus ?? 0;
   const lat = config.lat ?? ORIGEM_PAULISTA.lat;
   const lon = config.lon ?? ORIGEM_PAULISTA.lon;
+  // quem pediu menos movimento no aparelho: câmera vai direto (sem voo), nuvens paradas, giro do estande bem lento
+  const menosMovimento = typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const duracaoVoo = menosMovimento ? 1 : DURACAO_VOO_MS;
   const qualidade = new QualidadeAdaptativa({ inicial: config.qualidadeInicial ?? 0, fixo: config.qualidadeFixa ?? false });
   const criadoEm = performance.now();
   let cargaMs: number | null = null;
@@ -361,9 +378,12 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
       if (malha.name === 'fachada-concreto') pisosExtras.push(malha); // lajes: dá para pisar
     }
     cena.add(grupo);
+    raizPredio = grupo;
     bloqueado = bloqueioPorCaixas([...caixas.values()], 0.3, ALTURA_OLHOS_M);
   }
 
+  /** O empreendimento na cena (volumes com fachada ou o modelo GLB): vai para a maquete do AR. */
+  let raizPredio: THREE.Object3D | null = null;
   let configurador: Configurador | null = null;
   let planosCorte: THREE.Plane[] = [];
 
@@ -375,6 +395,7 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
     const centro = caixa.getCenter(new THREE.Vector3());
     modelo.position.set(-centro.x, -caixa.min.y, -centro.z); // centralizado e apoiado no chão
     cena.add(modelo);
+    raizPredio = modelo;
     modelo.updateMatrixWorld(true);
     const porNo = new Map(config.unidades.filter((u) => u.meshNodeId).map((u) => [u.meshNodeId!, u]));
     modelo.traverse((o) => {
@@ -498,6 +519,9 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
     } else {
       enquadrarPredio();
     }
+    // a tela sabe do novo modo na hora (não espera o próximo quadro, que no aparelho lento pode demorar)
+    ultimoAviso = 0;
+    avisar(performance.now());
   }
 
   function entradaAtual(): Entrada {
@@ -587,6 +611,50 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
   function selecionar(id: string | null): void {
     selecionada = id && pecas.has(id) ? id : null;
     pintar();
+  }
+
+  // -------------------------------------------------------------- VR e AR
+  let imersiva: SessaoXr | null = null;
+  let antesDoImersivo: { posicao: THREE.Vector3; alvo: THREE.Vector3; quaternion: THREE.Quaternion } | null = null;
+  const contextoXr = (): ContextoXr => ({
+    renderer,
+    cena,
+    caixaDoPredio,
+    objetosDoPredio: () => [raizPredio, paisagismo?.objeto].filter((o): o is THREE.Object3D => o != null),
+    pisos: () => [chao, ...pisosExtras, ...solidos],
+    unidades: () => new Map([...pecas].map(([id, p]) => [p.malha as THREE.Object3D, id])),
+    aoSelecionar(id) {
+      selecionar(id);
+      cbSelecao?.(id);
+    },
+    aoTerminar() {
+      imersiva = null;
+      renderer.xr.enabled = false;
+      if (antesDoImersivo) {
+        camera.position.copy(antesDoImersivo.posicao);
+        camera.quaternion.copy(antesDoImersivo.quaternion);
+        orbita.target.copy(antesDoImersivo.alvo);
+        antesDoImersivo = null;
+      }
+      redimensionar();
+      ultimoAviso = 0;
+    },
+  });
+  async function entrarImersivo(tipo: TipoXr, sobreposicao?: HTMLElement): Promise<boolean> {
+    if (imersiva) return true;
+    // nada de espera antes do pedido: o navegador só abre a sessão dentro do gesto (clique) da pessoa
+    if (modo !== 'orbita') definirModo('orbita');
+    voo = null;
+    poseSeguida = null;
+    const guardada = { posicao: camera.position.clone(), alvo: orbita.target.clone(), quaternion: camera.quaternion.clone() };
+    try {
+      imersiva = tipo === 'vr' ? await iniciarVr(contextoXr()) : await iniciarAr(contextoXr(), sobreposicao!);
+      antesDoImersivo = guardada;
+      return true;
+    } catch {
+      renderer.xr.enabled = false;
+      return false; // sem aparelho, recusado pela pessoa ou pelo navegador
+    }
   }
 
   // -------------------------------------------------------------- vista da janela e estudo solar
@@ -705,10 +773,11 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
       .finally(() => (carregandoPos = false));
   }
   /** O quadro com o acabamento quando há; senão, o desenho direto. */
-  const desenhar = () => (pos ? pos.desenhar() : renderer.render(cena, camera));
+  const desenhar = () => (pos && !renderer.xr.isPresenting ? pos.desenhar() : renderer.render(cena, camera));
 
   // -------------------------------------------------------------- tamanho e laço
   const redimensionar = () => {
+    if (renderer.xr.isPresenting) return; // no óculos o tamanho é do aparelho; volta a valer ao sair
     const pai = canvas.parentElement ?? canvas;
     const w = Math.max(1, pai.clientWidth);
     const h = Math.max(1, pai.clientHeight);
@@ -860,10 +929,22 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
       modo,
       posicao: { x: camera.position.x, y: camera.position.y, z: camera.position.z },
       acabamento: pos !== null,
+      imersivo: imersiva?.tipo ?? null,
       direcao: { x: direcaoCamera.x / (Math.hypot(direcaoCamera.x, direcaoCamera.z) || 1), z: direcaoCamera.z / (Math.hypot(direcaoCamera.x, direcaoCamera.z) || 1) },
     });
   };
-  renderer.setAnimationLoop((agora: number) => {
+  renderer.setAnimationLoop((agora: number, frame?: XRFrame) => {
+    if (imersiva) {
+      // óculos ou câmera: a pose vem do aparelho (sem órbita, sem acabamento de imagem, no ritmo do aparelho)
+      imersiva.quadro(frame);
+      if (imersiva.tipo === 'vr') {
+        atmosfera.quadro(camera, agora / 1000);
+        csm.update();
+      }
+      renderer.render(imersiva.cena, camera);
+      avisar(agora);
+      return;
+    }
     if (pausado) return;
     if (!naTela && !voo && !esperandoQuadro.length) {
       ultimoQuadro = agora; // ao voltar, o intervalo parado não conta como quadro lento
@@ -880,7 +961,7 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
     if (troca) aplicarQualidade(troca);
 
     if (voo) {
-      const t = (agora - voo.inicio) / DURACAO_VOO_MS;
+      const t = (agora - voo.inicio) / duracaoVoo;
       const pose = voo.trajeto(t);
       camera.position.copy(pose.posicao);
       orbita.target.copy(pose.alvo);
@@ -931,7 +1012,7 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
     }
 
     atualizarRaioX(modo === 'orbita' && !emVista ? orbita.target : null);
-    atmosfera.quadro(camera, config.qualidadeFixa ? 0 : agora / 1000); // qualidade fixa = cena determinística (nuvens paradas)
+    atmosfera.quadro(camera, config.qualidadeFixa || menosMovimento ? 0 : agora / 1000); // qualidade fixa = cena determinística (nuvens paradas)
     csm.update();
     desenhar();
     if (esperandoQuadro.length) for (const ok of esperandoQuadro.splice(0)) ok(performance.now());
@@ -1077,7 +1158,7 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
     apresentacao(ligada) {
       if (ligada && modo !== 'orbita') definirModo('orbita');
       orbita.autoRotate = ligada;
-      orbita.autoRotateSpeed = 0.5; // uma volta a cada ~2 min: dá para ver o prédio sem enjoar
+      orbita.autoRotateSpeed = menosMovimento ? 0.15 : 0.5; // uma volta a cada ~2 min (~7 min com menos movimento): dá para ver o prédio sem enjoar
     },
     visaoGeral() {
       orbita.autoRotate = false;
@@ -1211,8 +1292,17 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
     aoMudar(cb) {
       cbMudanca = cb;
     },
+    entrarEmVr: () => entrarImersivo('vr'),
+    entrarEmAr: (sobreposicao) => entrarImersivo('ar', sobreposicao),
+    async sairDoImersivo() {
+      await imersiva?.encerrar();
+    },
+    async arquivoUsdz() {
+      return exportarUsdz(montarMaquete([raizPredio, paisagismo?.objeto].filter((o): o is THREE.Object3D => o != null)));
+    },
     destruir() {
       destruido = true;
+      void imersiva?.encerrar();
       pos?.destruir();
       renderer.setAnimationLoop(null);
       observador.disconnect();
