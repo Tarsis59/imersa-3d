@@ -336,3 +336,59 @@ export interface VideosDoPredio {
   temModelo: boolean;
   videos: VideoPredio[];
 }
+
+// ------------------------------------------------------------------ criação integrada (Plano 11a)
+export interface TipologiaLida {
+  nome: string;
+  quartos: number;
+  suites: number;
+  areaM2: number | null;
+}
+export interface Descricao {
+  nome: string | null;
+  andares: number | null;
+  unidadesPorAndar: number | null;
+  totalUnidades: number | null;
+  subsolos: number | null;
+  torres: number | null;
+  tipologias: TipologiaLida[];
+  vagas: number | null;
+  lazer: Array<{ categoria: CategoriaLazer; nome: string }>;
+  endereco: string | null;
+  bairro: string | null;
+  cidade: string | null;
+  uf: string | null;
+  cep: string | null;
+  precoAPartirDe: number | null;
+  avisos: string[];
+}
+export interface PlanoCriacao {
+  unidades: number;
+  andares: number;
+  porAndar: number;
+  predios: string[];
+  tipologias: Array<TipologiaLida & { unidades: number }>;
+  lazer: Array<{ categoria: CategoriaLazer; nome: string; noTerraco: boolean }>;
+  avisos: string[];
+}
+export type EstadoEtapa = 'pendente' | 'rodando' | 'feita' | 'pulada' | 'aviso' | 'falhou';
+export type IdEtapa = 'texto' | 'local' | 'predio' | 'lazer' | 'cidade' | 'pontos' | 'arquivos';
+export const ROTULO_ETAPA: Record<IdEtapa, string> = {
+  texto: 'Lendo o texto',
+  local: 'Achando o lugar',
+  predio: 'Gerando o prédio e as unidades',
+  lazer: 'Montando o lazer e o tour',
+  cidade: 'Buscando a cidade em volta',
+  pontos: 'Escolas, mercados e transporte perto',
+  arquivos: 'Mandando cada arquivo para o caminho certo',
+};
+export interface Montagem {
+  id: string;
+  projetoId: string;
+  predioId: string | null;
+  estado: 'aguardando_arquivos' | 'montando' | 'pronta' | 'pronta_com_avisos' | 'falhou';
+  etapas: Array<{ id: IdEtapa; estado: EstadoEtapa; detalhe: string | null; ms: number | null }>;
+  descricao: Descricao;
+  iniciadaEm: string | null;
+  concluidaEm: string | null;
+}

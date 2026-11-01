@@ -78,6 +78,39 @@ export function criarEntorno(pool: pg.Pool, mapa: ServicosMapa) {
   return { obter, buscarPredios, gravar };
 }
 
+/** Escolas, mercados, metrô... do OSM em volta do projeto (os mais perto primeiro). Usado pela tela e pela criação integrada. */
+export async function importarPoisOsm(pool: pg.Pool, mapa: ServicosMapa, contexto: Contexto, id: string, raioM: number): Promise<{ encontrados: number; novos: number }> {
+  const centro = await withTenant(pool, contexto, (c) => localizacao(c, id));
+  if (!centro) throw new ErroHttp(400, 'sem_localizacao');
+  let encontrados;
+  try {
+    encontrados = await mapa.buscarPois(centro.lat, centro.lon, raioM);
+  } catch {
+    throw new ErroHttp(502, 'servico_mapa_indisponivel');
+  }
+  const cosLat = Math.cos((centro.lat * Math.PI) / 180);
+  const perto = encontrados
+    .map((p) => ({ p, d: Math.hypot(p.lat - centro.lat, (p.lon - centro.lon) * cosLat) }))
+    .sort((a, b) => a.d - b.d)
+    .slice(0, MAX_POIS_OSM)
+    .map(({ p }) => p);
+  return withTenant(pool, contexto, async (c) => {
+    let novos = 0;
+    for (const p of perto) {
+      const r = await c.query<{ novo: boolean }>(
+        `INSERT INTO pois (project_id, categoria, nome, geom, origem, osm_id)
+         VALUES ($1, $2, $3, ST_SetSRID(ST_MakePoint($5, $4), 4326), 'osm', $6)
+         ON CONFLICT (project_id, osm_id) DO UPDATE SET categoria = EXCLUDED.categoria, nome = EXCLUDED.nome, geom = EXCLUDED.geom
+         RETURNING (xmax = 0) AS novo`,
+        [id, p.categoria, p.nome, p.lat, p.lon, p.osmId],
+      );
+      if (r.rows[0]!.novo) novos++;
+    }
+    await registrarAuditoria(c, { userId: contexto.userId, acao: 'pois.importar_osm', entidade: 'project', entidadeId: id, depois: { raioM, encontrados: perto.length, novos } });
+    return { encontrados: perto.length, novos };
+  });
+}
+
 export function rotasMapa(app: FastifyInstance, { pool, exigir, mapa }: Dependencias): void {
   const entorno = criarEntorno(pool, mapa);
 
@@ -132,35 +165,7 @@ export function rotasMapa(app: FastifyInstance, { pool, exigir, mapa }: Dependen
     const s = await exigir(req, 'empreendimento:editar');
     const { id } = IdParam.parse(req.params);
     const { raioM } = ImportarOsm.parse(req.body ?? {});
-    const centro = await withTenant(pool, ctx(s), (c) => localizacao(c, id));
-    if (!centro) throw new ErroHttp(400, 'sem_localizacao');
-    let encontrados;
-    try {
-      encontrados = await mapa.buscarPois(centro.lat, centro.lon, raioM);
-    } catch {
-      throw new ErroHttp(502, 'servico_mapa_indisponivel');
-    }
-    const cosLat = Math.cos((centro.lat * Math.PI) / 180);
-    const perto = encontrados
-      .map((p) => ({ p, d: Math.hypot(p.lat - centro.lat, (p.lon - centro.lon) * cosLat) }))
-      .sort((a, b) => a.d - b.d)
-      .slice(0, MAX_POIS_OSM)
-      .map(({ p }) => p);
-    return withTenant(pool, ctx(s), async (c) => {
-      let novos = 0;
-      for (const p of perto) {
-        const r = await c.query<{ novo: boolean }>(
-          `INSERT INTO pois (project_id, categoria, nome, geom, origem, osm_id)
-           VALUES ($1, $2, $3, ST_SetSRID(ST_MakePoint($5, $4), 4326), 'osm', $6)
-           ON CONFLICT (project_id, osm_id) DO UPDATE SET categoria = EXCLUDED.categoria, nome = EXCLUDED.nome, geom = EXCLUDED.geom
-           RETURNING (xmax = 0) AS novo`,
-          [id, p.categoria, p.nome, p.lat, p.lon, p.osmId],
-        );
-        if (r.rows[0]!.novo) novos++;
-      }
-      await registrarAuditoria(c, { userId: s.userId, acao: 'pois.importar_osm', entidade: 'project', entidadeId: id, depois: { raioM, encontrados: perto.length, novos } });
-      return { encontrados: perto.length, novos };
-    });
+    return importarPoisOsm(pool, mapa, ctx(s), id, raioM);
   });
 
   app.post('/projetos/:id/pois', async (req, reply) => {

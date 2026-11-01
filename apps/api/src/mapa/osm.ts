@@ -1,4 +1,5 @@
 import { readFile } from 'node:fs/promises';
+import { interpretarViaCep, type EnderecoCep } from '../criacao/local';
 export type CategoriaPoi = 'escola' | 'saude' | 'mercado' | 'farmacia' | 'transporte' | 'parque' | 'outro';
 
 export interface PoiOsm {
@@ -91,6 +92,8 @@ export interface ServicosMapa {
   buscarEndereco(texto: string): Promise<Endereco[]>;
   buscarPois(lat: number, lon: number, raioM: number): Promise<PoiOsm[]>;
   buscarPredios(lat: number, lon: number, raioM: number): Promise<PredioOsm[]>;
+  /** CEP (8 dígitos) → endereço (ViaCEP, grátis). Opcional: sem ele a criação pede o endereço. */
+  buscarCep?(cep: string): Promise<EnderecoCep | null>;
 }
 
 /** Prédio do entorno: contorno em [lon, lat] (ordem GeoJSON), sem repetir o ponto final. */
@@ -184,6 +187,12 @@ export function servicosMapaReais(userAgent: string): ServicosMapa {
       });
       if (!r.ok) throw new Error(`Overpass respondeu ${r.status}`);
       return interpretarPredios(await r.json(), { lat, lon }, 3000, raioM);
+    },
+    buscarCep: async (cep) => {
+      const r = await fetch(`https://viacep.com.br/ws/${cep}/json/`, { headers: { 'user-agent': userAgent }, signal: AbortSignal.timeout(10_000) });
+      if (r.status === 400) return null;
+      if (!r.ok) throw new Error(`ViaCEP respondeu ${r.status}`);
+      return interpretarViaCep(await r.json());
     },
   };
 }
