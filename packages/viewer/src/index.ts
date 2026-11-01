@@ -17,3 +17,4 @@ export { PADROES, desenharPadrao, corDerivada, type Acabamento, type Padrao, typ
 export { MOVEIS_PADRAO, movelPadrao, ajustarPose, LICENCA_PADRAO, type MovelPadrao, type PoseMovel, type CategoriaMovel } from './configurador/moveis';
 export { blocosDaPlanta, subtrairIntervalos, type EdicaoPlanta, type SegmentoPx, type AberturaPx, type Bloco } from './planta/planta3d';
 export { montarPlanta3d, exportarGlb } from './planta/exportar';
+export { estudoSolar, type EstudoSolar, type PeriodoDeSol } from './sun/insolacao';

@@ -1,6 +1,6 @@
 'use client';
 import { useEffect, useMemo, useRef, useState, type PointerEvent as EventoPonteiro } from 'react';
-import { criarViewer, filtrar, type Clima, type Giro, filtroVazio, pontoCardeal, vetorJoystick, type EstadoViewer, type Filtro, type UnidadeViewer, type Viewer } from '@imersa/viewer';
+import { criarViewer, filtrar, type Clima, type EstudoSolar, type PeriodoDeSol, type Giro, filtroVazio, pontoCardeal, vetorJoystick, type EstadoViewer, type Filtro, type UnidadeViewer, type Viewer } from '@imersa/viewer';
 import type { StatusUnidade } from '@/lib/tipos';
 import { Botao, Campo, Cartao, Selecao } from '@/components/ui';
 import { alternarFavorito, lerFavoritos, salvarFavoritos } from '@/lib/favoritos';
@@ -13,6 +13,8 @@ import { Giro360 } from './giro';
 import { Assistente, type AcaoAssistente } from './assistente';
 
 const ROTULO_NIVEL = { alto: 'alta', medio: 'média', baixo: 'baixa' } as const;
+const ROTULO_SOL: Record<PeriodoDeSol, string> = { manha: 'Sol da manhã', tarde: 'Sol da tarde', 'dia-todo': 'Sol o dia todo', 'pouco-sol': 'Pouco sol direto' };
+const horas = (h: number) => `${h.toLocaleString('pt-BR')} h`;
 const hoje = () => new Date().toISOString().slice(0, 10);
 const horaLegivel = (h: number) => `${String(Math.floor(h)).padStart(2, '0')}:${String(Math.round((h % 1) * 60)).padStart(2, '0')}`;
 const filtroAtivo = (f: Filtro) => f.quartos.length > 0 || f.areaMin !== null || f.precoMax !== null || f.status.length > 0 || f.somenteFavoritos;
@@ -213,8 +215,17 @@ export function Vitrine({
   }, [predioId]);
 
   const unidadesAtuais = useMemo(() => unidades.map((u) => (statusAoVivo[u.id] ? { ...u, status: statusAoVivo[u.id]! } : u)), [unidades, statusAoVivo]);
-  const passam = useMemo(() => filtrar(unidadesAtuais, filtro, favoritos), [unidadesAtuais, filtro, favoritos]);
-  const ativo = filtroAtivo(filtro);
+  // estudo solar de cada unidade (depois do entorno: os prédios em volta fazem sombra)
+  const [solar, setSolar] = useState<ReadonlyMap<string, EstudoSolar>>(() => new Map());
+  const [filtroSol, setFiltroSol] = useState<PeriodoDeSol[]>([]);
+  const passamBase = useMemo(() => filtrar(unidadesAtuais, filtro, favoritos), [unidadesAtuais, filtro, favoritos]);
+  const passam = useMemo(
+    () => (filtroSol.length ? new Set([...passamBase].filter((id) => filtroSol.includes(solar.get(id)?.periodo ?? 'pouco-sol'))) : passamBase),
+    [passamBase, filtroSol, solar],
+  );
+  const ativo = filtroAtivo(filtro) || filtroSol.length > 0;
+  // vista da janela da unidade (câmera na varanda)
+  const [vista, setVista] = useState<string | null>(null);
   // unidades que o assistente mostrou: valem até a pessoa mexer nos filtros
   const [destaqueIA, setDestaqueIA] = useState<ReadonlySet<string> | null>(null);
   // apresentação do estande: a unidade disponível da vez
@@ -234,12 +245,17 @@ export function Vitrine({
   useEffect(() => {
     if (estado === 'pronto') viewer.current?.definirClima(clima);
   }, [estado, clima]);
+  useEffect(() => {
+    if (estado === 'pronto' && entorno.tipo !== 'carregando' && viewer.current) setSolar(viewer.current.estudoSolar());
+  }, [estado, entorno.tipo]);
 
   // estande: o próximo visitante começa do zero (sem filtro, unidade, corte ou interior do anterior)
   const reinicio = estande?.reinicio ?? 0;
   useEffect(() => {
     if (!reinicio) return;
     setFiltro(filtroVazio);
+    setFiltroSol([]);
+    setVista(null);
     setSelecionada(null);
     setAndarCorte('');
     setInteriorAberto(null);
@@ -350,6 +366,7 @@ export function Vitrine({
     }
   };
   const voar = (id: string) => {
+    setVista(null);
     setSelecionada(id);
     viewer.current?.voarPara(id);
   };
@@ -372,6 +389,7 @@ export function Vitrine({
         data-destaque-ia={destaqueIA ? [...destaqueIA].sort().join(',') : ''}
         data-ao-vivo={estadoAoVivo}
         data-clima={clima}
+        data-vista={vista ?? ''}
         data-acabamento={telemetria?.acabamento ? 'ligado' : 'desligado'}
         data-apresentacao={apresentando ? 'ligada' : 'desligada'}
         data-unidade-da-vez={vitrineDaVez ?? ''}
@@ -441,6 +459,15 @@ export function Vitrine({
                 <dt className="text-suave">Preço</dt>
                 <dd>{brl(unidade.preco)}</dd>
               </dl>
+              {solar.get(unidade.id) && (
+                <div data-testid="sol-unidade" className="grid gap-1 rounded-lg bg-fundo px-3 py-2">
+                  <span className="font-semibold">☀ {ROTULO_SOL[solar.get(unidade.id)!.periodo]}</span>
+                  <span className="text-xs text-suave">
+                    Sol direto na janela: {horas(solar.get(unidade.id)!.inverno)} no inverno · {horas(solar.get(unidade.id)!.equinocio)} no outono/primavera ·{' '}
+                    {horas(solar.get(unidade.id)!.verao)} no verão{entorno.tipo === 'pronto' ? ', com a sombra dos prédios em volta' : ''}.
+                  </span>
+                </div>
+              )}
               <div className="flex flex-wrap gap-2">
                 <Botao type="button" variante="secundario" onClick={() => favoritar(unidade.id)} aria-pressed={favoritos.has(unidade.id)}>
                   {favoritos.has(unidade.id) ? '★ Favorita' : '☆ Favoritar'}
@@ -448,6 +475,23 @@ export function Vitrine({
                 <Botao type="button" variante="secundario" onClick={() => voar(unidade.id)}>
                   Ir até ela
                 </Botao>
+                {solar.has(unidade.id) &&
+                  (vista === unidade.id ? (
+                    <Botao
+                      type="button"
+                      variante="secundario"
+                      onClick={() => {
+                        setVista(null);
+                        viewer.current?.visaoGeral();
+                      }}
+                    >
+                      Voltar ao prédio
+                    </Botao>
+                  ) : (
+                    <Botao type="button" onClick={() => viewer.current?.vistaDaUnidade(unidade.id) && setVista(unidade.id)}>
+                      Ver a vista desta unidade
+                    </Botao>
+                  ))}
               </div>
             </div>
           </Cartao>
@@ -488,12 +532,32 @@ export function Vitrine({
                 ))}
               </div>
             </fieldset>
+            {solar.size > 0 && (
+              <fieldset className="grid gap-2">
+                <legend className="mb-1 font-medium">Sol</legend>
+                <div className="flex flex-wrap gap-x-4 gap-y-1">
+                  {(['manha', 'tarde', 'dia-todo'] as const).map((p) => (
+                    <label key={p} className="flex min-h-10 items-center gap-2">
+                      <input type="checkbox" checked={filtroSol.includes(p)} onChange={() => setFiltroSol((f) => alternar(f, p))} />
+                      {ROTULO_SOL[p]}
+                    </label>
+                  ))}
+                </div>
+              </fieldset>
+            )}
             <label className="flex min-h-10 items-center gap-2">
               <input type="checkbox" checked={filtro.somenteFavoritos} onChange={(e) => setFiltro({ ...filtro, somenteFavoritos: e.target.checked })} />
               Só favoritas ({favoritos.size})
             </label>
             {ativo && (
-              <Botao type="button" variante="secundario" onClick={() => setFiltro(filtroVazio())}>
+              <Botao
+                type="button"
+                variante="secundario"
+                onClick={() => {
+                  setFiltro(filtroVazio());
+                  setFiltroSol([]);
+                }}
+              >
                 Limpar filtros
               </Botao>
             )}
@@ -610,13 +674,19 @@ export function Vitrine({
               </Botao>
             )}
             {modo === 'orbita' ? (
-              <Botao type="button" variante="secundario" disabled={estado !== 'pronto'} onClick={() => viewer.current?.definirModo('primeira-pessoa')}>
+              <Botao type="button" variante="secundario" disabled={estado !== 'pronto'} onClick={() => {
+                  setVista(null);
+                  viewer.current?.definirModo('primeira-pessoa');
+                }}>
                 Andar a pé (1ª pessoa)
               </Botao>
             ) : (
               <>
                 <p className="text-suave">WASD ou setas para andar, arraste para olhar. No celular, use o controle no canto da tela.</p>
-                <Botao type="button" variante="secundario" onClick={() => viewer.current?.definirModo('orbita')}>
+                <Botao type="button" variante="secundario" onClick={() => {
+                  setVista(null);
+                  viewer.current?.definirModo('orbita');
+                }}>
                   Voltar para a vista de cima
                 </Botao>
               </>

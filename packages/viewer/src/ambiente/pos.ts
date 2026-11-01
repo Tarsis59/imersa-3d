@@ -7,6 +7,8 @@ import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 
 export interface PosProcessamento {
   desenhar(): void;
+  /** Brilho suave das luzes (0 = desligado). De dia fica desligado: o céu é tão claro que o brilho lavaria a imagem. */
+  definirBrilho(forca: number): void;
   /** Tamanho em pixels de CSS e a densidade da tela (o compositor trabalha em pixels de verdade). */
   redimensionar(largura: number, altura: number, densidade: number): void;
   destruir(): void;
@@ -15,7 +17,7 @@ export interface PosProcessamento {
 /**
  * Acabamento de imagem (só no nível de qualidade alto):
  * - sombra de contato nos cantos e encontros (GTAO, ambient occlusion);
- * - brilho suave só no que é muito claro (janelas acesas à noite, reflexo do sol no vidro);
+ * - brilho suave das luzes à noite (janelas acesas);
  * - antisserrilhado por MSAA no alvo do compositor (o do canvas não vale quando há pós-processamento);
  * - tom e cor finais (AgX/ACES do renderer, sRGB) pelo OutputPass.
  * Carregado depois da 1ª imagem (import dinâmico): não pesa na abertura.
@@ -29,13 +31,18 @@ export function criarPos(renderer: THREE.WebGLRenderer, cena: THREE.Scene, camer
   ao.updateGtaoMaterial({ radius: 0.6, distanceExponent: 1.4, thickness: 1.2, scale: 1, samples: 12, distanceFallOff: 1 });
   ao.blendIntensity = 0.85;
   compositor.addPass(ao);
-  const brilho = new UnrealBloomPass(new THREE.Vector2(tamanho.x, tamanho.y), 0.22, 0.45, 0.92);
+  const brilho = new UnrealBloomPass(new THREE.Vector2(tamanho.x, tamanho.y), 0.35, 0.5, 0.85);
+  brilho.enabled = false;
   compositor.addPass(brilho);
   compositor.addPass(new OutputPass());
 
   return {
     desenhar() {
       compositor.render();
+    },
+    definirBrilho(forca) {
+      brilho.enabled = forca > 0.05;
+      brilho.strength = 0.35 * forca;
     },
     redimensionar(largura, altura, densidade) {
       compositor.setPixelRatio(densidade);

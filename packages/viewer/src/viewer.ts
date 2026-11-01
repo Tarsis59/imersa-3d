@@ -7,7 +7,8 @@ import { criarCeu, type Clima } from './ambiente/ceu';
 import type { PosProcessamento } from './ambiente/pos';
 import { rumoDaCamera, paraReferenciaDoProjeto } from './sun/bussola';
 import { massaDoPredio } from './units/massa';
-import { planejarFachada } from './units/fachada';
+import { ladoExterno, planejarFachada } from './units/fachada';
+import { estudoSolar, type EstudoSolar, type FaceSolar } from './sun/insolacao';
 import { malhasDaFachada, materiaisDaFachada, texturaDeJanelas } from './units/janelas';
 import { buildCityMesh } from './city/cityMesh';
 import { entornoParaLocal, type Entorno } from './city/entorno';
@@ -89,6 +90,13 @@ export interface Viewer {
   /** Entrada do joystick de toque (soma com o teclado). */
   definirEntrada(entrada: Entrada): void;
   definirSol(dataISO: string, hora: number): void;
+  /**
+   * Horas de sol direto na fachada de cada unidade (verão, inverno, equinócio) e de que parte do dia vem, com a
+   * sombra dos prédios reais em volta (depois do entorno). Unidades sem face externa ficam de fora.
+   */
+  estudoSolar(): Map<string, EstudoSolar>;
+  /** Câmera na varanda (janela) da unidade, na altura dos olhos, olhando para fora; arrastar olha em volta. */
+  vistaDaUnidade(unidadeId: string): boolean;
   /** Céu limpo (sol e sombra fortes) ou nublado (luz difusa, céu cinza, sombra fraca). */
   definirClima(clima: Clima): void;
   /** Apresentação automática (estande sem ninguém mexendo): a câmera gira devagar em volta do prédio. */
@@ -223,7 +231,7 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
   let bloqueadoCidade: OpcoesPasso['bloqueado'] = () => false;
   let cidade: THREE.Mesh | null = null;
   let atribuicaoEntorno: string | null = null;
-  const materialCidade = new THREE.MeshStandardMaterial({ color: 0xeceae4, roughness: 0.9 });
+  const materialCidade = new THREE.MeshStandardMaterial({ color: 0xd8d5ce, roughness: 0.9 });
   prepararMaterial(materialCidade);
 
   /**
@@ -404,7 +412,20 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
     camera.updateProjectionMatrix();
   }
 
+  /** Sai da vista da janela: lente, zoom e distâncias da órbita voltam ao normal. */
+  function sairDaVista(): void {
+    if (!emVista) return;
+    emVista = false;
+    camera.fov = 50;
+    camera.updateProjectionMatrix();
+    orbita.enableZoom = true;
+    orbita.enablePan = true;
+    orbita.minDistance = 0;
+    orbita.maxDistance = Infinity;
+  }
+
   function definirModo(novo: ModoCamera): void {
+    sairDaVista();
     modo = novo;
     voo = null;
     orbita.enabled = novo === 'orbita';
@@ -493,6 +514,39 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
     pintar();
   }
 
+  // -------------------------------------------------------------- vista da janela e estudo solar
+  /** Prédios do entorno como caixas (fazem sombra nas fachadas no estudo solar). */
+  let obstaculos: Caixa[] = [];
+  let estudo: Map<string, EstudoSolar> | null = null;
+  let emVista = false;
+  const NORMAL_DO_LADO = { '+z': { x: 0, z: 1 }, '-z': { x: 0, z: -1 }, '+x': { x: 1, z: 0 }, '-x': { x: -1, z: 0 } } as const;
+
+  /** Face externa da unidade: no prédio de volumes, o lado sem vizinha; no GLB, o lado que dá para fora do prédio. */
+  function faceDaUnidade(p: PecaUnidade): FaceSolar | null {
+    const c = p.caixa;
+    const meio = { x: (c.minX + c.maxX) / 2, y: c.minY + 1.5, z: (c.minZ + c.maxZ) / 2 };
+    let normal: { x: number; z: number };
+    if (!solidos.length) {
+      const doAndar = [...pecas.values()].filter((o) => o.unidade.andar === p.unidade.andar).map((o) => o.caixa);
+      const lado = ladoExterno(c, doAndar);
+      if (!lado) return null;
+      normal = NORMAL_DO_LADO[lado];
+    } else {
+      const b = caixaDoPredio();
+      const dx = meio.x - (b.minX + b.maxX) / 2;
+      const dz = meio.z - (b.minZ + b.maxZ) / 2;
+      if (Math.hypot(dx, dz) < 0.5) return null; // no meio do prédio: sem fachada
+      normal = Math.abs(dx) > Math.abs(dz) ? { x: Math.sign(dx), z: 0 } : { x: 0, z: Math.sign(dz) };
+    }
+    const centro = {
+      x: normal.x > 0 ? c.maxX : normal.x < 0 ? c.minX : meio.x,
+      y: meio.y,
+      z: normal.z > 0 ? c.maxZ : normal.z < 0 ? c.minZ : meio.z,
+    };
+    return { centro, normal };
+  }
+  const solNaCena = (dataISO: string, hora: number) => paraReferenciaDoProjeto(sunDirection(horaSaoPauloParaUtc(dataISO, hora), lat, lon), rotacao);
+
   // -------------------------------------------------------------- sol
   let clima: Clima = 'limpo';
   /** Direção PARA o sol (referencial da cena). */
@@ -520,6 +574,7 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
     const antes = luzNoturna;
     luzNoturna = Math.round(noite * 20) / 20;
     if (luzNoturna !== antes && pecas.size) pintar();
+    pos?.definirBrilho(luzNoturna);
     (cena.background as THREE.Color).copy(atmosfera.horizonte);
     cena.fog?.color.copy(atmosfera.horizonte);
   }
@@ -566,6 +621,7 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
       .then((m) => {
         if (destruido || !qualidade.nivel.posProcessamento) return;
         pos = m.criarPos(renderer, cena, camera);
+        pos.definirBrilho(luzNoturna);
         const pai = canvas.parentElement ?? canvas;
         pos.redimensionar(Math.max(1, pai.clientWidth), Math.max(1, pai.clientHeight), renderer.getPixelRatio());
       })
@@ -764,7 +820,7 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
       camera.rotation.set(pessoa.pitch, pessoa.yaw, 0, 'YXZ');
     }
 
-    atualizarRaioX(modo === 'orbita' ? orbita.target : null);
+    atualizarRaioX(modo === 'orbita' && !emVista ? orbita.target : null);
     atmosfera.quadro(camera, agora / 1000);
     csm.update();
     desenhar();
@@ -815,6 +871,7 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
     voarPara(id) {
       const p = pecas.get(id);
       if (!p) return false;
+      sairDaVista();
       if (modo !== 'orbita') definirModo('orbita');
       orbita.enabled = false;
       voo = {
@@ -831,6 +888,37 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
     },
     definirSol,
     definirClima,
+    estudoSolar() {
+      if (estudo) return estudo;
+      const calculado = new Map<string, EstudoSolar>();
+      for (const [id, p] of pecas) {
+        const face = faceDaUnidade(p);
+        if (face) calculado.set(id, estudoSolar(face, obstaculos, solNaCena, lat < 0));
+      }
+      estudo = calculado;
+      return calculado;
+    },
+    vistaDaUnidade(id) {
+      const p = pecas.get(id);
+      const face = p ? faceDaUnidade(p) : null;
+      if (!p || !face) return false;
+      if (modo !== 'orbita') definirModo('orbita');
+      voo = null;
+      orbita.autoRotate = false;
+      // na varanda, a 1 m do vidro, na altura dos olhos; arrastar gira a cabeça em volta de um ponto logo à frente
+      const olho = new THREE.Vector3(face.centro.x + face.normal.x, p.caixa.minY + 1.45, face.centro.z + face.normal.z);
+      camera.position.copy(olho);
+      orbita.target.set(olho.x + face.normal.x * 0.5, olho.y - 0.05, olho.z + face.normal.z * 0.5);
+      camera.fov = 65; // lente mais aberta: o que a pessoa vê da janela
+      camera.updateProjectionMatrix();
+      orbita.enableZoom = false;
+      orbita.enablePan = false;
+      orbita.minDistance = orbita.maxDistance = 0.5;
+      orbita.enabled = true;
+      emVista = true;
+      selecionar(id);
+      return true;
+    },
     apresentacao(ligada) {
       if (ligada && modo !== 'orbita') definirModo('orbita');
       orbita.autoRotate = ligada;
@@ -838,6 +926,7 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
     },
     visaoGeral() {
       orbita.autoRotate = false;
+      sairDaVista();
       if (modo !== 'orbita') definirModo('orbita');
       voo = null;
       selecionar(null);
@@ -852,9 +941,19 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
       }
       bloqueadoCidade = () => false;
       atribuicaoEntorno = null;
+      obstaculos = [];
+      estudo = null;
       if (!entorno) return 0;
       const predios = entornoParaLocal(entorno.predios, entorno.centro, rotacao, caixaDoPredio());
       if (predios.length === 0) return 0;
+      obstaculos = predios.map((b) => ({
+        minX: Math.min(...b.footprint.map((q) => q.x)),
+        maxX: Math.max(...b.footprint.map((q) => q.x)),
+        minY: 0,
+        maxY: b.height,
+        minZ: Math.min(...b.footprint.map((q) => q.z)),
+        maxZ: Math.max(...b.footprint.map((q) => q.z)),
+      }));
       cidade = buildCityMesh(predios, materialCidade);
       cidade.castShadow = true;
       cidade.receiveShadow = true;
