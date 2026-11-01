@@ -5,6 +5,7 @@ import { entrarComoAdminComMfa } from './ajuda';
  * Regressão visual da Vitrine em 3 resoluções. Cena determinística: dados fixos, entorno do arquivo da Paulista,
  * sol em 21/06 às 15h, qualidade fixa e câmera inicial. Qualquer mudança visual reprova; se for intencional,
  * atualize as referências com `pnpm e2e --update-snapshots` e revise as imagens no commit.
+ * Tolerância de 2%: o 3D desenhado por software no CI varia um pouco entre quadros seguidos.
  * As referências dependem do sistema (o nome do arquivo leva -win32/-linux): no CI, gerar as do Linux uma vez.
  */
 const TELAS = [
@@ -51,7 +52,7 @@ test('aparência da Vitrine 3D em celular, tablet e computador', async ({ page, 
     await page.evaluate(() => window.scrollTo(0, 0));
     await page.waitForTimeout(1500); // sombras em cascata assentam
     await expect(vitrine).toHaveScreenshot(`vitrine-${tela.nome}.png`, {
-      maxDiffPixelRatio: 0.02, // desenho por software no CI: quadros seguidos variam um pouco
+      maxDiffPixelRatio: 0.02,
       timeout: 30_000, // desenho por software no navegador de teste: cada captura é lenta
       mask: [page.getByTestId('qualidade')], // o número de FPS muda a cada rodada
     });
@@ -69,9 +70,9 @@ test('aparência da Vitrine 3D em celular, tablet e computador', async ({ page, 
   await page.getByLabel(/^Hora/).fill('15');
   await page.evaluate(() => window.scrollTo(0, 0));
   await page.waitForTimeout(1500);
-  await expect(vitrine).toHaveScreenshot('vitrine-computador-alta.png', { maxDiffPixelRatio: 0.02, // desenho por software no CI: quadros seguidos variam um pouco timeout: 60_000, mask: [page.getByTestId('qualidade')] });
+  await expect(vitrine).toHaveScreenshot('vitrine-computador-alta.png', { maxDiffPixelRatio: 0.02, timeout: 60_000, mask: [page.getByTestId('qualidade')] });
   // noite: céu escuro com estrelas e janelas acesas (as disponíveis sempre acesas)
   await page.getByLabel(/^Hora/).fill('21');
   await page.waitForTimeout(1500);
-  await expect(vitrine).toHaveScreenshot('vitrine-computador-noite.png', { maxDiffPixelRatio: 0.02, // desenho por software no CI: quadros seguidos variam um pouco timeout: 60_000, mask: [page.getByTestId('qualidade')] });
+  await expect(vitrine).toHaveScreenshot('vitrine-computador-noite.png', { maxDiffPixelRatio: 0.02, timeout: 60_000, mask: [page.getByTestId('qualidade')] });
 });
