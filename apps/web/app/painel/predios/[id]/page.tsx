@@ -2,10 +2,11 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { Cartao } from '@/components/ui';
 import { apiNaPagina } from '@/lib/sessao';
-import { ehGestao, type Arquivo, type Espelho, type GirosDoPredio, type LinkCliente, type Me, type VideosDoPredio } from '@/lib/tipos';
-import { criarLink, mudarStatus, pedirGiro, pedirVideo, revogarLink, vincularModelo } from './actions';
+import { ehGestao, type Arquivo, type Espelho, type Estande, type GirosDoPredio, type LinkCliente, type Me, type VideosDoPredio } from '@/lib/tipos';
+import { comandarEstande, criarEstande, criarLink, mudarStatus, pedirGiro, pedirVideo, revogarLink, vincularModelo } from './actions';
 import { linkDoArquivo } from './vitrine/actions';
 import { Estudio } from './estudio';
+import { Estandes } from './estandes';
 import { GiroRenderizado } from './giro-renderizado';
 import { LinksClientes } from './links-clientes';
 import { EspelhoVendas } from './espelho';
@@ -28,9 +29,12 @@ export default async function PaginaPredio({ params }: { params: Promise<{ id: s
   const videos = lVideos.dados;
   // gestão e consultoras geram links para clientes (cada consultora vê só os dela)
   const podeLinks = ehGestao(me.papel) || me.papel === 'consultora';
-  const [lArquivos, lLinks] = await Promise.all([
+  // estande: link público que fica anos ligado num PC; só a gestão, com verificação em duas etapas
+  const podeEstande = ehGestao(me.papel) && me.mfa;
+  const [lArquivos, lLinks, lEstandes] = await Promise.all([
     apiNaPagina<Arquivo[]>(`/projetos/${espelho.predio.projetoId}/arquivos`, volta),
     podeLinks ? apiNaPagina<LinkCliente[]>(`/predios/${encodeURIComponent(id)}/links`, volta) : null,
+    podeEstande ? apiNaPagina<Estande[]>(`/predios/${encodeURIComponent(id)}/estandes`, volta) : null,
   ]);
   const arquivos = lArquivos.dados;
   const modelos = arquivos.filter((a) => a.tipo === 'modelo_3d' && a.status === 'pronto');
@@ -64,6 +68,17 @@ export default async function PaginaPredio({ params }: { params: Promise<{ id: s
             links={links}
             criar={criarLink.bind(null, espelho.predio.id)}
             revogar={revogarLink.bind(null, espelho.predio.id)}
+          />
+        </Cartao>
+      )}
+      {podeEstande && (
+        <Cartao titulo="Estande de vendas (tela touch)">
+          <Estandes
+            predioId={espelho.predio.id}
+            estandes={lEstandes?.dados ?? []}
+            temModelo={Boolean(espelho.predio.modeloArquivoId)}
+            criar={criarEstande.bind(null, espelho.predio.id)}
+            comandar={comandarEstande.bind(null, espelho.predio.id)}
           />
         </Cartao>
       )}

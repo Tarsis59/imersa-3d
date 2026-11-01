@@ -58,7 +58,7 @@ export function rotasVendas(app: FastifyInstance, { pool, exigir, webUrl }: Depe
                 (SELECT count(*)::int FROM view_events e WHERE e.link_id = l.id AND e.tipo = 'abriu') AS visitas,
                 (SELECT count(*)::int FROM leads x WHERE x.link_id = l.id) AS leads
            FROM share_links l JOIN users u ON u.id = l.criado_por
-          WHERE l.building_id = $1 AND ($2::uuid IS NULL OR l.criado_por = $2)
+          WHERE l.building_id = $1 AND l.tipo = 'cliente' AND ($2::uuid IS NULL OR l.criado_por = $2)
           ORDER BY l.criado_em DESC`,
         [id, soDela(s)],
       );

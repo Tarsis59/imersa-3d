@@ -1,6 +1,6 @@
 'use client';
 import { useEffect, useMemo, useRef, useState, type PointerEvent as EventoPonteiro } from 'react';
-import { criarViewer, filtrar, type Giro, filtroVazio, pontoCardeal, vetorJoystick, type EstadoViewer, type Filtro, type UnidadeViewer, type Viewer } from '@imersa/viewer';
+import { criarViewer, filtrar, type Clima, type Giro, filtroVazio, pontoCardeal, vetorJoystick, type EstadoViewer, type Filtro, type UnidadeViewer, type Viewer } from '@imersa/viewer';
 import type { StatusUnidade } from '@/lib/tipos';
 import { Botao, Campo, Cartao, Selecao } from '@/components/ui';
 import { alternarFavorito, lerFavoritos, salvarFavoritos } from '@/lib/favoritos';
@@ -48,6 +48,7 @@ export function Vitrine({
   giroRenderizado = null,
   assistenteUrl = null,
   aoPedirContato,
+  estande = null,
 }: {
   predioId: string;
   projetoId: string;
@@ -80,8 +81,14 @@ export function Vitrine({
   assistenteUrl?: string | null;
   /** O assistente pediu o formulário de contato (portal): abre com a unidade e o motivo. */
   aoPedirContato?: (motivo: 'contato' | 'visita', unidadeId: string | null) => void;
+  /**
+   * Estande de vendas (tela touch no PC do estande): `apresentando` = ninguém mexendo, a câmera gira sozinha e as
+   * unidades disponíveis aparecem uma a uma; cada `reinicio` novo volta tudo ao começo (próximo visitante).
+   */
+  estande?: { apresentando: boolean; reinicio: number } | null;
 }) {
   const canvas = useRef<HTMLCanvasElement>(null);
+  const coluna = useRef<HTMLDivElement>(null);
   const viewer = useRef<Viewer | null>(null);
   const inicial = useRef({ modeloUrl, unidades, rotacaoGraus, lat, lon, projetoId, predioId, qualidadeFixa, carregarEntorno, comTelemetria });
   inicial.current = { modeloUrl, unidades, rotacaoGraus, lat, lon, projetoId, predioId, qualidadeFixa, carregarEntorno, comTelemetria };
@@ -103,6 +110,7 @@ export function Vitrine({
   const [comCorte, setComCorte] = useState<number[]>([]);
   const [dataSol, setDataSol] = useState(hoje);
   const [horaSol, setHoraSol] = useState(10);
+  const [clima, setClima] = useState<Clima>('limpo');
   const [entorno, setEntorno] = useState<EstadoEntorno>({ tipo: 'carregando' });
   const [interiorAberto, setInteriorAberto] = useState<{ id: string; nome: string } | null>(null);
 
@@ -209,18 +217,63 @@ export function Vitrine({
   const ativo = filtroAtivo(filtro);
   // unidades que o assistente mostrou: valem até a pessoa mexer nos filtros
   const [destaqueIA, setDestaqueIA] = useState<ReadonlySet<string> | null>(null);
+  // apresentação do estande: a unidade disponível da vez
+  const [vitrineDaVez, setVitrineDaVez] = useState<string | null>(null);
   useEffect(() => {
     setDestaqueIA(null);
   }, [filtro]);
   useEffect(() => {
-    if (estado === 'pronto') viewer.current?.definirDestaque(destaqueIA ?? (ativo ? passam : null), favoritos);
-  }, [estado, passam, ativo, favoritos, destaqueIA]);
+    if (estado === 'pronto') viewer.current?.definirDestaque(vitrineDaVez ? new Set([vitrineDaVez]) : (destaqueIA ?? (ativo ? passam : null)), favoritos);
+  }, [estado, passam, ativo, favoritos, destaqueIA, vitrineDaVez]);
   useEffect(() => {
     if (estado === 'pronto') viewer.current?.cortarNoAndar(andarCorte === '' ? null : Number(andarCorte));
   }, [estado, andarCorte]);
   useEffect(() => {
     if (estado === 'pronto') viewer.current?.definirSol(dataSol, horaSol);
   }, [estado, dataSol, horaSol]);
+  useEffect(() => {
+    if (estado === 'pronto') viewer.current?.definirClima(clima);
+  }, [estado, clima]);
+
+  // estande: o próximo visitante começa do zero (sem filtro, unidade, corte ou interior do anterior)
+  const reinicio = estande?.reinicio ?? 0;
+  useEffect(() => {
+    if (!reinicio) return;
+    setFiltro(filtroVazio);
+    setSelecionada(null);
+    setAndarCorte('');
+    setInteriorAberto(null);
+    setMostrarGiro(false);
+    setDestaqueIA(null);
+    setClima('limpo');
+    setHoraSol(10);
+    setDataSol(hoje());
+    viewer.current?.visaoGeral();
+    coluna.current?.scrollTo({ top: 0 });
+    window.scrollTo({ top: 0 });
+  }, [reinicio]);
+  // apresentação: gira devagar e mostra uma unidade disponível de cada vez (8 s cada)
+  const apresentando = (estande?.apresentando ?? false) && estado === 'pronto';
+  const disponiveisRef = useRef<string[]>([]);
+  disponiveisRef.current = unidadesAtuais.filter((u) => u.status === 'disponivel').map((u) => u.id);
+  useEffect(() => {
+    viewer.current?.apresentacao(apresentando);
+    if (!apresentando) {
+      setVitrineDaVez(null);
+      return;
+    }
+    let i = 0;
+    const proxima = () => {
+      const ids = disponiveisRef.current;
+      setVitrineDaVez(ids.length ? ids[i++ % ids.length]! : null);
+    };
+    proxima();
+    const t = setInterval(proxima, 8000);
+    return () => {
+      clearInterval(t);
+      viewer.current?.apresentacao(false);
+    };
+  }, [apresentando]);
 
   const nomeAndar = new Map(andares.map((a) => [a.numero, a.nome]));
   const quartosDisponiveis = [...new Set(unidades.map((u) => u.quartos).filter((q): q is number => q !== null))].sort((a, b) => a - b);
@@ -318,7 +371,10 @@ export function Vitrine({
         data-giro={mostrarGiro ? 'pronto' : progressoGiro ? 'gerando' : 'fechado'}
         data-destaque-ia={destaqueIA ? [...destaqueIA].sort().join(',') : ''}
         data-ao-vivo={estadoAoVivo}
-        className="relative h-[70vh] min-h-96 overflow-hidden rounded-2xl border border-borda bg-fundo lg:sticky lg:top-6"
+        data-clima={clima}
+        data-apresentacao={apresentando ? 'ligada' : 'desligada'}
+        data-unidade-da-vez={vitrineDaVez ?? ''}
+        className={`relative ${estande ? 'h-[calc(100dvh-7rem)]' : 'h-[70vh]'} min-h-96 overflow-hidden rounded-2xl border border-borda bg-fundo lg:sticky lg:top-6`}
       >
         <canvas
           ref={canvas}
@@ -326,25 +382,33 @@ export function Vitrine({
           aria-label="Prédio em 3D. Arraste para girar, role para aproximar, toque numa unidade para ver os detalhes."
         />
         {estado === 'carregando' && <p className="absolute inset-0 grid place-items-center text-suave">Carregando o 3D…</p>}
+        {apresentando && <Apresentacao unidade={unidadesAtuais.find((u) => u.id === vitrineDaVez) ?? null} nomeAndar={(n) => nomeAndar.get(n) ?? `${n}º andar`} />}
         {estado === 'erro' && <p className="absolute inset-0 grid place-items-center text-perigo">Não foi possível carregar o modelo 3D.</p>}
         {telemetria && (
           <>
             <Bussola rumo={telemetria.rumo} />
-            <p data-testid="qualidade" className="absolute left-3 top-3 rounded-md bg-black/60 px-2 py-1 text-xs text-white">
-              {telemetria.fps} FPS · qualidade {ROTULO_NIVEL[telemetria.nivel]}
-            </p>
+            {/* número técnico: no estande, quem vê é o visitante (o desempenho vai para o painel) */}
+            {!estande && (
+              <p data-testid="qualidade" className="absolute left-3 top-3 rounded-md bg-black/60 px-2 py-1 text-xs text-white">
+                {telemetria.fps} FPS · qualidade {ROTULO_NIVEL[telemetria.nivel]}
+              </p>
+            )}
           </>
         )}
-        {entorno.tipo === 'pronto' && entorno.predios > 0 && (
-          <a
-            href="https://www.openstreetmap.org/copyright"
-            target="_blank"
-            rel="noreferrer"
-            className="absolute bottom-2 right-2 rounded bg-white/85 px-2 py-0.5 text-[11px] text-slate-800 hover:underline"
-          >
-            {entorno.atribuicao}
-          </a>
-        )}
+        {entorno.tipo === 'pronto' && entorno.predios > 0 &&
+          (estande ? (
+            // no estande não há para onde navegar: a atribuição (licença do OSM) fica só como texto
+            <span className="absolute bottom-2 right-2 rounded bg-white/85 px-2 py-0.5 text-[11px] text-slate-800">{entorno.atribuicao}</span>
+          ) : (
+            <a
+              href="https://www.openstreetmap.org/copyright"
+              target="_blank"
+              rel="noreferrer"
+              className="absolute bottom-2 right-2 rounded bg-white/85 px-2 py-0.5 text-[11px] text-slate-800 hover:underline"
+            >
+              {entorno.atribuicao}
+            </a>
+          ))}
         {mostrarGiro && (tipoGiro === 'fotorrealista' ? giroFoto : giro) && (
           <Giro360
             giro={(tipoGiro === 'fotorrealista' ? giroFoto : giro)!}
@@ -360,7 +424,8 @@ export function Vitrine({
         {modo === 'primeira-pessoa' && <Joystick aoMover={(e) => viewer.current?.definirEntrada(e)} />}
       </div>
 
-      <div className="grid gap-4">
+      {/* estande: a coluna rola sozinha; o 3D e o cabeçalho (com o QR) ficam sempre na tela */}
+      <div ref={coluna} className={`grid gap-4 ${estande ? 'lg:max-h-[calc(100dvh-7rem)] lg:overflow-y-auto lg:overscroll-contain lg:pr-1' : ''}`}>
         {unidade && (
           <Cartao titulo={`Unidade ${unidade.codigo}`}>
             <div data-testid="unidade-selecionada" className="grid gap-3 text-sm">
@@ -509,6 +574,22 @@ export function Vitrine({
                 <input id="hora-sol" type="range" min={6} max={19} step={0.25} value={horaSol} onChange={(e) => setHoraSol(Number(e.target.value))} />
               </label>
             </div>
+            <fieldset className="grid gap-2">
+              <legend className="font-medium">Clima</legend>
+              <div className="flex gap-2">
+                {(['limpo', 'nublado'] as const).map((c) => (
+                  <button
+                    key={c}
+                    type="button"
+                    aria-pressed={clima === c}
+                    onClick={() => setClima(c)}
+                    className={`flex-1 rounded-lg border px-3 py-2 ${clima === c ? 'border-acento bg-acento text-acento-texto' : 'border-borda hover:bg-fundo'}`}
+                  >
+                    {c === 'limpo' ? 'Céu limpo' : 'Nublado'}
+                  </button>
+                ))}
+              </div>
+            </fieldset>
             {giroRenderizado && (
               <Botao type="button" disabled={progressoGiro !== null} onClick={() => void abrirGiroFoto()}>
                 Abrir giro 360° fotorrealista
@@ -522,9 +603,11 @@ export function Vitrine({
             <Botao type="button" variante="secundario" disabled={estado !== 'pronto' || progressoGiro !== null} onClick={() => void abrirGiro()}>
               {giro ? 'Abrir giro 360° (modo leve)' : 'Gerar giro 360° (modo leve)'}
             </Botao>
-            <Botao type="button" variante="secundario" disabled={estado !== 'pronto' || baixando} onClick={() => void baixarImagem()}>
-              {baixando ? 'Gerando imagem…' : 'Baixar imagem (PNG)'}
-            </Botao>
+            {!estande && (
+              <Botao type="button" variante="secundario" disabled={estado !== 'pronto' || baixando} onClick={() => void baixarImagem()}>
+                {baixando ? 'Gerando imagem…' : 'Baixar imagem (PNG)'}
+              </Botao>
+            )}
             {modo === 'orbita' ? (
               <Botao type="button" variante="secundario" disabled={estado !== 'pronto'} onClick={() => viewer.current?.definirModo('primeira-pessoa')}>
                 Andar a pé (1ª pessoa)
@@ -540,6 +623,26 @@ export function Vitrine({
           </div>
         </Cartao>
       </div>
+    </div>
+  );
+}
+
+/** Estande sem ninguém mexendo: a unidade disponível da vez e o convite para tocar na tela. */
+function Apresentacao({ unidade, nomeAndar }: { unidade: UnidadeViewer | null; nomeAndar: (n: number) => string }) {
+  return (
+    <div className="pointer-events-none absolute inset-x-0 bottom-0 grid justify-items-center gap-3 bg-gradient-to-t from-black/70 to-transparent px-6 pb-8 pt-24 text-center text-white">
+      {unidade && (
+        <div data-testid="apresentacao-unidade" className="grid gap-1">
+          <p className="text-sm uppercase tracking-widest text-white/80">Disponível</p>
+          <p className="text-3xl font-bold">Unidade {unidade.codigo}</p>
+          <p className="text-lg">
+            {[nomeAndar(unidade.andar), unidade.quartos !== null && `${unidade.quartos} quartos`, unidade.areaM2 !== null && `${unidade.areaM2} m²`, unidade.preco !== null && brl(unidade.preco)]
+              .filter(Boolean)
+              .join(' · ')}
+          </p>
+        </div>
+      )}
+      <p className="animate-pulse rounded-full bg-white/20 px-5 py-2 text-lg font-semibold backdrop-blur">Toque na tela para explorar</p>
     </div>
   );
 }

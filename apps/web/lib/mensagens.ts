@@ -46,6 +46,9 @@ const MENSAGENS: Record<string, string> = {
   video_em_andamento: 'Já há um vídeo deste formato na fila ou sendo renderizado.',
   planta_nao_lida: 'A leitura da planta ainda não terminou.',
   predio_de_outro_empreendimento: 'O prédio é de outro empreendimento.',
+  estande_desativado: 'Este estande foi desativado.',
+  sem_modelo: 'Ligue um modelo 3D ao prédio primeiro.',
+  modelo_sem_leitor: 'O modelo usa texturas KTX2, que o Unreal não lê. Envie o modelo com texturas PNG ou JPEG.',
 };
 
 export function mensagem(status: number, dados: unknown): string {

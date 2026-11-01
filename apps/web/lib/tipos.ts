@@ -282,6 +282,22 @@ export interface VideoPredio {
   /** Feito com o modelo que o prédio usa hoje. */
   atual: boolean;
 }
+/** Estande de vendas (PC com tela touch) do prédio, como o painel vê. */
+export interface Estande {
+  id: string;
+  nome: string;
+  criadoEm: string;
+  ultimoSinalEm: string | null;
+  info: { fps?: number; largura?: number; altura?: number; apresentando?: boolean; versao?: string };
+  status: 'online' | 'offline' | 'desativado';
+  recarregarPendente: boolean;
+  /** Visitantes que mexeram na tela (cada um conta uma vez). */
+  interacoes: number;
+  /** Visitas pelo QR code (no celular de quem levou). */
+  visitasQr: number;
+  leads: number;
+}
+
 export interface VideosDoPredio {
   temModelo: boolean;
   videos: VideoPredio[];

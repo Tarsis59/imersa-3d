@@ -32,6 +32,11 @@ export async function api<T = unknown>(
 }
 
 /** Como `api`, mas devolve a resposta sem ler o corpo: para repassar um fluxo (SSE) ao navegador. */
+/** GET cru (arquivo para baixar): a resposta da API passa direto, sem ler o corpo aqui. */
+export async function apiArquivo(caminho: string, token: string): Promise<Response> {
+  return fetch(`${API_URL}${caminho}`, { headers: { authorization: `Bearer ${token}` }, cache: 'no-store' });
+}
+
 export async function apiFluxo(caminho: string, opcoes: { corpo: string; token: string }): Promise<Response> {
   const h = await headers();
   const ip = h.get('x-forwarded-for') ?? h.get('x-real-ip');

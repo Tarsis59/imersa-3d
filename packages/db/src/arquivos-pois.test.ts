@@ -307,3 +307,28 @@ describe('vídeos de marketing', () => {
     await expect(comoA((c) => c.query('DELETE FROM videos WHERE id = $1', [v916]))).rejects.toThrow(/permission denied/);
   });
 });
+
+describe('estandes de vendas', () => {
+  it('isolado por empresa, links do próprio prédio, link do PC separado dos links de cliente', async () => {
+    const u = (await owner.query<{ id: string }>("INSERT INTO users (email, nome, senha_hash) VALUES ('estande@a.test', 'Gestora', 'x') RETURNING id")).rows[0]!.id;
+    const link = (c: pg.PoolClient, hash: string, tipo: string) =>
+      c
+        .query<{ id: string }>("INSERT INTO share_links (building_id, token_hash, criado_por, expira_em, tipo) VALUES ($1, $2, $3, now() + interval '10 years', $4) RETURNING id", [predioA, hash, u, tipo])
+        .then((r) => r.rows[0]!.id);
+    const pc = await comoA((c) => link(c, 'hash-pc', 'estande'));
+    const qr = await comoA((c) => link(c, 'hash-qr', 'cliente'));
+    await expect(comoA((c) => link(c, 'hash-x', 'outro'))).rejects.toThrow(/check/);
+    const novo = (c: pg.PoolClient, nome: string, a: string, b: string) =>
+      c.query<{ id: string }>('INSERT INTO estandes (building_id, nome, link_id, qr_link_id) VALUES ($1, $2, $3, $4) RETURNING id', [predioA, nome, a, b]).then((r) => r.rows[0]!.id);
+    await expect(comoA((c) => novo(c, '', pc, qr))).rejects.toThrow(/check/);
+    const e = await comoA((c) => novo(c, 'Estande da Paulista', pc, qr));
+    await expect(comoA((c) => novo(c, 'Outro', pc, qr))).rejects.toThrow(/unique/);
+    // a outra empresa não vê nem usa
+    expect(await comoB(async (c) => (await c.query('SELECT * FROM estandes')).rowCount)).toBe(0);
+    await expect(comoB((c) => c.query('UPDATE estandes SET nome = $2 WHERE id = $1 RETURNING id', [e, 'x']).then((r) => r.rowCount))).resolves.toBe(0);
+    // sinal de vida e informações limitadas
+    await comoA((c) => c.query(`UPDATE estandes SET ultimo_sinal_em = now(), info = '{"fps": 58}' WHERE id = $1`, [e]));
+    await expect(comoA((c) => c.query(`UPDATE estandes SET info = '[1]' WHERE id = $1`, [e]))).rejects.toThrow(/check/);
+    await expect(comoA((c) => c.query('DELETE FROM estandes WHERE id = $1', [e]))).rejects.toThrow(/permission denied/);
+  });
+});

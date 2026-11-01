@@ -65,6 +65,8 @@ export interface Giro {
   altura: number;
 }
 
+export type Clima = 'limpo' | 'nublado';
+
 export interface Viewer {
   /** Resolve quando o prédio está na tela; rejeita se o modelo não carregar. */
   pronto: Promise<void>;
@@ -81,6 +83,12 @@ export interface Viewer {
   /** Entrada do joystick de toque (soma com o teclado). */
   definirEntrada(entrada: Entrada): void;
   definirSol(dataISO: string, hora: number): void;
+  /** Céu limpo (sol e sombra fortes) ou nublado (luz difusa, céu cinza, sombra fraca). */
+  definirClima(clima: Clima): void;
+  /** Apresentação automática (estande sem ninguém mexendo): a câmera gira devagar em volta do prédio. */
+  apresentacao(ligada: boolean): void;
+  /** Volta à vista do prédio inteiro, em órbita (o estande recomeça para o próximo visitante). */
+  visaoGeral(): void;
   /** Prédios reais em volta (OSM). Devolve quantos foram desenhados. `null` tira o entorno. */
   definirEntorno(entorno: Entorno | null): Promise<number>;
   /** PNG da vista atual com faixa da marca (empresa, prédio, data, "imagem ilustrativa" e atribuição do OSM). */
@@ -450,13 +458,26 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
   }
 
   // -------------------------------------------------------------- sol
+  let dia = true;
+  let clima: Clima = 'limpo';
+  const COR_CEU = { limpo: 0xbfd9f2, nublado: 0xc9ced6 } as const;
+  /** Luz do sol e do céu a partir da hora e do clima (nublado: o céu claro espalha a luz e a sombra quase some). */
+  function aplicarLuz(): void {
+    for (const l of csm.lights) l.intensity = !dia ? 0 : clima === 'limpo' ? 2.2 : 0.45;
+    ceu.intensity = !dia ? 0.35 : clima === 'limpo' ? 0.9 : 1.5;
+    (cena.background as THREE.Color).setHex(COR_CEU[clima]);
+    cena.fog?.color.setHex(COR_CEU[clima]);
+  }
   function definirSol(dataISO: string, hora: number): void {
     const mundo = sunDirection(horaSaoPauloParaUtc(dataISO, hora), lat, lon);
     const local = paraReferenciaDoProjeto(mundo, rotacao);
     csm.lightDirection.copy(local).negate();
-    const dia = local.y > 0;
-    for (const l of csm.lights) l.intensity = dia ? 2.2 : 0;
-    ceu.intensity = dia ? 0.9 : 0.35;
+    dia = local.y > 0;
+    aplicarLuz();
+  }
+  function definirClima(novo: Clima): void {
+    clima = novo;
+    aplicarLuz();
   }
 
   function aplicarQualidade(n: NivelQualidade): void {
@@ -602,10 +623,24 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
   /** Quem espera o próximo quadro desenhado (medir a troca de acabamento de ponta a ponta). */
   const esperandoQuadro: Array<(agora: number) => void> = [];
   const proximoQuadro = () => new Promise<number>((ok) => esperandoQuadro.push(ok));
+  /** Estado da câmera para a tela (modo, rumo, posição), no máximo 4 vezes por segundo. */
+  const avisar = (agora: number) => {
+    if (!cbMudanca || agora - ultimoAviso <= 250) return;
+    ultimoAviso = agora;
+    camera.getWorldDirection(direcaoCamera);
+    cbMudanca({
+      fps: Math.round(qualidade.fps),
+      nivel: qualidade.nivel.nome,
+      rumo: Math.round(rumoDaCamera(direcaoCamera, rotacao)),
+      modo,
+      posicao: { x: camera.position.x, y: camera.position.y, z: camera.position.z },
+    });
+  };
   renderer.setAnimationLoop((agora: number) => {
     if (pausado) return;
     if (!naTela && !voo && !esperandoQuadro.length) {
       ultimoQuadro = agora; // ao voltar, o intervalo parado não conta como quadro lento
+      avisar(agora); // a tela continua sabendo o modo (ex.: trocou para 1ª pessoa com o 3D fora da tela)
       return;
     }
     const dtMs = agora - ultimoQuadro;
@@ -640,17 +675,7 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
     renderer.render(cena, camera);
     if (esperandoQuadro.length) for (const ok of esperandoQuadro.splice(0)) ok(performance.now());
 
-    if (cbMudanca && agora - ultimoAviso > 250) {
-      ultimoAviso = agora;
-      camera.getWorldDirection(direcaoCamera);
-      cbMudanca({
-        fps: Math.round(qualidade.fps),
-        nivel: qualidade.nivel.nome,
-        rumo: Math.round(rumoDaCamera(direcaoCamera, rotacao)),
-        modo,
-        posicao: { x: camera.position.x, y: camera.position.y, z: camera.position.z },
-      });
-    }
+    avisar(agora);
   });
 
   const pronto = (config.modeloUrl ? montarModelo(config.modeloUrl) : Promise.resolve(montarVolumes())).then(() => {
@@ -709,6 +734,19 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
       joystick = e;
     },
     definirSol,
+    definirClima,
+    apresentacao(ligada) {
+      if (ligada && modo !== 'orbita') definirModo('orbita');
+      orbita.autoRotate = ligada;
+      orbita.autoRotateSpeed = 0.5; // uma volta a cada ~2 min: dá para ver o prédio sem enjoar
+    },
+    visaoGeral() {
+      orbita.autoRotate = false;
+      if (modo !== 'orbita') definirModo('orbita');
+      voo = null;
+      selecionar(null);
+      enquadrarPredio();
+    },
     async definirEntorno(entorno) {
       await pronto;
       if (cidade) {

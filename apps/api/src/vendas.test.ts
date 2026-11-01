@@ -348,3 +348,80 @@ describe('anti-abuso', () => {
     expect(status).toContain(429);
   });
 });
+
+describe('estande de vendas (PC com tela touch)', () => {
+  const tokenEstande = (url: string) => url.split('/estande/')[1]!;
+  const IP = '198.51.100.9';
+
+  it('só a gestão cria; o endereço tem token forte; o link do PC não entra na lista das consultoras', async () => {
+    expect((await req('POST', `/predios/${torreA}/estandes`, { nome: 'Estande' }, ana)).status).toBe(403);
+    expect((await req('POST', `/predios/${torreA}/estandes`, { nome: 'Estande' }, concorrente)).status).toBe(404);
+    expect((await req('POST', `/predios/${torreA}/estandes`, { nome: '' }, gestao)).status).toBe(400);
+    const r = await req('POST', `/predios/${torreA}/estandes`, { nome: 'Estande da Paulista' }, gestao);
+    expect(r.status).toBe(201);
+    expect(r.json.url).toMatch(/^http:\/\/localhost:3000\/estande\/[\w-]{43}$/);
+    const links = (await req('GET', `/predios/${torreA}/links`, undefined, gestao)).json as Array<{ titulo: string }>;
+    expect(links.some((l) => l.titulo === 'Estande: Estande da Paulista')).toBe(false);
+    expect(links.some((l) => l.titulo === 'QR do estande: Estande da Paulista')).toBe(true); // o QR é link de cliente
+    expect(JSON.stringify((await owner.query('SELECT * FROM share_links')).rows)).not.toContain(tokenEstande(r.json.url));
+  });
+
+  it('PC: dados do prédio pelo mesmo portal, QR estável que abre o portal, sinal de vida e comando de recarregar', async () => {
+    const criado = await req('POST', `/predios/${torreA}/estandes`, { nome: 'Estande do shopping' }, gestao);
+    const t = tokenEstande(criado.json.url);
+    const e = await req('GET', `/publico/estandes/${t}`, undefined, undefined, IP);
+    expect(e.status).toBe(200);
+    expect(e.json.nome).toBe('Estande do shopping');
+    expect(e.json.qrUrl).toMatch(/^http:\/\/localhost:3000\/v\/[\w-]{43}$/);
+    expect((await req('GET', `/publico/estandes/${t}`, undefined, undefined, IP)).json.qrUrl).toBe(e.json.qrUrl); // o mesmo QR depois de reiniciar
+    // o QR abre o portal do cliente do mesmo prédio
+    const portal = await req('GET', `/publico/links/${e.json.qrUrl.split('/v/')[1]}`, undefined, undefined, IP);
+    expect(portal.status).toBe(200);
+    expect(portal.json.predio.id).toBe(torreA);
+    expect((await req('GET', `/publico/links/${t}`, undefined, undefined, IP)).json.predio.id).toBe(torreA);
+    // link de cliente comum não é estande
+    expect((await req('GET', `/publico/estandes/${e.json.qrUrl.split('/v/')[1]}`, undefined, undefined, IP)).status).toBe(404);
+
+    const lista = async () => ((await req('GET', `/predios/${torreA}/estandes`, undefined, gestao)).json as Array<{ id: string; status: string; info: object; recarregarPendente: boolean }>).find((x) => x.id === criado.json.id)!;
+    expect((await lista()).status).toBe('offline');
+    expect((await req('POST', `/publico/estandes/${t}/sinal`, { fps: 58, largura: 1920, altura: 1080, apresentando: true }, undefined, IP)).json).toEqual({ recarregar: false });
+    expect(await lista()).toMatchObject({ status: 'online', info: { fps: 58, largura: 1920 }, recarregarPendente: false });
+    expect((await req('POST', `/publico/estandes/${t}/sinal`, { fps: -1 }, undefined, IP)).status).toBe(400);
+
+    expect((await req('POST', `/estandes/${criado.json.id}/recarregar`, {}, ana)).status).toBe(403);
+    expect((await req('POST', `/estandes/${criado.json.id}/recarregar`, {}, concorrente)).status).toBe(404);
+    expect((await req('POST', `/estandes/${criado.json.id}/recarregar`, {}, gestao)).status).toBe(200);
+    expect((await lista()).recarregarPendente).toBe(true);
+    expect((await req('POST', `/publico/estandes/${t}/sinal`, {}, undefined, IP)).json).toEqual({ recarregar: true });
+    expect((await req('POST', `/publico/estandes/${t}/sinal`, {}, undefined, IP)).json).toEqual({ recarregar: false }); // uma vez só
+    expect((await lista()).recarregarPendente).toBe(false);
+  });
+
+  it('desativar para o PC e o QR juntos; a outra empresa não vê', async () => {
+    const criado = await req('POST', `/predios/${torreA}/estandes`, { nome: 'Estande temporário' }, gestao);
+    const t = tokenEstande(criado.json.url);
+    const qr = (await req('GET', `/publico/estandes/${t}`, undefined, undefined, IP)).json.qrUrl.split('/v/')[1];
+    expect((await req('GET', `/predios/${torreA}/estandes`, undefined, concorrente)).status).toBe(404);
+    expect((await req('POST', `/estandes/${criado.json.id}/desativar`, {}, concorrente)).status).toBe(404);
+    expect((await req('POST', `/estandes/${criado.json.id}/desativar`, {}, gestao)).status).toBe(200);
+    expect((await req('GET', `/publico/estandes/${t}`, undefined, undefined, IP)).status).toBe(410);
+    expect((await req('POST', `/publico/estandes/${t}/sinal`, {}, undefined, IP)).status).toBe(410);
+    expect((await req('GET', `/publico/links/${qr}`, undefined, undefined, IP)).status).toBe(410);
+    expect((await req('POST', `/estandes/${criado.json.id}/recarregar`, {}, gestao)).status).toBe(404);
+    const e = ((await req('GET', `/predios/${torreA}/estandes`, undefined, gestao)).json as Array<{ id: string; status: string }>).find((x) => x.id === criado.json.id)!;
+    expect(e.status).toBe('desativado');
+  });
+
+  it('pacote para o Unreal: empreendimento georreferenciado, unidades com a peça do modelo e as rotas ao vivo', async () => {
+    expect((await req('GET', `/predios/${torreA}/pacote-unreal`, undefined, ana)).status).toBe(403);
+    const r = await req('GET', `/predios/${torreA}/pacote-unreal`, undefined, gestao);
+    expect(r.status).toBe(200);
+    expect(r.json).toMatchObject({ formato: 'imersa-estande/1', predio: { id: torreA, nome: 'Torre A' }, empreendimento: { nome: 'Residencial Paulista' }, modelo: null });
+    expect(r.json.empreendimento.lat).toBeCloseTo(-23.5613, 4);
+    expect(r.json.unidades.map((u: { codigo: string }) => u.codigo)).toEqual(['101', '102']);
+    expect(r.json.unidades[0]).toMatchObject({ andar: 1, status: 'disponivel', quartos: 2, areaM2: 72, meshNodeId: null });
+    expect(r.json.tempoReal.aoVivo).toContain('/publico/links/{token}/ao-vivo');
+    // sem modelo 3D ligado ao prédio, não há o que baixar
+    expect((await req('GET', `/predios/${torreA}/pacote-unreal/modelo.glb`, undefined, gestao)).status).toBe(404);
+  });
+});

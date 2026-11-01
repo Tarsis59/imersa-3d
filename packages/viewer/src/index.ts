@@ -1,4 +1,4 @@
-export { criarViewer, type Viewer, type ConfigViewer, type EstadoViewer, type Giro, type MetricasViewer, type ModoCamera } from './viewer';
+export { criarViewer, type Viewer, type ConfigViewer, type EstadoViewer, type Giro, type MetricasViewer, type ModoCamera, type Clima } from './viewer';
 export { filtrar, filtroVazio, type Filtro } from './units/filtro';
 export { COR_UNIDADE, type StatusUnidade, type UnidadeViewer, type Caixa } from './units/tipos';
 export { massaDoPredio } from './units/massa';

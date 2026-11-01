@@ -16,11 +16,12 @@ export type Acao =
   | 'numeros:ler'
   | 'integracao:gerir'
   | 'catalogo:editar'
-  | 'configuracao:salvar';
+  | 'configuracao:salvar'
+  | 'estande:gerir';
 
 const TODOS: readonly Papel[] = PAPEIS;
 const GESTAO: readonly Papel[] = ['super_admin', 'admin'];
-const SENSIVEIS: readonly Acao[] = ['projeto:criar', 'membro:convidar', 'auditoria:ler', 'empreendimento:editar', 'importacao:executar', 'unidade:status', 'captura:revisar', 'lead:ler', 'integracao:gerir', 'catalogo:editar'];
+const SENSIVEIS: readonly Acao[] = ['projeto:criar', 'membro:convidar', 'auditoria:ler', 'empreendimento:editar', 'importacao:executar', 'unidade:status', 'captura:revisar', 'lead:ler', 'integracao:gerir', 'catalogo:editar', 'estande:gerir'];
 
 const MATRIZ: Record<Acao, readonly Papel[]> = {
   'projeto:ler': TODOS,
@@ -43,6 +44,8 @@ const MATRIZ: Record<Acao, readonly Papel[]> = {
   // configurador: o catálogo (materiais, móveis e preços) é da gestão; a consultora monta e salva a combinação com a cliente
   'catalogo:editar': GESTAO,
   'configuracao:salvar': [...GESTAO, 'consultora'],
+  // estande: um link público que fica anos ligado num PC; só a gestão cria, recarrega e desativa
+  'estande:gerir': GESTAO,
 };
 
 export const pode = (papel: Papel, acao: Acao): boolean => MATRIZ[acao].includes(papel);

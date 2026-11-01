@@ -81,3 +81,18 @@ export async function pedirVideo(predioId: string, formato: '9:16' | '1:1' | '16
   revalidatePath(`/painel/predios/${predioId}`);
   return {};
 }
+
+/** Estande novo: devolve o endereço para abrir no PC do estande (só aparece agora). */
+export async function criarEstande(predioId: string, nome: string): Promise<{ url?: string; erro?: string }> {
+  const r = await api<{ url: string }>(`/predios/${encodeURIComponent(predioId)}/estandes`, { metodo: 'POST', corpo: { nome }, token: await tokenParaAcao() });
+  if (r.status !== 201) return { erro: mensagem(r.status, r.dados) };
+  revalidatePath(`/painel/predios/${predioId}`);
+  return { url: r.dados.url };
+}
+
+export async function comandarEstande(predioId: string, estandeId: string, comando: 'recarregar' | 'desativar'): Promise<{ erro?: string }> {
+  const r = await api(`/estandes/${encodeURIComponent(estandeId)}/${comando}`, { metodo: 'POST', corpo: {}, token: await tokenParaAcao() });
+  if (r.status !== 200) return { erro: mensagem(r.status, r.dados) };
+  revalidatePath(`/painel/predios/${predioId}`);
+  return {};
+}
