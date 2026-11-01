@@ -38,17 +38,24 @@ function BarraSituacao({ resumo }: { resumo: DetalheProjeto['resumo'] }) {
 export default async function PaginaProjeto({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const volta = `/painel/projetos/${id}`;
-  const me = (await apiNaPagina<Me>('/me', volta)).dados;
-  const r = await apiNaPagina<DetalheProjeto>(`/projetos/${encodeURIComponent(id)}`, volta);
+  // independentes entre si: em paralelo. Em série, a página levava ~5 s na API grátis (longe do banco), mais que
+  // o intervalo das listas que se atualizam sozinhas
+  const base = `/projetos/${encodeURIComponent(id)}`;
+  const [eu, r, lArquivos, lArredores, lCapturas, lConversoes, lPlantas] = await Promise.all([
+    apiNaPagina<Me>('/me', volta),
+    apiNaPagina<DetalheProjeto>(base, volta),
+    apiNaPagina<Arquivo[]>(`${base}/arquivos`, volta),
+    apiNaPagina<{ semLocalizacao: boolean; pois: Poi[] }>(`${base}/pois`, volta),
+    apiNaPagina<Captura[]>(`${base}/capturas`, volta),
+    apiNaPagina<ConversaoBim[]>(`${base}/conversoes`, volta),
+    apiNaPagina<PlantaResumo[]>(`${base}/plantas`, volta),
+  ]);
   if (r.status !== 200) notFound();
+  const me = eu.dados;
   const { projeto, predios, tipologias, resumo } = r.dados;
   const gestao = ehGestao(me.papel);
   const podeEditar = gestao && me.mfa;
-  const arquivos = (await apiNaPagina<Arquivo[]>(`/projetos/${projeto.id}/arquivos`, volta)).dados;
-  const arredores = (await apiNaPagina<{ semLocalizacao: boolean; pois: Poi[] }>(`/projetos/${projeto.id}/pois`, volta)).dados;
-  const capturas = (await apiNaPagina<Captura[]>(`/projetos/${projeto.id}/capturas`, volta)).dados;
-  const conversoes = (await apiNaPagina<ConversaoBim[]>(`/projetos/${projeto.id}/conversoes`, volta)).dados;
-  const plantas = (await apiNaPagina<PlantaResumo[]>(`/projetos/${projeto.id}/plantas`, volta)).dados;
+  const [arquivos, arredores, capturas, conversoes, plantas] = [lArquivos.dados, lArredores.dados, lCapturas.dados, lConversoes.dados, lPlantas.dados];
   // quem está no imóvel (consultora, produtor) envia fotos/vídeo; só a gestão (com MFA) revisa e publica
   const podeEnviarCaptura = gestao || me.papel === 'consultora' || me.papel === 'produtor';
 

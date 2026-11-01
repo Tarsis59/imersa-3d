@@ -1,6 +1,7 @@
 'use client';
-import { useEffect, useState, useTransition } from 'react';
+import { useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
+import { useAtualizarEnquanto } from '@/lib/atualizacao';
 import { Aviso, Botao } from '@/components/ui';
 import type { GirosDoPredio } from '@/lib/tipos';
 
@@ -18,11 +19,7 @@ export function GiroRenderizado({ giros, podePedir, pedir }: { giros: GirosDoPre
   const { ultimo, pronto } = giros;
   const andamento = ultimo && (ultimo.status === 'na_fila' || ultimo.status === 'processando');
   // na fila ou renderizando: confere de minuto em minuto (o render leva de minutos a uma hora)
-  useEffect(() => {
-    if (!andamento) return;
-    const t = setInterval(() => router.refresh(), 60_000);
-    return () => clearInterval(t);
-  }, [andamento, router]);
+  useAtualizarEnquanto(!!andamento, 60_000);
 
   return (
     <div className="grid gap-3 text-sm" data-testid="giro-renderizado" data-status={ultimo?.status ?? 'nenhum'}>

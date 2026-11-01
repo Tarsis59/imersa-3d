@@ -1,7 +1,8 @@
 'use client';
-import { useEffect, useState, useTransition } from 'react';
+import { useState, useTransition } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
+import { useAtualizarEnquanto } from '@/lib/atualizacao';
 import { Aviso, Botao } from '@/components/ui';
 import { tamanhoLegivel, type Arquivo, type ConversaoBim } from '@/lib/tipos';
 
@@ -26,11 +27,7 @@ export function SecaoBim({
   const [erro, setErro] = useState<string | null>(null);
   const [ocupado, iniciar] = useTransition();
   const andamento = conversoes.some((c) => c.status === 'na_fila' || c.status === 'processando');
-  useEffect(() => {
-    if (!andamento) return;
-    const t = setInterval(() => router.refresh(), 4000);
-    return () => clearInterval(t);
-  }, [andamento, router]);
+  useAtualizarEnquanto(!!andamento, 4000);
 
   if (!ifcs.length) return <p className="text-sm text-suave">Envie o projeto em IFC (exportado do Revit, ArchiCAD, SketchUp etc.) em “Arquivos 3D e documentos”: ele vira 3D navegável com pavimentos e ambientes.</p>;
   return (

@@ -12,16 +12,25 @@ import { ModeloDoPredio } from './modelo-3d';
 export default async function PaginaPredio({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const volta = `/painel/predios/${id}`;
-  const r = await apiNaPagina<Espelho>(`/predios/${encodeURIComponent(id)}`, volta);
+  // independentes entre si: em paralelo (cada ida à API grátis custa centenas de ms)
+  const [r, eu, lGiros] = await Promise.all([
+    apiNaPagina<Espelho>(`/predios/${encodeURIComponent(id)}`, volta),
+    apiNaPagina<Me>('/me', volta),
+    apiNaPagina<GirosDoPredio>(`/predios/${encodeURIComponent(id)}/giros`, volta),
+  ]);
   if (r.status !== 200) notFound();
   const espelho = r.dados;
-  const me = (await apiNaPagina<Me>('/me', volta)).dados;
-  const arquivos = (await apiNaPagina<Arquivo[]>(`/projetos/${espelho.predio.projetoId}/arquivos`, volta)).dados;
-  const modelos = arquivos.filter((a) => a.tipo === 'modelo_3d' && a.status === 'pronto');
+  const me = eu.dados;
+  const giros = lGiros.dados;
   // gestão e consultoras geram links para clientes (cada consultora vê só os dela)
   const podeLinks = ehGestao(me.papel) || me.papel === 'consultora';
-  const links = podeLinks ? (await apiNaPagina<LinkCliente[]>(`/predios/${encodeURIComponent(id)}/links`, volta)).dados : [];
-  const giros = (await apiNaPagina<GirosDoPredio>(`/predios/${encodeURIComponent(id)}/giros`, volta)).dados;
+  const [lArquivos, lLinks] = await Promise.all([
+    apiNaPagina<Arquivo[]>(`/projetos/${espelho.predio.projetoId}/arquivos`, volta),
+    podeLinks ? apiNaPagina<LinkCliente[]>(`/predios/${encodeURIComponent(id)}/links`, volta) : null,
+  ]);
+  const arquivos = lArquivos.dados;
+  const modelos = arquivos.filter((a) => a.tipo === 'modelo_3d' && a.status === 'pronto');
+  const links = lLinks?.dados ?? [];
   return (
     <>
       <div className="grid gap-1">

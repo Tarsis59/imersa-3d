@@ -1,7 +1,8 @@
 'use client';
-import { useEffect, useState, useTransition } from 'react';
+import { useState, useTransition } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
+import { useAtualizarEnquanto } from '@/lib/atualizacao';
 import { Aviso, Botao } from '@/components/ui';
 import type { Arquivo } from '@/lib/tipos';
 
@@ -26,11 +27,7 @@ export function SecaoPlantas({ plantasArquivos, plantas, podeEditar, ler }: { pl
   const [erro, setErro] = useState<string | null>(null);
   const [ocupado, iniciar] = useTransition();
   const andamento = plantas.some((p) => p.status === 'na_fila' || p.status === 'processando');
-  useEffect(() => {
-    if (!andamento) return;
-    const t = setInterval(() => router.refresh(), 3000);
-    return () => clearInterval(t);
-  }, [andamento, router]);
+  useAtualizarEnquanto(!!andamento, 3000);
 
   if (!plantasArquivos.length)
     return <p className="text-sm text-suave">Envie a planta baixa (PDF, PNG, JPG ou DXF) em “Arquivos 3D e documentos” como “Planta”: o sistema acha paredes, portas e janelas, você confere e vira 3D.</p>;

@@ -1,7 +1,8 @@
 'use client';
-import { useEffect, useState, useTransition } from 'react';
+import { useState, useTransition } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
+import { useAtualizarEnquanto } from '@/lib/atualizacao';
 import { Aviso, Botao, Campo } from '@/components/ui';
 import { ROTULO_STATUS_CAPTURA, tamanhoLegivel, type Captura, type StatusCaptura } from '@/lib/tipos';
 import { concluirEnvio, prepararEnvio } from './actions-arquivos';
@@ -29,11 +30,7 @@ export function SecaoCapturas({ projetoId, capturas, podeEnviar, podeRevisar }: 
 
   // enquanto alguma estiver na fila/processando, atualiza sozinho (a GPU leva de minutos a uma hora)
   const andamento = capturas.some((c) => EM_ANDAMENTO.includes(c.status));
-  useEffect(() => {
-    if (!andamento) return;
-    const t = setInterval(() => router.refresh(), 15_000);
-    return () => clearInterval(t);
-  }, [andamento, router]);
+  useAtualizarEnquanto(!!andamento, 15_000);
 
   async function enviar() {
     if (!arquivo || !nome.trim()) return;
