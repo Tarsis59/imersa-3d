@@ -8,7 +8,7 @@ import { bilheteAoVivo, carregarEntorno, criarLazer, linkDoArquivo, removerLazer
 
 const NIVEIS_FIXOS = ['alto', 'medio', 'baixo'] as const;
 
-export default async function PaginaVitrine({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ qualidade?: string; amostras?: string }> }) {
+export default async function PaginaVitrine({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ qualidade?: string; amostras?: string; unidade?: string; hora?: string }> }) {
   const { id } = await params;
   // ?qualidade=alto|medio|baixo fixa o nível (testes visuais, comparação entre aparelhos)
   const busca = await searchParams;
@@ -65,6 +65,7 @@ export default async function PaginaVitrine({ params, searchParams }: { params: 
         andares={andares.map((a) => ({ numero: a.numero, nome: a.nome }))}
         rotacaoGraus={projeto.rotacaoGraus}
         estiloDecorado={projeto.estiloDecorado}
+        inicio={{ unidadeId: busca.unidade && /^[0-9a-f-]{36}$/i.test(busca.unidade) ? busca.unidade : null, hora: busca.hora && /^\d{1,2}$/.test(busca.hora) && Number(busca.hora) <= 23 ? Number(busca.hora) : null }}
         fotos={fotos.status === 200 ? fotos.dados : []}
         lat={projeto.lat}
         lon={projeto.lon}

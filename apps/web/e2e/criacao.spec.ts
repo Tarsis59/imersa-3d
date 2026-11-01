@@ -127,4 +127,20 @@ test('criar com tudo: foto com GPS + planta + texto → montagem ao vivo → Vit
   // V volta para a 1ª pessoa sem recarregar
   await page.keyboard.press('v');
   await expect(vitrine).toHaveAttribute('data-terceira', 'nao');
+
+  // gestão por texto: prévia, confirmação, e a foto pedida abre a Vitrine na vista da unidade, na hora certa
+  await page.goto(page.url().replace(/\/vitrine.*$/, ''));
+  const pedir = page.getByTestId('pedir-por-texto');
+  await pedir.getByLabel('O que você quer mudar ou pedir?').fill('a 101 foi vendida e a 102 custa 650 mil');
+  await pedir.getByRole('button', { name: 'Ver o que muda' }).click();
+  await expect(page.getByTestId('previa-comando')).toContainText('101: disponível → vendida');
+  await expect(page.getByTestId('previa-comando')).toContainText('Preço da 102: sem preço → R$ 650.000,00');
+  await pedir.getByRole('button', { name: 'Confirmar' }).click();
+  await expect(pedir).toContainText('2 mudanças feitas (no registro de auditoria).');
+  await pedir.getByLabel('O que você quer mudar ou pedir?').fill('foto do pôr do sol da 102');
+  await pedir.getByRole('button', { name: 'Ver o que muda' }).click();
+  await pedir.getByRole('button', { name: 'Confirmar' }).click();
+  await expect(page).toHaveURL(/\/vitrine\?hora=18&unidade=/);
+  await expect(page.getByTestId('vitrine-3d')).toHaveAttribute('data-vista', /^[0-9a-f-]{36}$/, { timeout: 60_000 });
+  await expect(page.getByLabel(/^Hora/)).toHaveValue('18');
 });

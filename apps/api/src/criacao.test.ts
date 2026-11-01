@@ -275,3 +275,48 @@ describe('criação integrada (Plano 11a)', () => {
     expect((await req('GET', `/projetos/${c.json.projetoId}/montagem`, undefined, gestao)).json.estado).toBe('pronta_com_avisos');
   });
 });
+
+describe('editar e pedir por texto (Plano 11e, itens 22 e 23)', () => {
+  it('mostra o que muda sem gravar; só grava confirmado, em transação, com auditoria do texto', async () => {
+    const c = await criar({ texto: '3 andares, 2 por andar, 2 quartos', pistas: { local: { ...CURITIBA, rotulo: 'Escolhido' } } });
+    const m = await montar(c.json.montagemId);
+    const predio = m.predioId as string;
+    const texto = 'a 101 foi vendida, a 102 custa 650 mil e o 2º andar agora tem 4 unidades. Vídeo de 15 s para o Instagram com voz masculina';
+    const previa = await req('POST', `/predios/${predio}/comandos`, { texto }, gestao);
+    expect(previa.status).toBe(200);
+    expect(previa.json.mudancas).toEqual([
+      '101: disponível → vendida',
+      'Preço da 102: sem preço → R$ 650.000,00',
+      '2º andar: 2 → 4 unidades (novas: 203, 204, disponíveis, sem preço)',
+      'Pedir vídeo vertical (Instagram, Reels, Stories) com voz masculina e legenda',
+    ]);
+    expect(previa.json.avisos).toEqual(['O vídeo tem a duração do passeio de câmera do estúdio: os 15 s pedidos não mudam o tamanho.']);
+    // nada gravado na prévia
+    const antes = (await owner.query("SELECT count(*)::int AS n, count(*) FILTER (WHERE status = 'vendido')::int AS v FROM units WHERE building_id = $1", [predio])).rows[0];
+    expect(antes).toEqual({ n: 6, v: 0 });
+
+    const feito = await req('POST', `/predios/${predio}/comandos`, { texto, aplicar: true }, gestao);
+    expect(feito.json).toMatchObject({ aplicado: true, acoes: [{ tipo: 'video', formato: '9:16', voz: 'pm_alex' }] });
+    const depois = (await owner.query("SELECT count(*)::int AS n, count(*) FILTER (WHERE status = 'vendido')::int AS v, max(preco) FILTER (WHERE codigo = '102')::float8 AS p FROM units WHERE building_id = $1", [predio])).rows[0];
+    expect(depois).toEqual({ n: 8, v: 1, p: 650000 });
+    const audit = (await owner.query("SELECT depois FROM audit_logs WHERE acao = 'comando.aplicar' AND entidade_id = $1", [predio])).rows;
+    expect(audit[0].depois.texto).toBe(texto);
+    expect((await owner.query("SELECT motivo FROM unit_status_history h JOIN units u ON u.id = h.unit_id WHERE u.building_id = $1 AND u.codigo = '101'", [predio])).rows[0].motivo).toMatch(/^Pedido por texto/);
+  });
+
+  it('o que não pode vira aviso (transição proibida, unidade que não existe, tirar unidades); outra empresa não acessa', async () => {
+    const c = await criar({ texto: '2 andares, 2 por andar, 2 quartos' });
+    const predio = (await montar(c.json.montagemId)).predioId as string;
+    await req('POST', `/predios/${predio}/comandos`, { texto: 'a 101 foi vendida', aplicar: true }, gestao);
+    const r = await req('POST', `/predios/${predio}/comandos`, { texto: 'reserva a 101, a 999 foi vendida e o 1º andar agora tem 1 unidades', aplicar: true }, gestao);
+    expect(r.json.mudancas).toEqual([]);
+    expect(r.json.avisos).toEqual([
+      'A 101 não pode passar de vendida para reservada.',
+      'Não há unidade 999 neste prédio.',
+      'O 1º andar tem 2 unidades: para tirar unidades, use a tela de unidades (nada some por texto).',
+    ]);
+    expect((await req('POST', `/predios/${predio}/comandos`, { texto: 'a 102 foi vendida' }, concorrente)).status).toBe(404);
+    expect((await req('POST', `/predios/${predio}/comandos`, { texto: 'a 102 foi vendida' }, consultora)).status).toBe(403);
+  });
+});
+

@@ -73,6 +73,7 @@ export function Vitrine({
   rotacaoGraus,
   estiloDecorado,
   fotos = SEM_FOTOS,
+  inicio,
   lat,
   lon,
   interiores,
@@ -106,6 +107,8 @@ export function Vitrine({
   lon: number | null;
   /** Estilo do apartamento decorado gerado ao entrar numa unidade do prédio desenhado. */
   estiloDecorado?: 'moderno' | 'classico' | 'jovem';
+  /** Abrir já na vista de uma unidade e numa hora (foto pedida por texto). */
+  inicio?: { unidadeId: string | null; hora: number | null };
   /** Fotos do imóvel com GPS: quadros no 3D onde foram tiradas (Plano 11c). */
   fotos?: Array<{ id: string; nome: string; lat: number; lon: number; rumo: number | null }>;
   /** Splats prontos do projeto (interiores reais). */
@@ -692,6 +695,17 @@ export function Vitrine({
     setSelecionada(id);
     viewer.current?.voarPara(id);
   };
+  // pedido por texto da gestão ("foto do pôr do sol da 1201"): abre na vista da unidade, na hora pedida
+  const inicioFeito = useRef(false);
+  useEffect(() => {
+    if (estado !== 'pronto' || inicioFeito.current || !inicio) return;
+    inicioFeito.current = true;
+    if (inicio.hora !== null) setHoraSol(inicio.hora);
+    if (inicio.unidadeId) {
+      setSelecionada(inicio.unidadeId);
+      if (viewer.current?.vistaDaUnidade(inicio.unidadeId)) setVista(inicio.unidadeId);
+    }
+  }, [estado, inicio]);
   // corretora virtual: personagem na frente da unidade de que o assistente fala, acenando enquanto fala
   const [corretoraLigada, setCorretoraLigada] = useState(false);
   const [corretoraFalando, setCorretoraFalando] = useState(false);

@@ -101,3 +101,11 @@ export async function comandarEstande(predioId: string, estandeId: string, coman
   revalidatePath(`/painel/predios/${predioId}`);
   return {};
 }
+
+/** Editar e pedir por texto (Plano 11e): prévia sem gravar; `aplicar` só depois da confirmação. */
+export async function comandoGestao(predioId: string, texto: string, aplicar: boolean): Promise<import('./pedir-por-texto').RespostaComando> {
+  const r = await api<import('./pedir-por-texto').RespostaComando>(`/predios/${encodeURIComponent(predioId)}/comandos`, { metodo: 'POST', corpo: { texto, aplicar }, token: await tokenParaAcao() });
+  if (r.status !== 200) return { aplicado: false, mudancas: [], avisos: [], acoes: [], erro: mensagem(r.status, r.dados) };
+  if (aplicar) revalidatePath(`/painel/predios/${predioId}`);
+  return r.dados;
+}

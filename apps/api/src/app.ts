@@ -35,6 +35,7 @@ import { rotasVideos } from './rotas/videos';
 import { rotasEstandes } from './rotas/estandes';
 import { rotasLazer } from './rotas/lazer';
 import { rotasCriacao } from './rotas/criacao';
+import { rotasComandosGestao } from './rotas/comandos-gestao';
 import Anthropic from '@anthropic-ai/sdk';
 import { rotasAssistente, type ConfigIA } from './rotas/assistente';
 import { chamadaReal, type ChamarModelo } from './ia/assistente';
@@ -402,6 +403,7 @@ export async function construirApp({ pool, config, logger = false, reportarErro,
   rotasIntegracoes(app, { pool, exigir, chaveCifra: config.TOTP_KEY, permitirLocal: config.WEBHOOK_PERMITIR_LOCAL });
   rotasLazer(app, { pool, exigir });
   rotasCriacao(app, { pool, exigir, mapa: servicosMapa });
+  rotasComandosGestao(app, { pool, exigir });
   rotasEstandes(app, { pool, exigir, armazenamento: arm, webUrl: config.WEB_URL, apiPublica, segredo: config.JWT_SECRET });
 
   return app;

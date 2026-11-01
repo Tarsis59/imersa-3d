@@ -3,13 +3,14 @@ import { notFound } from 'next/navigation';
 import { Cartao } from '@/components/ui';
 import { apiNaPagina } from '@/lib/sessao';
 import { ehGestao, type Arquivo, type Espelho, type Estande, type GirosDoPredio, type LinkCliente, type Me, type VideosDoPredio } from '@/lib/tipos';
-import { comandarEstande, criarEstande, criarLink, mudarStatus, pedirGiro, pedirVideo, revogarLink, vincularModelo } from './actions';
+import { comandarEstande, criarEstande, criarLink, mudarStatus, pedirGiro, comandoGestao, pedirVideo, revogarLink, vincularModelo } from './actions';
 import { linkDoArquivo } from './vitrine/actions';
 import { Estudio } from './estudio';
 import { Estandes } from './estandes';
 import { GiroRenderizado } from './giro-renderizado';
 import { LinksClientes } from './links-clientes';
 import { EspelhoVendas } from './espelho';
+import { PedirPorTexto } from './pedir-por-texto';
 import { ModeloDoPredio } from './modelo-3d';
 
 export default async function PaginaPredio({ params }: { params: Promise<{ id: string }> }) {
@@ -91,6 +92,11 @@ export default async function PaginaPredio({ params }: { params: Promise<{ id: s
           acao={vincularModelo.bind(null, espelho.predio.id)}
         />
       </Cartao>
+      {ehGestao(me.papel) && me.mfa && (
+        <Cartao titulo="Pedir por texto">
+          <PedirPorTexto predioId={espelho.predio.id} enviar={comandoGestao.bind(null, espelho.predio.id)} pedirVideo={pedirVideo.bind(null, espelho.predio.id)} />
+        </Cartao>
+      )}
       <Cartao titulo="Estúdio de marketing (vídeos)">
         <Estudio dados={videos} podePedir={ehGestao(me.papel) && me.mfa} pedir={pedirVideo.bind(null, espelho.predio.id)} linkDoArquivo={linkDoArquivo} />
       </Cartao>
