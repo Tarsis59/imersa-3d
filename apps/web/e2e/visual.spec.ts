@@ -59,7 +59,7 @@ test('aparência da Vitrine 3D em celular, tablet e computador', async ({ page, 
     }
     await expect(vitrine).toHaveScreenshot(`vitrine-${tela.nome}.png`, {
       maxDiffPixelRatio: 0.02,
-      timeout: 30_000, // desenho por software no navegador de teste: cada captura é lenta
+      timeout: 90_000, // desenho por software no navegador de teste: cada captura é lenta (a cidade completa pesa)
       mask: [page.getByTestId('qualidade')], // o número de FPS muda a cada rodada
     });
   }
@@ -76,9 +76,9 @@ test('aparência da Vitrine 3D em celular, tablet e computador', async ({ page, 
   await page.getByLabel(/^Hora/).fill('15');
   await page.evaluate(() => window.scrollTo(0, 0));
   await page.waitForTimeout(1500);
-  await expect(vitrine).toHaveScreenshot('vitrine-computador-alta.png', { maxDiffPixelRatio: 0.02, timeout: 60_000, mask: [page.getByTestId('qualidade')] });
+  await expect(vitrine).toHaveScreenshot('vitrine-computador-alta.png', { maxDiffPixelRatio: 0.02, timeout: 90_000, mask: [page.getByTestId('qualidade')] });
   // noite: céu escuro com estrelas e janelas acesas (as disponíveis sempre acesas)
   await page.getByLabel(/^Hora/).fill('21');
   await page.waitForTimeout(1500);
-  await expect(vitrine).toHaveScreenshot('vitrine-computador-noite.png', { maxDiffPixelRatio: 0.02, timeout: 60_000, mask: [page.getByTestId('qualidade')] });
+  await expect(vitrine).toHaveScreenshot('vitrine-computador-noite.png', { maxDiffPixelRatio: 0.02, timeout: 90_000, mask: [page.getByTestId('qualidade')] });
 });

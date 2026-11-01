@@ -293,7 +293,8 @@ export function criarCidade(
 
   // chão com relevo (só quando há relevo; senão o chão plano do 3D continua)
   if (terreno.meioLado > 0) {
-    const seg = Math.min(160, Math.max(16, Math.round((2 * terreno.meioLado) / 8)));
+    // ~10 m entre pontos (o relevo vem a ~16 m): leve no celular e no desenho por software
+    const seg = Math.min(96, Math.max(16, Math.round((2 * terreno.meioLado) / 10)));
     const g = new THREE.PlaneGeometry(2 * terreno.meioLado, 2 * terreno.meioLado, seg, seg);
     g.rotateX(-Math.PI / 2);
     const p = g.attributes.position as THREE.BufferAttribute;
