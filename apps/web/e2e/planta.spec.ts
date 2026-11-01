@@ -94,3 +94,22 @@ test('planta: PNG → paredes, portas e janelas detectadas → escala e ajuste n
   await page.goto(projetoUrl);
   await expect(page.getByTestId('lista-plantas')).toContainText('conferida · 3D gerado');
 });
+
+test('outros formatos: OBJ + MTL convertidos no navegador → Modelo 3D verificado no empreendimento', async ({ page, request }, info) => {
+  test.setTimeout(180_000);
+  const { writeFile } = await import('node:fs/promises');
+  const obj = info.outputPath('cubo.obj');
+  const mtl = info.outputPath('cubo.mtl');
+  await writeFile(obj, 'mtllib cubo.mtl\nv 0 0 0\nv 1 0 0\nv 1 1 0\nv 0 1 0\nusemtl Azul\nf 1 2 3 4\n');
+  await writeFile(mtl, 'newmtl Azul\nKd 0.1 0.2 0.8\n');
+  await entrarComoAdminComMfa(page, request, 'formatos');
+  await page.getByLabel('Nome do projeto').fill('Modelos de fora');
+  await page.getByRole('button', { name: 'Criar projeto' }).click();
+  await page.getByRole('link', { name: /Modelos de fora/ }).click();
+  await page.locator('#arquivo-converter').setInputFiles([obj, mtl]);
+  await page.getByRole('button', { name: 'Converter e enviar' }).click();
+  await expect(page.getByText(/cubo\.glb convertido e enviado/)).toBeVisible({ timeout: 60_000 });
+  const item = page.getByTestId('lista-arquivos').getByRole('listitem').filter({ hasText: 'cubo.glb' });
+  await expect(item).toContainText('Modelo 3D (.glb)');
+  await expect(item.locator('[data-status-arquivo]')).toHaveAttribute('data-status-arquivo', 'pronto');
+});

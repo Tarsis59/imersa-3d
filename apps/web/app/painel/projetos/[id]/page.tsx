@@ -7,6 +7,7 @@ import { SecaoArquivos, SecaoArredores } from './secoes';
 import { SecaoCapturas } from './capturas';
 import { SecaoBim } from './bim';
 import { SecaoPlantas, type PlantaResumo } from './plantas';
+import { ConverterModelo } from './converter-modelo';
 import { converterBim, lerPlanta, criarPredio, criarTipologia, importar, salvarDados } from './actions';
 import { FormDados, FormImportacao, FormPredio, FormTipologia } from './formularios';
 
@@ -155,6 +156,11 @@ export default async function PaginaProjeto({ params }: { params: Promise<{ id: 
           converter={converterBim.bind(null, projeto.id)}
         />
       </Cartao>
+      {podeEditar && (
+        <Cartao titulo="Outros formatos 3D (FBX, OBJ, DAE, 3DS, STL) → GLB">
+          <ConverterModelo projetoId={projeto.id} />
+        </Cartao>
+      )}
       <Cartao titulo="Planta baixa (PDF, imagem, DXF) → 3D">
         <SecaoPlantas plantasArquivos={arquivos.filter((a) => a.tipo === 'planta' && a.status === 'pronto')} plantas={plantas} podeEditar={podeEditar} ler={lerPlanta.bind(null, projeto.id)} />
       </Cartao>
