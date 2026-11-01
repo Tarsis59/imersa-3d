@@ -11,6 +11,8 @@ import type { ResultadoEntorno } from './actions';
 import { InteriorSplat } from './interior';
 import { Giro360 } from './giro';
 import { Assistente, type AcaoAssistente } from './assistente';
+import { ComandoVitrine } from './comando';
+import type { AcaoComando } from '@/lib/comandos';
 import { SimuladorFinanciamento } from './simulador';
 import { CartaoLazer, PainelDoPonto, passoDoTourMs, rotuloDoPonto, type EstadoTour } from './lazer';
 import type { NovoLazer } from './actions';
@@ -689,8 +691,89 @@ export function Vitrine({
     setSelecionada(id);
     viewer.current?.voarPara(id);
   };
+  // comandos por texto/voz (e os que a IA pede): cada ação mexe só na tela; devolve o que não deu para fazer
+  const [perguntaAssistente, setPerguntaAssistente] = useState<{ texto: string; vez: number } | null>(null);
+  const executarComandos = (acoes: AcaoComando[]): string[] => {
+    const problemas: string[] = [];
+    for (const a of acoes) {
+      switch (a.tipo) {
+        case 'limpar':
+          setFiltro(filtroVazio());
+          setFiltroSol([]);
+          setDestaqueIA(null);
+          break;
+        case 'filtro':
+          setDestaqueIA(null);
+          setFiltro((f) => ({
+            ...f,
+            ...(a.quartos ? { quartos: a.quartos } : {}),
+            ...(a.precoMax !== undefined ? { precoMax: a.precoMax } : {}),
+            ...(a.areaMin !== undefined ? { areaMin: a.areaMin } : {}),
+            ...(a.status ? { status: a.status } : {}),
+            ...(a.favoritos ? { somenteFavoritos: true } : {}),
+          }));
+          if (a.sol) setFiltroSol(a.sol);
+          break;
+        case 'hora':
+          setHoraSol(a.hora);
+          break;
+        case 'estacao':
+          setDataSol(`${new Date().getFullYear()}-${a.estacao === 'inverno' ? '06' : '12'}-21`);
+          break;
+        case 'clima':
+          setClima(a.clima);
+          break;
+        case 'tour_lazer':
+          if (!itensLazer.length) problemas.push('Este empreendimento ainda não tem o lazer marcado.');
+          else {
+            setTour({ indice: 0, vistos: [], completo: false });
+            irAoPontoLazer(0, true);
+          }
+          break;
+        case 'lazer': {
+          const alvo = (x: string) => x.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+          const i = itensLazer.findIndex((l) => (a.categoria && l.categoria === a.categoria) || (a.nome && alvo(l.nome).includes(alvo(a.nome))));
+          if (i < 0) problemas.push(`${a.nome || 'Esse espaço'} não está no lazer deste empreendimento.`);
+          else irAoPontoLazer(i, false);
+          break;
+        }
+        case 'unidade': {
+          const u = unidadesAtuais.find((x) => x.codigo.toUpperCase() === a.codigo.toUpperCase());
+          if (!u) {
+            problemas.push(`Não há unidade ${a.codigo} neste prédio.`);
+            break;
+          }
+          if (a.acao === 'entrar') {
+            setSelecionada(u.id);
+            entrar(u);
+          } else if (a.acao === 'vista') {
+            setSelecionada(u.id);
+            if (viewer.current?.vistaDaUnidade(u.id)) setVista(u.id);
+            else problemas.push(`A ${u.codigo} não tem janela para fora no 3D.`);
+          } else voar(u.id);
+          break;
+        }
+        case 'corte':
+          setAndarCorte(a.andar === null ? '' : String(a.andar));
+          break;
+        case 'modo':
+          viewer.current?.definirModo(a.modo);
+          break;
+        case 'visao_geral':
+          setVista(null);
+          setInterior(null);
+          viewer.current?.visaoGeral();
+          break;
+        case 'som':
+          void viewer.current?.definirSom(a.ligado);
+          break;
+      }
+    }
+    return problemas;
+  };
   const aoAcaoIA = (a: AcaoAssistente) => {
     if (a.tipo === 'contato') return aoPedirContato?.(a.motivo, a.unidade);
+    if (a.tipo === 'comandos') return void executarComandos(a.acoes);
     setDestaqueIA(a.unidades.length ? new Set(a.unidades) : null);
     if (a.focar) voar(a.focar);
   };
@@ -978,9 +1061,16 @@ export function Vitrine({
             </div>
           </Cartao>
         )}
+        <Cartao titulo="Peça o que quiser ver">
+          <ComandoVitrine
+            pronto={estado === 'pronto'}
+            aoExecutar={executarComandos}
+            aoPerguntar={assistenteUrl ? (texto) => setPerguntaAssistente((p) => ({ texto, vez: (p?.vez ?? 0) + 1 })) : null}
+          />
+        </Cartao>
         {assistenteUrl && (
           <Cartao titulo="Pergunte ao assistente">
-            <Assistente url={assistenteUrl} aoAcao={aoAcaoIA} />
+            <Assistente url={assistenteUrl} aoAcao={aoAcaoIA} pergunta={perguntaAssistente} />
           </Cartao>
         )}
         <Cartao titulo="Filtros">

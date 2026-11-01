@@ -253,6 +253,45 @@ describe('assistente no portal do cliente (sem login)', () => {
     expect(ev2.at(-1)!.dados.texto).toMatch(/Não posso ajudar com isso/);
   });
 
+  it('comandar a tela (Plano 11e): filtros, hora, lazer e unidade vão para a Vitrine no formato dos comandos; unidade de fora não', async () => {
+    const nada = { quartos: null, preco_max: null, area_min_m2: null, situacao: null, sol: null, hora: null, estacao: null, clima: null, lazer: null, codigo: null, acao_unidade: null, andar: null, modo: null, ligado: null };
+    const f = claudeFalso([
+      {
+        ferramentas: [
+          {
+            nome: 'comandar_vitrine',
+            entrada: {
+              acoes: [
+                { ...nada, tipo: 'filtro', quartos: [3], preco_max: 900000, sol: 'manha' },
+                { ...nada, tipo: 'hora', hora: 21 },
+                { ...nada, tipo: 'lazer', lazer: 'Piscina' },
+                { ...nada, tipo: 'unidade', codigo: '201', acao_unidade: 'entrar' },
+                { ...nada, tipo: 'unidade', codigo: 'B1' },
+                { ...nada, tipo: 'hora' },
+              ],
+            },
+          },
+        ],
+      },
+      { texto: 'Pronto: deixei à noite, filtrei 3 quartos com sol da manhã e entrei na 201.' },
+    ]);
+    const app = await montar(f.chamar);
+    const ev = eventos((await req(app, 'POST', `/publico/links/${token}/assistente`, pergunta('mostra à noite, 3 quartos com sol da manhã até 900 mil, a piscina e entra na 201'))).texto);
+    expect(ev.find((e) => e.evento === 'acao')!.dados).toEqual({
+      tipo: 'comandos',
+      acoes: [
+        { tipo: 'filtro', quartos: [3], precoMax: 900000, sol: ['manha'] },
+        { tipo: 'hora', hora: 21 },
+        { tipo: 'lazer', categoria: null, nome: 'Piscina' },
+        { tipo: 'unidade', codigo: '201', acao: 'entrar' },
+      ],
+    });
+    const res = (f.pedidos[1]!.messages.at(-1)!.content as Array<{ content: string }>).map((b) => JSON.parse(b.content));
+    expect(res[0]).toEqual({ feito: 4, naoEncontradas: ['B1'] });
+    // a ferramenta faz parte do pedido ao Claude, estrita
+    expect(f.pedidos[0]!.tools!.find((t) => (t as { name: string }).name === 'comandar_vitrine')).toMatchObject({ strict: true });
+  });
+
   it('entrada: conversa precisa terminar numa pergunta do cliente, até 20 mensagens de até 2.000 caracteres', async () => {
     const app = await montar(claudeFalso([]).chamar);
     expect((await req(app, 'POST', `/publico/links/${token}/assistente`, { mensagens: [] })).status).toBe(400);

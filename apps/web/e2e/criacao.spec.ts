@@ -75,6 +75,22 @@ test('criar com tudo: foto com GPS + planta + texto → montagem ao vivo → Vit
   await page.waitForTimeout(2000);
   await vitrine.screenshot({ path: test.info().outputPath('cidade-completa.png') });
 
+  // comandos por texto: a tela obedece na hora (e diz o que entendeu)
+  const comando = page.getByLabel('Peça o que quiser ver');
+  await comando.fill('mostre as de 3 quartos à noite');
+  await comando.press('Enter');
+  await expect(page.getByTestId('retorno-comando')).toHaveText('Entendi: 3 quartos · às 21h.');
+  await expect(page.getByLabel(/^Hora/)).toHaveValue('21');
+  await comando.fill('vá para a piscina');
+  await comando.press('Enter');
+  await expect(page.getByTestId('retorno-comando')).toHaveText('Entendi: piscina.');
+  await comando.fill('vá para a quadra de tênis');
+  await comando.press('Enter');
+  await expect(page.getByTestId('retorno-comando')).toContainText('não está no lazer deste empreendimento');
+  await comando.fill('limpar filtros e voltar para o prédio');
+  await comando.press('Enter');
+  await expect(page.getByTestId('retorno-comando')).toHaveText('Entendi: sem filtros · visão geral.');
+
   // apartamento decorado no estilo escolhido: entra na 101 e já vê a sala mobiliada
   await page.getByTestId('lista-vitrine').getByRole('button', { name: /^101/ }).click();
   await page.getByRole('button', { name: 'Entrar no apartamento' }).click();
