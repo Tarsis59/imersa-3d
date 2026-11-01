@@ -244,3 +244,82 @@ describe('combinações e orçamento', () => {
     expect(audit.rows.map((x) => x.acao)).toEqual(['configuracao.criar', 'configuracao.alterar', 'configuracao.apagar']);
   });
 });
+
+describe('plantas: leitura → edição → modelo do prédio', () => {
+  it('fila de leitura, worker grava a imagem e a detecção, edição validada, modelo ligado ao prédio', async () => {
+    const { ArmazenamentoLocal } = await import('./arquivos/armazenamento');
+    const { processarProximaPlanta } = await import('./plantas/worker');
+    const { mkdtemp, writeFile } = await import('node:fs/promises');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+    const pasta = await mkdtemp(join(tmpdir(), 'plantas-'));
+    const armazenamento = new ArmazenamentoLocal(join(pasta, 'arq'), 'https://api.exemplo.com', config.JWT_SECRET);
+    const asset = async (tipo: string, nome: string, status = 'pronto') =>
+      (
+        await owner.query<{ id: string; chave: string }>(
+          'INSERT INTO assets (tenant_id, project_id, tipo, nome, chave, tamanho_declarado, status) SELECT tenant_id, id, $2, $3, $4, 10, $5 FROM projects WHERE id = $1 RETURNING id, chave',
+          [projeto, tipo, nome, `t/${Date.now()}-${nome}`, status],
+        )
+      ).rows[0]!;
+    const planta = await asset('planta', 'térreo.pdf');
+    await armazenamento.salvar(planta.chave, Buffer.from('%PDF-1.4 teste'), 'application/pdf');
+    const dwg = await asset('planta', 'térreo.dwg');
+    expect((await req('POST', `/projetos/${projeto}/plantas`, { arquivoId: dwg.id }, gestaoA)).json.erro).toBe('dwg_salvar_como_dxf');
+    expect((await req('POST', `/projetos/${projeto}/plantas`, { arquivoId: planta.id }, consultoraA)).status).toBe(403);
+    const r = await req('POST', `/projetos/${projeto}/plantas`, { arquivoId: planta.id }, gestaoA);
+    expect(r.status).toBe(201);
+    expect((await req('POST', `/projetos/${projeto}/plantas`, { arquivoId: planta.id }, gestaoA)).json.erro).toBe('leitura_em_andamento');
+    expect((await req('POST', `/projetos/${projeto}/plantas`, { arquivoId: planta.id }, gestaoB)).status).toBe(404);
+
+    // worker com um leitor de mentira (o motor Python tem os próprios testes)
+    const deteccao = { largura: 800, altura: 700, paredes: [{ x1: 100, y1: 100, x2: 700, y2: 100, espessura: 15 }], aberturas: [], comodos: [], escalaMPorPx: null };
+    const leitor = async (entrada: string, p: string) => {
+      expect(entrada.endsWith('.pdf')).toBe(true);
+      const imagem = join(p, 'planta.png');
+      await writeFile(imagem, Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+      return { ok: true as const, imagem, deteccao };
+    };
+    expect(await processarProximaPlanta({ pool, armazenamento, leitor, pastaTrabalho: pasta })).toBe('ok');
+    expect(await processarProximaPlanta({ pool, armazenamento, leitor, pastaTrabalho: pasta })).toBe('vazia');
+    const lista = (await req('GET', `/projetos/${projeto}/plantas`, undefined, consultoraA)).json;
+    expect(lista).toEqual([expect.objectContaining({ id: r.json.id, status: 'pronto', arquivoNome: 'térreo.pdf', paredes: 1, editada: false })]);
+    const lida = (await req('GET', `/plantas/${r.json.id}`, undefined, gestaoA)).json;
+    expect(lida.deteccao).toEqual(deteccao);
+    expect(lida.imagemArquivoId).toBeTruthy();
+
+    const edicao = { escalaMPorPx: 0.02, alturaParedeM: 2.8, alturaPortaM: 2.1, peitorilM: 1, alturaJanelaM: 1.2, paredes: deteccao.paredes, aberturas: [{ tipo: 'porta', x1: 300, y1: 100, x2: 345, y2: 100, espessura: 15 }] };
+    expect((await req('PUT', `/plantas/${r.json.id}/edicao`, { ...edicao, alturaParedeM: 50 }, gestaoA)).status).toBe(400);
+    expect((await req('PUT', `/plantas/${r.json.id}/edicao`, edicao, gestaoA)).json).toEqual({ ok: true });
+    expect((await req('GET', `/projetos/${projeto}/plantas`, undefined, gestaoA)).json[0].editada).toBe(true);
+
+    // 3D gerado no editor: só GLB verificado do mesmo empreendimento; liga ao prédio e desfaz vínculos antigos
+    const glb = await asset('modelo_3d', 'planta.glb');
+    const pendente = await asset('modelo_3d', 'x.glb', 'aguardando_envio');
+    expect((await req('POST', `/plantas/${r.json.id}/modelo`, { arquivoId: pendente.id, predioId: casa }, gestaoA)).json.erro).toBe('arquivo_invalido_para_modelo');
+    await owner.query("UPDATE units SET mesh_node_id = 'velho' WHERE id = $1", [u1]);
+    expect((await req('POST', `/plantas/${r.json.id}/modelo`, { arquivoId: glb.id, predioId: casa }, gestaoA)).json).toEqual({ ok: true });
+    expect((await owner.query('SELECT modelo_asset_id FROM buildings WHERE id = $1', [casa])).rows[0].modelo_asset_id).toBe(glb.id);
+    expect((await owner.query('SELECT mesh_node_id FROM units WHERE id = $1', [u1])).rows[0].mesh_node_id).toBeNull();
+  });
+
+  it('planta recusada pelo leitor vira erro com a mensagem, sem nova tentativa', async () => {
+    const { ArmazenamentoLocal } = await import('./arquivos/armazenamento');
+    const { processarProximaPlanta } = await import('./plantas/worker');
+    const { mkdtemp } = await import('node:fs/promises');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+    const pasta = await mkdtemp(join(tmpdir(), 'plantas-'));
+    const armazenamento = new ArmazenamentoLocal(join(pasta, 'arq'), 'https://api.exemplo.com', config.JWT_SECRET);
+    const a = (
+      await owner.query<{ id: string; chave: string }>(
+        "INSERT INTO assets (tenant_id, project_id, tipo, nome, chave, tamanho_declarado, status) SELECT tenant_id, id, 'planta', 'ruim.png', 't/ruim.png', 10, 'pronto' FROM projects WHERE id = $1 RETURNING id, chave",
+        [projeto],
+      )
+    ).rows[0]!;
+    await armazenamento.salvar(a.chave, Buffer.from('x'), 'image/png');
+    const id = (await req('POST', `/projetos/${projeto}/plantas`, { arquivoId: a.id }, gestaoA)).json.id;
+    const leitor = async () => ({ ok: false as const, recusado: true, mensagem: 'imagem ilegível' });
+    expect(await processarProximaPlanta({ pool, armazenamento, leitor, pastaTrabalho: pasta })).toBe('erro');
+    expect((await req('GET', `/plantas/${id}`, undefined, gestaoA)).json).toMatchObject({ status: 'erro', mensagem: 'imagem ilegível' });
+  });
+});

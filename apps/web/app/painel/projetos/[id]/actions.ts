@@ -108,3 +108,11 @@ export async function converterBim(projetoId: string, arquivoId: string): Promis
   revalidatePath(`/painel/projetos/${projetoId}`);
   return {};
 }
+
+/** Planta (PDF, imagem, DXF) → fila de leitura (paredes, portas, janelas e cômodos). */
+export async function lerPlanta(projetoId: string, arquivoId: string): Promise<{ erro?: string }> {
+  const r = await api(`/projetos/${encodeURIComponent(projetoId)}/plantas`, { metodo: 'POST', corpo: { arquivoId }, token: await tokenParaAcao() });
+  if (r.status !== 201) return { erro: mensagem(r.status, r.dados) };
+  revalidatePath(`/painel/projetos/${projetoId}`);
+  return {};
+}

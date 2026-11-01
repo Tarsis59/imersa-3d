@@ -7,7 +7,8 @@ export const REGRAS: Record<TipoArquivo, { extensoes: readonly string[]; maxByte
   modelo_3d: { extensoes: ['.glb'], maxBytes: 500 * MB },
   splat: { extensoes: ['.spz', '.ply', '.splat', '.sog'], maxBytes: 1024 * MB },
   ifc: { extensoes: ['.ifc'], maxBytes: 300 * MB },
-  planta: { extensoes: ['.pdf', '.png', '.jpg', '.jpeg', '.dwg'], maxBytes: 100 * MB },
+  // DWG fica aceito para guardar o original; para virar 3D, o CAD salva em DXF
+  planta: { extensoes: ['.pdf', '.png', '.jpg', '.jpeg', '.dxf', '.dwg'], maxBytes: 100 * MB },
   imagem: { extensoes: ['.png', '.jpg', '.jpeg', '.webp'], maxBytes: 30 * MB },
   documento: { extensoes: ['.pdf'], maxBytes: 50 * MB },
   // fotos (ZIP) ou vídeo do celular para virar 3D
@@ -40,6 +41,8 @@ const MAGIA: Record<string, Conferidor> = {
   '.jpeg': comeca([0xff, 0xd8, 0xff]),
   '.webp': (b) => b.subarray(0, 4).toString('latin1') === 'RIFF' && b.subarray(8, 12).toString('latin1') === 'WEBP',
   '.dwg': comeca('AC10'),
+  // DXF texto começa com o código de grupo 0 (ou 999, comentário); o binário tem cabeçalho próprio
+  '.dxf': (b) => /^\s*(0|999)\s*\r?\n/.test(b.toString('latin1')) || b.toString('latin1').startsWith('AutoCAD Binary DXF'),
   '.zip': comeca([0x50, 0x4b, 0x03, 0x04]),
   // MP4/MOV (ISO BMFF / QuickTime): o 1º bloco começa no byte 4 com o tipo do átomo
   '.mp4': (b) => ['ftyp', 'moov', 'mdat', 'wide', 'free', 'skip'].includes(b.subarray(4, 8).toString('latin1')),

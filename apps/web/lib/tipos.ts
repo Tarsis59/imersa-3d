@@ -98,7 +98,7 @@ export const ACEITA_POR_TIPO: Record<TipoArquivo, string> = {
   modelo_3d: '.glb',
   splat: '.spz,.ply,.splat,.sog',
   ifc: '.ifc',
-  planta: '.pdf,.png,.jpg,.jpeg,.dwg',
+  planta: '.pdf,.png,.jpg,.jpeg,.dxf,.dwg',
   imagem: '.png,.jpg,.jpeg,.webp',
   documento: '.pdf',
   captura: '.zip,.mp4,.mov',

@@ -1,9 +1,9 @@
 [project]
 name = "imersa-bim"
 version = "0.1.0"
-description = "Imersa 3D: IFC (BIM) → GLB para a web (Y para cima, nós por GUID, tipo IFC em cada nó) + pavimentos, ambientes e áreas"
+description = "Imersa 3D: plantas (PDF/imagem/DXF → paredes, portas, janelas) e IFC (BIM) → GLB para a web (Y para cima, nós por GUID, tipo IFC em cada nó) + pavimentos, ambientes e áreas"
 requires-python = ">=3.11"
-dependencies = ["ifcopenshell>=0.8", "numpy>=2.0"]
+dependencies = ["ifcopenshell>=0.8", "numpy>=2.0", "opencv-python-headless>=4.10", "pypdfium2>=4.30", "ezdxf>=1.3"]
 
 [project.optional-dependencies]
 dev = ["pytest>=8"]

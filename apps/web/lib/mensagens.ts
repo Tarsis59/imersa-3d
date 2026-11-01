@@ -38,6 +38,11 @@ const MENSAGENS: Record<string, string> = {
   movel_inexistente: 'Um dos móveis escolhidos não está mais no catálogo.',
   superficie_repetida: 'A mesma superfície apareceu duas vezes.',
   movel_repetido: 'O mesmo móvel apareceu duas vezes.',
+  arquivo_invalido_para_planta: 'Escolha uma planta (PDF, imagem ou DXF) já verificada deste empreendimento.',
+  dwg_salvar_como_dxf: 'DWG é um formato fechado: no CAD, use Salvar como → DXF e envie o DXF.',
+  leitura_em_andamento: 'Essa planta já está sendo lida.',
+  planta_nao_lida: 'A leitura da planta ainda não terminou.',
+  predio_de_outro_empreendimento: 'O prédio é de outro empreendimento.',
 };
 
 export function mensagem(status: number, dados: unknown): string {

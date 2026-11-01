@@ -8,6 +8,7 @@ import { processarProxima, reconstrutorPython, reconstrutorSimulado } from '../c
 import { anonimizarEventos, periodica } from '../vendas/retencao';
 import { entregarWebhooks } from '../integracoes/entregas';
 import { conversorPython, processarProximaConversao } from '../bim/worker';
+import { leitorPython, processarProximaPlanta } from '../plantas/worker';
 
 export const ConfigWorker = z.object({
   RECONSTRUTOR: z.enum(['python', 'simulado']).default('python'),
@@ -70,9 +71,16 @@ function montarBim(pool: pg.Pool, config: Config, extra: ConfigWorker) {
   return { pool, armazenamento: armazenamentoDaConfig(config), conversor: conversorPython({ python, diretorio: extra.BIM_DIR }), pastaTrabalho: resolve(extra.WORKER_PASTA) };
 }
 
+/** Leitor de plantas: mesmo ambiente Python do BIM (servicos/bim/imersa_planta). */
+function montarPlantas(pool: pg.Pool, config: Config, extra: ConfigWorker) {
+  const python = extra.BIM_PYTHON ?? resolve(extra.BIM_DIR, process.platform === 'win32' ? '.venv/Scripts/python.exe' : '.venv/bin/python');
+  return { pool, armazenamento: armazenamentoDaConfig(config), leitor: leitorPython({ python, diretorio: extra.BIM_DIR }), pastaTrabalho: resolve(extra.WORKER_PASTA) };
+}
+
 export function iniciarWorker(pool: pg.Pool, config: Config, extra: ConfigWorker) {
   const deps = extra.WORKER_CAPTURAS ? montarDeps(pool, config, extra) : null;
   const bim = extra.WORKER_BIM ? montarBim(pool, config, extra) : null;
+  const plantas = extra.WORKER_BIM ? montarPlantas(pool, config, extra) : null;
   const retencao = periodica(6 * 3600 * 1000, async () => {
     try {
       const n = await anonimizarEventos(pool, extra.RETENCAO_EVENTOS_DIAS);
@@ -96,9 +104,11 @@ export function iniciarWorker(pool: pg.Pool, config: Config, extra: ConfigWorker
         if (webhooks) console.info(`[worker] webhooks: ${webhooks} entrega(s) tentada(s)`);
         const conversao = bim ? await processarProximaConversao(bim) : 'vazia';
         if (conversao !== 'vazia') console.info(`[worker] conversão BIM: ${conversao}`);
+        const planta = plantas ? await processarProximaPlanta(plantas) : 'vazia';
+        if (planta !== 'vazia') console.info(`[worker] leitura de planta: ${planta}`);
         const r = deps ? await processarProxima(deps) : 'vazia';
         if (r !== 'vazia') console.info(`[worker] captura processada: ${r}`);
-        if (r === 'vazia' && conversao === 'vazia' && ativo) await esperar(extra.WORKER_INTERVALO_S * 1000);
+        if (r === 'vazia' && conversao === 'vazia' && planta === 'vazia' && ativo) await esperar(extra.WORKER_INTERVALO_S * 1000);
       } catch (e) {
         console.error('[worker] erro inesperado', e);
         if (ativo) await esperar(extra.WORKER_INTERVALO_S * 1000);

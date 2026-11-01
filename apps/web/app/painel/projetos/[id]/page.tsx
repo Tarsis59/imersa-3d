@@ -6,7 +6,8 @@ import { COR_STATUS, ehGestao, ROTULO_STATUS, ROTULO_STATUS_PROJETO, STATUS_UNID
 import { SecaoArquivos, SecaoArredores } from './secoes';
 import { SecaoCapturas } from './capturas';
 import { SecaoBim } from './bim';
-import { converterBim, criarPredio, criarTipologia, importar, salvarDados } from './actions';
+import { SecaoPlantas, type PlantaResumo } from './plantas';
+import { converterBim, lerPlanta, criarPredio, criarTipologia, importar, salvarDados } from './actions';
 import { FormDados, FormImportacao, FormPredio, FormTipologia } from './formularios';
 
 function BarraSituacao({ resumo }: { resumo: DetalheProjeto['resumo'] }) {
@@ -46,6 +47,7 @@ export default async function PaginaProjeto({ params }: { params: Promise<{ id: 
   const arredores = (await apiNaPagina<{ semLocalizacao: boolean; pois: Poi[] }>(`/projetos/${projeto.id}/pois`, volta)).dados;
   const capturas = (await apiNaPagina<Captura[]>(`/projetos/${projeto.id}/capturas`, volta)).dados;
   const conversoes = (await apiNaPagina<ConversaoBim[]>(`/projetos/${projeto.id}/conversoes`, volta)).dados;
+  const plantas = (await apiNaPagina<PlantaResumo[]>(`/projetos/${projeto.id}/plantas`, volta)).dados;
   // quem está no imóvel (consultora, produtor) envia fotos/vídeo; só a gestão (com MFA) revisa e publica
   const podeEnviarCaptura = gestao || me.papel === 'consultora' || me.papel === 'produtor';
 
@@ -152,6 +154,9 @@ export default async function PaginaProjeto({ params }: { params: Promise<{ id: 
           podeEditar={podeEditar}
           converter={converterBim.bind(null, projeto.id)}
         />
+      </Cartao>
+      <Cartao titulo="Planta baixa (PDF, imagem, DXF) → 3D">
+        <SecaoPlantas plantasArquivos={arquivos.filter((a) => a.tipo === 'planta' && a.status === 'pronto')} plantas={plantas} podeEditar={podeEditar} ler={lerPlanta.bind(null, projeto.id)} />
       </Cartao>
       <Cartao titulo="Fotos ou vídeo → 3D (interior real)">
         <SecaoCapturas projetoId={projeto.id} capturas={capturas} podeEnviar={podeEnviarCaptura} podeRevisar={podeEditar} />

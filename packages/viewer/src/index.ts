@@ -15,3 +15,5 @@ export type { Superficie, FonteMovel } from './configurador/cena';
 export { grupoDaPeca, areaVisivel, categoriaPeloNome, type CategoriaMaterial } from './configurador/superficies';
 export { PADROES, desenharPadrao, corDerivada, type Acabamento, type Padrao, type Contexto2D } from './configurador/padroes';
 export { MOVEIS_PADRAO, movelPadrao, ajustarPose, LICENCA_PADRAO, type MovelPadrao, type PoseMovel, type CategoriaMovel } from './configurador/moveis';
+export { blocosDaPlanta, subtrairIntervalos, type EdicaoPlanta, type SegmentoPx, type AberturaPx, type Bloco } from './planta/planta3d';
+export { montarPlanta3d, exportarGlb } from './planta/exportar';

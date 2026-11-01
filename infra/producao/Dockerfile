@@ -1,7 +1,7 @@
 # Imersa 3D em produção num serviço só (hospedagem grátis): API + worker (capturas, webhooks, retenção) + motor Python.
 # Build a partir da raiz do monorepo:  docker build -f infra/producao/Dockerfile -t imersa-servidor .
 # O treino 3D roda na GPU grátis do Kaggle; aqui ficam a validação das fotos, o desfoque de rostos, a compressão
-# e a conversão BIM (IFC → 3D com IfcOpenShell + gltf-transform).
+# a conversão BIM (IFC → 3D com IfcOpenShell + gltf-transform) e a leitura de plantas (OpenCV, PDF, DXF).
 
 FROM node:22-bookworm-slim AS build
 WORKDIR /repo
@@ -22,12 +22,13 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends python3 python3-venv ca-certificates wget && rm -rf /var/lib/apt/lists/*
 COPY servicos/reconstrucao/pyproject.toml /app/reconstrucao/pyproject.toml
 RUN python3 -m venv /app/reconstrucao/.venv \
- && /app/reconstrucao/.venv/bin/pip install --no-cache-dir "numpy>=2.0" "opencv-python-headless>=4.10" "kaggle>=2.2" "ifcopenshell>=0.8"
+ && /app/reconstrucao/.venv/bin/pip install --no-cache-dir "numpy>=2.0" "opencv-python-headless>=4.10" "kaggle>=2.2" "ifcopenshell>=0.8" "pypdfium2>=4.30" "ezdxf>=1.3"
 ENV PATH="/app/reconstrucao/.venv/bin:${PATH}"
 COPY servicos/reconstrucao/imersa_recon /app/reconstrucao/imersa_recon
 COPY servicos/reconstrucao/kaggle /app/reconstrucao/kaggle
 COPY servicos/reconstrucao/modelos /app/reconstrucao/modelos
 COPY servicos/bim/imersa_bim /app/bim/imersa_bim
+COPY servicos/bim/imersa_planta /app/bim/imersa_planta
 # compressão dos splats e do 3D do BIM (versões fixas, já instaladas: o npx não baixa nada na hora)
 RUN npm install -g --no-audit --no-fund @playcanvas/splat-transform@3.10.3 @gltf-transform/cli@4.5.1 \
  && npm install --omit=dev --no-save --no-audit --no-fund @node-rs/argon2@2.2.2 @sentry/node@11.10.0 \

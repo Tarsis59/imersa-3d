@@ -77,3 +77,14 @@ describe('captura (fotos ZIP ou vídeo do celular)', () => {
     expect(validarDeclaracao('captura', 'visita.mp4', 3100 * MB)).toMatch(/limite/);
   });
 });
+
+describe('planta em DXF', () => {
+  it('aceita DXF texto (código 0 ou comentário 999) e binário; recusa outra coisa com extensão .dxf', () => {
+    expect(validarDeclaracao('planta', 'casa.dxf', 1000)).toBeNull();
+    const t = (s: string) => Buffer.from(s, 'latin1');
+    expect(conferirConteudo('casa.dxf', t('  0\r\nSECTION\r\n'), 100)).toBeNull();
+    expect(conferirConteudo('casa.dxf', t('999\nfeito no CAD\n'), 100)).toBeNull();
+    expect(conferirConteudo('casa.dxf', t('AutoCAD Binary DXF\r\n'), 100)).toBeNull();
+    expect(conferirConteudo('casa.dxf', t('<html><body>'), 100)).not.toBeNull();
+  });
+});

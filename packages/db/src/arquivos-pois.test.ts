@@ -237,3 +237,24 @@ describe('configurador: catálogo de materiais e móveis, combinações salvas',
     expect(await comoA(async (c) => (await c.query('DELETE FROM configuracoes')).rowCount)).toBe(1);
   });
 });
+
+describe('plantas: leitura da planta → editor → 3D', () => {
+  it('planta isolada por empresa, só de arquivo da empresa, uma leitura ativa por arquivo e fila entre empresas', async () => {
+    const arquivo = (c: pg.PoolClient, projeto: string, chave: string) =>
+      c.query<{ id: string }>("INSERT INTO assets (project_id, tipo, nome, chave, tamanho_declarado) VALUES ($1, 'planta', 'planta.pdf', $2, 1000) RETURNING id", [projeto, chave]).then((r) => r.rows[0]!.id);
+    const arqA = await comoA((c) => arquivo(c, projA, 'a/planta.pdf'));
+    const arqB = await comoB((c) => arquivo(c, projB, 'b/planta.pdf'));
+    const nova = (c: pg.PoolClient, projeto: string, arq: string) => c.query<{ id: string }>('INSERT INTO plantas (project_id, arquivo_id) VALUES ($1, $2) RETURNING id', [projeto, arq]).then((r) => r.rows[0]!.id);
+    const pA = await comoA((c) => nova(c, projA, arqA));
+    await expect(comoA((c) => nova(c, projA, arqA))).rejects.toThrow(/plantas_ativa_uk/);
+    // BLINDAGEM: arquivo de outra empresa não vira planta
+    await expect(comoA((c) => nova(c, projA, arqB))).rejects.toThrow(/foreign key/);
+    expect(await comoB(async (c) => (await c.query('SELECT * FROM plantas')).rowCount)).toBe(0);
+    await comoB((c) => nova(c, projB, arqB));
+    const pegar = () => app.query<{ id: string; tenant_id: string }>('SELECT * FROM pegar_proxima_planta()').then((r) => r.rows[0] ?? null);
+    expect(await pegar()).toEqual({ id: pA, tenant_id: A });
+    expect((await pegar())?.tenant_id).toBe(B);
+    expect(await pegar()).toBeNull();
+    await expect(comoA((c) => c.query("UPDATE plantas SET edicao = '[]' WHERE id = $1", [pA]))).rejects.toThrow(/check/);
+  });
+});
