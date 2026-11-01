@@ -1,6 +1,6 @@
 'use client';
 import { useEffect, useMemo, useRef, useState, type PointerEvent as EventoPonteiro } from 'react';
-import { criarViewer, filtrar, suporteImersivo, temWebGpu, type SuporteImersivo, type Caixa, type Clima, type EstudoSolar, type PeriodoDeSol, type Giro, filtroVazio, pontoCardeal, vetorJoystick, type EstadoViewer, type Filtro, type UnidadeViewer, type Viewer } from '@imersa/viewer';
+import { BONECOS, criarViewer, filtrar, suporteImersivo, temWebGpu, type SuporteImersivo, type Caixa, type Clima, type EstudoSolar, type PeriodoDeSol, type Giro, filtroVazio, pontoCardeal, vetorJoystick, type EstadoViewer, type Filtro, type UnidadeViewer, type Viewer } from '@imersa/viewer';
 import type { ItemLazer, StatusUnidade } from '@/lib/tipos';
 import { Botao, Campo, Cartao, Selecao } from '@/components/ui';
 import { alternarFavorito, lerFavoritos, salvarFavoritos } from '@/lib/favoritos';
@@ -808,6 +808,9 @@ export function Vitrine({
         data-moradores={telemetria?.moradores ?? 0}
         data-decorado={telemetria?.decorado ?? 0}
         data-fotos={qtdFotos}
+        data-terceira={telemetria?.terceiraPessoa ? 'sim' : 'nao'}
+        data-boneco={telemetria?.boneco ?? ''}
+        data-no-ar={telemetria?.noAr ? 'sim' : 'nao'}
         data-nivel={telemetria?.nivel ?? ''}
         data-som={telemetria?.som ? 'ligado' : 'desligado'}
         data-marcando-lazer={marcandoLazer ? 'sim' : ''}
@@ -1303,7 +1306,45 @@ export function Vitrine({
               </Botao>
             ) : (
               <>
-                <p className="text-suave">WASD ou setas para andar, arraste para olhar. No celular, use o controle no canto da tela.</p>
+                <p className="text-suave">WASD ou setas para andar, arraste para olhar, espaço pula, Shift corre, V troca a vista. No celular, use o controle no canto da tela.</p>
+                <div className="grid gap-2 rounded-lg border border-borda p-3" data-testid="modo-jogo">
+                  <label className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      checked={telemetria?.terceiraPessoa ?? false}
+                      onChange={(e) => viewer.current?.definirTerceiraPessoa(e.target.checked)}
+                    />
+                    Ver o boneco (3ª pessoa)
+                  </label>
+                  <label className="grid gap-1">
+                    <span>Boneco</span>
+                    <select
+                      className="rounded-lg border border-borda bg-superficie px-2 py-1"
+                      value={telemetria?.boneco ?? 'ana'}
+                      onChange={(e) => {
+                        viewer.current?.definirBoneco(e.target.value);
+                        viewer.current?.definirTerceiraPessoa(true);
+                      }}
+                    >
+                      {BONECOS.map((b) => (
+                        <option key={b.id} value={b.id}>
+                          {b.nome}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <div className="flex flex-wrap gap-2">
+                    <Botao type="button" variante="secundario" onClick={() => viewer.current?.pular()}>
+                      Pular
+                    </Botao>
+                    <Botao type="button" variante="secundario" aria-pressed={telemetria?.correndo ?? false} onClick={() => viewer.current?.definirCorrida(!(telemetria?.correndo ?? false))}>
+                      {telemetria?.correndo ? 'Andar' : 'Correr'}
+                    </Botao>
+                    <Botao type="button" variante="secundario" onClick={() => viewer.current?.acenar()}>
+                      Acenar
+                    </Botao>
+                  </div>
+                </div>
                 <Botao type="button" variante="secundario" onClick={() => {
                   setVista(null);
                   setInterior(null);

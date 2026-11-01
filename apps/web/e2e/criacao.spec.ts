@@ -10,7 +10,7 @@ const PDF = Buffer.from('%PDF-1.4\n1 0 obj<<>>endobj\ntrailer<<>>\n%%EOF\n');
 const TEXTO = 'Residencial Paulista Vista, 6 andares, 4 apartamentos por andar, 2 e 3 quartos de 60 e 80 m², piscina, academia e churrasqueira.';
 
 test('criar com tudo: foto com GPS + planta + texto → montagem ao vivo → Vitrine com unidades, lazer e cidade', async ({ page, request }) => {
-  test.setTimeout(300_000);
+  test.setTimeout(420_000);
   await entrarComoAdminComMfa(page, request, 'criar');
   await page.getByTestId('ir-criar').click();
   await expect(page).toHaveURL(/\/painel\/criar$/);
@@ -100,4 +100,28 @@ test('criar com tudo: foto com GPS + planta + texto → montagem ao vivo → Vit
   await vitrine.screenshot({ path: test.info().outputPath('decorado-101.png') });
   await page.getByRole('button', { name: 'Sair do apartamento' }).click();
   await expect(vitrine).toHaveAttribute('data-decorado', '0');
+
+  // modo jogo: a pé com o boneco (3ª pessoa), troca de boneco, pulo com gravidade e corrida
+  await page.getByRole('button', { name: 'Andar a pé (1ª pessoa)' }).click();
+  await expect(vitrine).toHaveAttribute('data-modo', 'primeira-pessoa');
+  const jogo = page.getByTestId('modo-jogo');
+  await jogo.getByLabel('Ver o boneco (3ª pessoa)').check();
+  await expect(vitrine).toHaveAttribute('data-terceira', 'sim');
+  await jogo.getByRole('combobox', { name: 'Boneco' }).selectOption('beto');
+  await expect(vitrine).toHaveAttribute('data-boneco', 'beto');
+  await jogo.getByRole('button', { name: 'Pular' }).click();
+  await expect(vitrine).toHaveAttribute('data-no-ar', 'sim');
+  await expect(vitrine).toHaveAttribute('data-no-ar', 'nao', { timeout: 10_000 }); // a gravidade traz de volta ao chão
+  await jogo.getByRole('button', { name: 'Correr' }).click();
+  await expect(jogo.getByRole('button', { name: 'Andar' })).toBeVisible();
+  const antes = await vitrine.getAttribute('data-posicao');
+  await vitrine.click({ position: { x: 20, y: 20 } }); // foco no 3D (o teclado vale para ele)
+  await page.keyboard.down('w');
+  await page.waitForTimeout(1200);
+  await page.keyboard.up('w');
+  await expect.poll(() => vitrine.getAttribute('data-posicao'), { timeout: 10_000 }).not.toBe(antes);
+  await vitrine.screenshot({ path: test.info().outputPath('boneco.png') });
+  // V volta para a 1ª pessoa sem recarregar
+  await page.keyboard.press('v');
+  await expect(vitrine).toHaveAttribute('data-terceira', 'nao');
 });

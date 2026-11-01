@@ -26,3 +26,4 @@ export { planejarQuadros, type FotoNoLugar } from './ambiente/fotos';
 export { PALETA, type EstiloDecorado } from './interior/decorado';
 export { volumeDaRua, cantoDePassaro } from './ambiente/som';
 export { temWebGpu } from './quality/webgpu';
+export { BONECOS, type PresetBoneco } from './cameras/boneco';

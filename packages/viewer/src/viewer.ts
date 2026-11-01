@@ -17,6 +17,7 @@ import { entornoParaLocal, type Entorno } from './city/entorno';
 import { criarCidade, terrenoDoRelevo, type CidadeCompleta } from './city/cidade';
 import { montarDecorado, planejarDecorado, type Decorado, type EstiloDecorado } from './interior/decorado';
 import { criarQuadros, planejarQuadros, type FotoNoLugar, type QuadrosDeFoto } from './ambiente/fotos';
+import { cameraAtrasDoOmbro, criarBoneco, presetBoneco, type Boneco } from './cameras/boneco';
 import { alturaDoCorte, planoDeCorte } from './units/corte';
 import { COR_UNIDADE, type Caixa, type StatusUnidade, type UnidadeViewer } from './units/tipos';
 import { planejarVoo, enquadrar, type Pose } from './cameras/voo';
@@ -75,6 +76,13 @@ export interface EstadoViewer {
   som: boolean;
   /** Móveis do apartamento decorado em que a pessoa está (0 = fora, ou unidade sem decorado). */
   decorado: number;
+  /** Modo jogo: câmera atrás do boneco (terceira pessoa). */
+  terceiraPessoa: boolean;
+  /** Boneco escolhido. */
+  boneco: string;
+  /** No ar (pulando). */
+  noAr: boolean;
+  correndo: boolean;
 }
 
 /** Resumo da visita para a telemetria. */
@@ -140,6 +148,16 @@ export interface Viewer {
   definirSom(ligado: boolean): Promise<boolean>;
   /** Toque num marcador do lazer. */
   aoSelecionarLazer(cb: ((id: string) => void) | null): void;
+  /** Modo jogo (a pé): câmera atrás do boneco (`true`) ou nos olhos (`false`), sem recarregar. */
+  definirTerceiraPessoa(ligada: boolean): void;
+  /** Troca o boneco (ana, beto, carla, davi). */
+  definirBoneco(id: string): void;
+  /** Pula (a pé, no chão). Devolve `false` se já está no ar ou fora do modo a pé. */
+  pular(): boolean;
+  /** Correr em vez de andar. */
+  definirCorrida(ligada: boolean): void;
+  /** O boneco acena por 2 s (visita em grupo, corretora virtual). */
+  acenar(): void;
   /** Fotos do imóvel com GPS: quadros no 3D onde foram tiradas. Devolve quantos quadros ficaram (perto do prédio). */
   definirFotos(fotos: readonly FotoNoLugar[]): number;
   /** Põe a imagem (link assinado) no quadro da foto. */
@@ -218,6 +236,14 @@ interface PecaUnidade {
 
 const ALTURA_OLHOS_M = 1.6;
 const VELOCIDADE_M_S = 2.2;
+/** Correndo (modo jogo). */
+const CORRIDA_M_S = 4.5;
+/** Impulso do pulo (~0,9 m de altura) e gravidade. */
+const PULO_M_S = 4.2;
+const GRAVIDADE = 9.8;
+/** Distância da câmera atrás do boneco (na rua; dentro do apartamento, mais perto). */
+const DISTANCIA_3A_M = 3.2;
+const DISTANCIA_3A_DENTRO_M = 1.5;
 const DURACAO_VOO_MS = 1200;
 const OPACIDADE_ESMAECIDA = 0.12;
 const OPACIDADE_AMBIENTE = 0.45;
@@ -579,9 +605,56 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
   }
 
   /** Câmera nos olhos da pessoa (a tela recebe a posição certa já no aviso, sem esperar o quadro). */
+  // modo jogo: boneco em terceira pessoa, pulo e corrida
+  let terceiraPessoa = false;
+  let boneco: Boneco | null = null;
+  let presetId = 'ana';
+  let correndo = false;
+  let velocidadeVertical = 0;
+  let noAr = false;
+  let pedidoPulo = false;
+  let acenarAte = 0;
+  /** Andado no último quadro (anima o passo do boneco). */
+  let andadoQuadro = 0;
+  let tempoQuadro = 0;
+  const raioCamera = new THREE.Raycaster();
+  function garantirBoneco(): Boneco {
+    if (!boneco) {
+      boneco = criarBoneco(presetBoneco(presetId), (m) => prepararMaterial(m));
+      cena.add(boneco.objeto);
+    }
+    return boneco;
+  }
   function posicionarPessoa(): void {
-    camera.position.set(pessoa.x, pessoa.y + ALTURA_OLHOS_M, pessoa.z);
-    camera.rotation.set(pessoa.pitch, pessoa.yaw, 0, 'YXZ');
+    if (!terceiraPessoa || modo !== 'primeira-pessoa') {
+      if (boneco) boneco.objeto.visible = false;
+      camera.position.set(pessoa.x, pessoa.y + ALTURA_OLHOS_M, pessoa.z);
+      camera.rotation.set(pessoa.pitch, pessoa.yaw, 0, 'YXZ');
+      return;
+    }
+    const b = garantirBoneco();
+    b.objeto.visible = true;
+    const agora = performance.now();
+    b.atualizar(
+      { x: pessoa.x, y: pessoa.y, z: pessoa.z, yaw: pessoa.yaw },
+      { distancia: andadoQuadro, velocidade: tempoQuadro > 0 ? andadoQuadro / tempoQuadro : 0, noAr, acenando: agora < acenarAte ? 1 : 0 },
+      agora / 1000,
+      menosMovimento,
+    );
+    andadoQuadro = 0;
+    tempoQuadro = 0;
+    const desejo = interior ? DISTANCIA_3A_DENTRO_M : DISTANCIA_3A_M;
+    const c = cameraAtrasDoOmbro(pessoa, desejo);
+    // parede entre a cabeça e a câmera: a câmera encosta (não atravessa prédio nem parede do apartamento)
+    const dir = c.posicao.clone().sub(c.cabeca);
+    const dist = dir.length();
+    raioCamera.set(c.cabeca, dir.normalize());
+    raioCamera.far = dist;
+    const barreiras = [...solidos, ...(cidade ? [cidade] : []), ...(decorado ? decorado.paredes : []), ...(interior ? [pecas.get(interior)?.malha].filter((x): x is THREE.Mesh => !!x) : [])];
+    const bate = raioCamera.intersectObjects(barreiras, false)[0];
+    if (bate) c.posicao.copy(c.cabeca).addScaledVector(dir, Math.max(0.3, bate.distance - 0.2));
+    camera.position.copy(c.posicao);
+    camera.lookAt(c.alvo);
   }
 
   function definirModo(novo: ModoCamera): void {
@@ -589,6 +662,9 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
     modo = novo;
     voo = null;
     orbita.enabled = novo === 'orbita';
+    if (boneco) boneco.objeto.visible = novo === 'primeira-pessoa' && terceiraPessoa;
+    noAr = false;
+    velocidadeVertical = 0;
     alvoCaminhada = null;
     if (interior) {
       interior = null;
@@ -623,11 +699,24 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
   const aoTeclar = (e: KeyboardEvent) => {
     if (modo !== 'primeira-pessoa' || ehCampoDeTexto(e)) return;
     const k = e.key.toLowerCase();
+    if (k === ' ') {
+      e.preventDefault();
+      pedidoPulo = true;
+      return;
+    }
+    if (k === 'shift') correndo = true;
+    if (k === 'v' && !e.repeat) {
+      terceiraPessoa = !terceiraPessoa;
+      ultimoAviso = 0;
+    }
     if (!['w', 'a', 's', 'd', 'arrowup', 'arrowdown', 'arrowleft', 'arrowright'].includes(k)) return;
     e.preventDefault();
     teclas.add(k);
   };
-  const aoSoltarTecla = (e: KeyboardEvent) => teclas.delete(e.key.toLowerCase());
+  const aoSoltarTecla = (e: KeyboardEvent) => {
+    if (e.key === 'Shift') correndo = false;
+    teclas.delete(e.key.toLowerCase());
+  };
   const aoPerderFoco = () => teclas.clear();
 
   // olhar arrastando (primeira pessoa) e clique em unidade (qualquer modo)
@@ -1096,6 +1185,10 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
       moradores: pessoas?.objeto.visible ? (pessoas.objeto.children[0] as THREE.InstancedMesh).count : 0,
       som: som.ligado(),
       decorado: decorado?.moveis ?? 0,
+      terceiraPessoa,
+      boneco: presetId,
+      noAr,
+      correndo,
       direcao: { x: direcaoCamera.x / (Math.hypot(direcaoCamera.x, direcaoCamera.z) || 1), z: direcaoCamera.z / (Math.hypot(direcaoCamera.x, direcaoCamera.z) || 1) },
     });
   };
@@ -1170,18 +1263,33 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
           entrada = r.entrada;
           if (r.chegou) alvoCaminhada = null;
         }
-        if (entrada.frente === 0 && entrada.lado === 0 && passo > 0) break; // parado: nada mais a simular
+        if (pedidoPulo && !noAr) {
+          noAr = true;
+          velocidadeVertical = PULO_M_S;
+        }
+        pedidoPulo = false;
+        if (entrada.frente === 0 && entrada.lado === 0 && passo > 0 && !noAr) break; // parado: nada mais a simular
         const antes = { x: pessoa.x, z: pessoa.z };
-        Object.assign(pessoa, passoPrimeiraPessoa(pessoa, entrada, dt, { velocidade: VELOCIDADE_M_S, bloqueado: (de, para) => bloqueado(de, para) || bloqueadoCidade(de, para) || bloqueadoDecorado(de, para) }));
+        Object.assign(pessoa, passoPrimeiraPessoa(pessoa, entrada, dt, { velocidade: correndo ? CORRIDA_M_S : VELOCIDADE_M_S, bloqueado: (de, para) => bloqueado(de, para) || bloqueadoCidade(de, para) || bloqueadoDecorado(de, para) }));
+        andadoQuadro += Math.hypot(pessoa.x - antes.x, pessoa.z - antes.z);
         // preso (parede no caminho do toque): desiste em 0,6 s
         if (alvoCaminhada && entrada.frente > 0) {
           paradoMs = pessoa.x === antes.x && pessoa.z === antes.z ? paradoMs + dt * 1000 : 0;
           if (paradoMs > 600) alvoCaminhada = null;
         }
-        // os pés seguem o piso: sobe escada e rampa, desce suave
+        // os pés seguem o piso: sobe escada e rampa, desce suave; no pulo, a gravidade manda
         const piso = seguirPiso(pessoa.y, pessoa.x, pessoa.z, alturaDoPiso);
-        pessoa.y = piso > pessoa.y ? piso : pessoa.y + (piso - pessoa.y) * Math.min(1, dt * 10);
+        if (noAr) {
+          pessoa.y += velocidadeVertical * dt;
+          velocidadeVertical -= GRAVIDADE * dt;
+          if (velocidadeVertical < 0 && pessoa.y <= piso) {
+            pessoa.y = piso;
+            noAr = false;
+            velocidadeVertical = 0;
+          }
+        } else pessoa.y = piso > pessoa.y ? piso : pessoa.y + (piso - pessoa.y) * Math.min(1, dt * 10);
       }
+      tempoQuadro += total;
       posicionarPessoa();
     }
 
@@ -1306,6 +1414,29 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
     },
     aoSelecionarLazer(cb) {
       cbLazer = cb;
+    },
+    definirTerceiraPessoa(ligada) {
+      terceiraPessoa = ligada;
+      if (modo === 'primeira-pessoa') posicionarPessoa();
+      ultimoAviso = 0;
+      avisar(performance.now());
+    },
+    definirBoneco(id) {
+      presetId = presetBoneco(id).id;
+      boneco?.trocar(presetBoneco(presetId));
+      ultimoAviso = 0;
+    },
+    pular() {
+      if (modo !== 'primeira-pessoa' || noAr) return false;
+      pedidoPulo = true;
+      return true;
+    },
+    definirCorrida(ligada) {
+      correndo = ligada;
+      ultimoAviso = 0;
+    },
+    acenar() {
+      acenarAte = performance.now() + 2000;
     },
     definirFotos(fotos) {
       fotosNoLugar = [...fotos];
@@ -1569,6 +1700,7 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
       return exportarUsdz(montarMaquete([raizPredio, paisagismo?.objeto].filter((o): o is THREE.Object3D => o != null)));
     },
     destruir() {
+      boneco?.destruir();
       destruido = true;
       void imersiva?.encerrar();
       pos?.destruir();
