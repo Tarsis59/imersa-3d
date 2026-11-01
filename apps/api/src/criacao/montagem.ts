@@ -6,6 +6,8 @@ import { validarPlanilha } from '../dominio/planilha';
 import { aplicarPlanilha } from '../importar';
 import type { ServicosMapa } from '../mapa/osm';
 import { criarEntorno, importarPoisOsm } from '../rotas/mapa';
+import { giroParaOlhar, recuoDaRua, ruaMaisPerto } from '../mapa/malha';
+import { localParaLatLon } from '../mapa/relevo';
 import { centroDosGps, consultasDoTexto, limparCep, noBrasil, type LocalAchado, type Ponto } from './local';
 import { planoDoPredio, posicionarLazer } from './plano';
 import { normalizar, type Descricao } from './texto';
@@ -100,6 +102,34 @@ export async function acharLocal(d: DepsMontagem, s: Sessao, desc: Descricao, pi
     if (r) return { ...r, fonte: 'cidade' };
   }
   return null;
+}
+
+/**
+ * Prédio sem modelo (fachada procedural): vira a entrada para a rua de carro mais perto e, se o ponto do endereço caiu
+ * na rua, recua o prédio para trás da calçada (Plano 11b, item 9). Devolve o nome da rua, ou null se não mexeu.
+ */
+async function assentarNaRua(d: DepsMontagem, s: Sessao, projetoId: string, centro: { lat: number; lon: number }, vias: Parameters<typeof ruaMaisPerto>[0]): Promise<string | null> {
+  const rua = ruaMaisPerto(vias, centro);
+  if (!rua || rua.distanciaM > 120) return null;
+  return withTenant(d.pool, ctx(s), async (c) => {
+    const p = (
+      await c.query<{ modelos: number; por_andar: number }>(
+        `SELECT (SELECT count(*)::int FROM buildings WHERE project_id = $1 AND modelo_asset_id IS NOT NULL) AS modelos,
+                coalesce((SELECT max(n) FROM (SELECT count(*)::int AS n FROM units u JOIN buildings b ON b.id = u.building_id WHERE b.project_id = $1 GROUP BY u.floor_id) x), 4) AS por_andar`,
+        [projetoId],
+      )
+    ).rows[0]!;
+    if (p.modelos > 0) return null; // modelo de verdade: a posição e o giro são do projeto
+    const colunas = Math.ceil(Math.sqrt(p.por_andar));
+    const meia = (Math.max(colunas, Math.ceil(p.por_andar / colunas)) * 8) / 2;
+    const novo = recuoDaRua(rua, meia);
+    const lugar = novo ? localParaLatLon(centro, novo.x, novo.z) : centro;
+    const alvo = novo ? { x: rua.ponto.x - novo.x, z: rua.ponto.z - novo.z } : rua.ponto;
+    const giro = giroParaOlhar(alvo);
+    await c.query('UPDATE projects SET rotacao_graus = $2, geom = ST_SetSRID(ST_MakePoint($4, $3), 4326) WHERE id = $1', [projetoId, giro, lugar.lat, lugar.lon]);
+    await registrarAuditoria(c, { userId: s.userId, acao: 'projeto.assentar', entidade: 'project', entidadeId: projetoId, depois: { giro, recuoM: novo ? Math.round(Math.hypot(novo.x, novo.z)) : 0, rua: rua.via.nome } });
+    return rua.via.nome ?? 'a rua';
+  });
 }
 
 interface Linha {
@@ -222,12 +252,18 @@ export async function executarMontagem(d: DepsMontagem, s: Sessao, montagemId: s
 
   await etapa('cidade', async () => {
     if (!(await temLocal())) return { estado: 'pulada', detalhe: 'Sem localização, sem cidade em volta.' };
+    let e;
     try {
-      const e = await criarEntorno(d.pool, d.mapa).obter(ctx(s), projetoId);
-      return { detalhe: `${e.predios.length} prédios reais em volta (OpenStreetMap).` };
+      e = await criarEntorno(d.pool, d.mapa).obter(ctx(s), projetoId);
     } catch {
       throw new Aviso('O mapa da cidade não respondeu agora: abra o 3D mais tarde que ele busca de novo.');
     }
+    const partes = [`${e.predios.length} prédios reais`];
+    if (e.vias.length) partes.push(`${e.vias.length} ruas e calçadas`);
+    if (e.areas.length) partes.push(`${e.areas.length} áreas verdes e de água`);
+    if (e.relevo) partes.push('o relevo do terreno');
+    const virada = e.centro ? await assentarNaRua(d, s, projetoId, e.centro, e.vias) : null;
+    return { detalhe: `${partes.join(', ')} em volta${virada ? `; fachada virada para ${virada}` : ''}.` };
   });
 
   await etapa('pontos', async () => {

@@ -10,10 +10,10 @@ const caminho = (token: string, resto = '') => {
 };
 
 export async function carregarEntornoPublico(token: string): Promise<ResultadoEntorno> {
-  const r = await api<{ semLocalizacao: boolean; centro: Entorno['centro'] | null; predios: Entorno['predios']; atribuicao: string }>(caminho(token, '/entorno'));
+  const r = await api<{ semLocalizacao: boolean; centro: Entorno['centro'] | null; predios: Entorno['predios']; vias?: Entorno['vias']; areas?: Entorno['areas']; relevo?: Entorno['relevo']; atribuicao: string }>(caminho(token, '/entorno'));
   if (r.status !== 200) return { entorno: null, motivo: 'indisponivel' };
   if (r.dados.semLocalizacao || !r.dados.centro) return { entorno: null, motivo: 'sem_localizacao' };
-  return { entorno: { centro: r.dados.centro, predios: r.dados.predios, atribuicao: r.dados.atribuicao } };
+  return { entorno: { centro: r.dados.centro, predios: r.dados.predios, vias: r.dados.vias ?? [], areas: r.dados.areas ?? [], relevo: r.dados.relevo ?? null, atribuicao: r.dados.atribuicao } };
 }
 
 export async function linkArquivoPublico(token: string, arquivoId: string): Promise<string | null> {

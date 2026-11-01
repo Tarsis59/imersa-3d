@@ -14,6 +14,7 @@ import { estudoSolar, type EstudoSolar, type FaceSolar } from './sun/insolacao';
 import { malhasDaFachada, materiaisDaFachada, texturaDeJanelas } from './units/janelas';
 import { buildCityMesh } from './city/cityMesh';
 import { entornoParaLocal, type Entorno } from './city/entorno';
+import { criarCidade, terrenoDoRelevo, type CidadeCompleta } from './city/cidade';
 import { alturaDoCorte, planoDeCorte } from './units/corte';
 import { COR_UNIDADE, type Caixa, type StatusUnidade, type UnidadeViewer } from './units/tipos';
 import { planejarVoo, enquadrar, type Pose } from './cameras/voo';
@@ -289,6 +290,8 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
   let bloqueado: OpcoesPasso['bloqueado'] = () => false;
   let bloqueadoCidade: OpcoesPasso['bloqueado'] = () => false;
   let cidade: THREE.Mesh | null = null;
+  /** Chão com relevo, ruas, verde, água e árvores de rua (Plano 11b). */
+  let cidadeCompleta: CidadeCompleta | null = null;
   let atribuicaoEntorno: string | null = null;
   const materialCidade = new THREE.MeshStandardMaterial({ color: 0xd8d5ce, roughness: 0.9 });
   prepararMaterial(materialCidade);
@@ -846,6 +849,7 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
     }
     for (const m of materiais) m.needsUpdate = true;
     pessoas?.definirQuantidade(MORADORES_POR_NIVEL[n.nome]);
+    cidadeCompleta?.definirNivel(n.nome);
     ajustarPos(n);
   }
 
@@ -1331,22 +1335,50 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
         cidade.geometry.dispose();
         cidade = null;
       }
+      if (cidadeCompleta) {
+        cena.remove(cidadeCompleta.objeto);
+        for (const m of cidadeCompleta.materiais) materiais.delete(m);
+        for (const p of cidadeCompleta.pisos) pisosExtras.splice(pisosExtras.indexOf(p), 1);
+        cidadeCompleta.destruir();
+        cidadeCompleta = null;
+      }
+      chao.position.y = 0;
       bloqueadoCidade = () => false;
       atribuicaoEntorno = null;
       obstaculos = [];
       estudo = null;
       if (!entorno) return 0;
-      const predios = entornoParaLocal(entorno.predios, entorno.centro, rotacao, caixaDoPredio());
-      if (predios.length === 0) return 0;
+      const lote = caixaDoPredio();
+      const predios = entornoParaLocal(entorno.predios, entorno.centro, rotacao, lote);
+      // prédios no chão de verdade: a base de cada um é a altura do terreno no meio dele
+      const terrenoDe = terrenoDoRelevo(entorno.relevo, entorno.centro, rotacao, lote);
+      for (const b of predios) {
+        const cx = b.footprint.reduce((s, q) => s + q.x, 0) / b.footprint.length;
+        const cz = b.footprint.reduce((s, q) => s + q.z, 0) / b.footprint.length;
+        const base = terrenoDe.altura(cx, cz);
+        if (Math.abs(base) > 0.05) b.base = base;
+      }
       obstaculos = predios.map((b) => ({
         minX: Math.min(...b.footprint.map((q) => q.x)),
         maxX: Math.max(...b.footprint.map((q) => q.x)),
-        minY: 0,
-        maxY: b.height,
+        minY: b.base ?? 0,
+        maxY: (b.base ?? 0) + b.height,
         minZ: Math.min(...b.footprint.map((q) => q.z)),
         maxZ: Math.max(...b.footprint.map((q) => q.z)),
       }));
       montarPaisagismo(); // sem árvores dentro dos prédios vizinhos
+      if (entorno.vias?.length || entorno.areas?.length || entorno.relevo) {
+        cidadeCompleta = criarCidade(entorno, rotacao, lote, obstaculos, (m) => prepararMaterial(m));
+        cidadeCompleta.definirNivel(qualidade.nivel.nome);
+        cena.add(cidadeCompleta.objeto);
+        pisosExtras.push(...cidadeCompleta.pisos);
+        // além do relevo, o chão do horizonte fica embaixo de tudo (sem cobrir os vales)
+        if (cidadeCompleta.terreno.meioLado > 0) chao.position.y = cidadeCompleta.terreno.horizonte;
+      }
+      if (predios.length === 0) {
+        atribuicaoEntorno = entorno.atribuicao;
+        return 0;
+      }
       cidade = buildCityMesh(predios, materialCidade);
       cidade.castShadow = true;
       cidade.receiveShadow = true;
@@ -1428,7 +1460,7 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
         zenite: atmosfera.horizonte.clone().lerp(new THREE.Color(noite > 0.5 ? 0x050a1a : 0x2f6fc4), 0.6),
         ceu: THREE.MathUtils.lerp(clima === 'limpo' ? 0.9 : 1.3, 0.12, noite),
       };
-      const objetos = [raizPredio, paisagismo?.objeto, cidade, chao, pessoas?.objeto.visible ? pessoas.objeto : null].filter((o): o is THREE.Object3D => o != null);
+      const objetos = [raizPredio, paisagismo?.objeto, cidade, cidadeCompleta?.objeto, chao, pessoas?.objeto.visible ? pessoas.objeto : null].filter((o): o is THREE.Object3D => o != null);
       pausado = true; // o 3D normal para: o canvas mostra a foto "revelando"
       let png: Promise<Blob> | null = null;
       try {

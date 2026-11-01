@@ -67,4 +67,6 @@ test('criar com tudo: foto com GPS + planta + texto → montagem ao vivo → Vit
   await expect(vitrine).toHaveAttribute('data-lazer', '3');
   await expect(vitrine).toHaveAttribute('data-entorno', /^[1-9]\d*$/, { timeout: 60_000 });
   await expect(page.getByRole('button', { name: /Conheça o lazer/ })).toBeVisible();
+  await page.waitForTimeout(2000);
+  await vitrine.screenshot({ path: test.info().outputPath('cidade-completa.png') });
 });

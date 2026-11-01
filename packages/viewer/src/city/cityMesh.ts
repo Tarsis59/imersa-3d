@@ -7,8 +7,11 @@ import type { Building } from './osm';
  */
 export function buildingGeometry(b: Building): THREE.BufferGeometry {
   const shape = new THREE.Shape(b.footprint.map((p) => new THREE.Vector2(p.x, -p.z)));
-  const g = new THREE.ExtrudeGeometry(shape, { depth: b.height, bevelEnabled: false });
+  // no relevo, o prédio desce um pouco abaixo do chão (terreno em declive não deixa vão embaixo)
+  const enterrado = b.base ? 3 : 0;
+  const g = new THREE.ExtrudeGeometry(shape, { depth: b.height + enterrado, bevelEnabled: false });
   g.rotateX(-Math.PI / 2);
+  if (b.base) g.translate(0, b.base - enterrado, 0);
   return g;
 }
 

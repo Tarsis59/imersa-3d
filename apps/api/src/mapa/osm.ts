@@ -1,5 +1,8 @@
 import { readFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import { interpretarViaCep, type EnderecoCep } from '../criacao/local';
+import { consultaMalha, interpretarMalha, type Malha } from './malha';
+import { lerRelevo, type Relevo } from './relevo';
 export type CategoriaPoi = 'escola' | 'saude' | 'mercado' | 'farmacia' | 'transporte' | 'parque' | 'outro';
 
 export interface PoiOsm {
@@ -94,6 +97,10 @@ export interface ServicosMapa {
   buscarPredios(lat: number, lon: number, raioM: number): Promise<PredioOsm[]>;
   /** CEP (8 dígitos) → endereço (ViaCEP, grátis). Opcional: sem ele a criação pede o endereço. */
   buscarCep?(cep: string): Promise<EnderecoCep | null>;
+  /** Ruas, calçadas, verde e água em volta. Opcional: sem ele a cidade fica só com os prédios. */
+  buscarMalha?(lat: number, lon: number, raioM: number): Promise<Malha>;
+  /** Grade de alturas do terreno. Opcional: sem ele o chão é plano. */
+  buscarRelevo?(lat: number, lon: number, raioM: number): Promise<Relevo>;
 }
 
 /** Prédio do entorno: contorno em [lon, lat] (ordem GeoJSON), sem repetir o ponto final. */
@@ -188,6 +195,22 @@ export function servicosMapaReais(userAgent: string): ServicosMapa {
       if (!r.ok) throw new Error(`Overpass respondeu ${r.status}`);
       return interpretarPredios(await r.json(), { lat, lon }, 3000, raioM);
     },
+    buscarMalha: async (lat, lon, raioM) => {
+      const r = await fetch('https://overpass-api.de/api/interpreter', {
+        method: 'POST',
+        headers: { 'user-agent': userAgent, 'content-type': 'application/x-www-form-urlencoded', accept: 'application/json' },
+        body: new URLSearchParams({ data: consultaMalha(lat, lon, raioM) }),
+        signal: AbortSignal.timeout(60_000),
+      });
+      if (!r.ok) throw new Error(`Overpass respondeu ${r.status}`);
+      return interpretarMalha(await r.json(), { lat, lon }, raioM);
+    },
+    buscarRelevo: (lat, lon, raioM) =>
+      lerRelevo({ lat, lon }, raioM, async (z, x, y) => {
+        const r = await fetch(`https://s3.amazonaws.com/elevation-tiles-prod/terrarium/${z}/${x}/${y}.png`, { headers: { 'user-agent': userAgent }, signal: AbortSignal.timeout(20_000) });
+        if (!r.ok) throw new Error(`Terrain Tiles respondeu ${r.status}`);
+        return new Uint8Array(await r.arrayBuffer());
+      }),
     buscarCep: async (cep) => {
       const r = await fetch(`https://viacep.com.br/ws/${cep}/json/`, { headers: { 'user-agent': userAgent }, signal: AbortSignal.timeout(10_000) });
       if (r.status === 400) return null;
@@ -209,5 +232,15 @@ export function comPrediosDeArquivo(base: ServicosMapa, caminho: string): Servic
       dados ??= readFile(caminho, 'utf8').then((t) => JSON.parse(t) as unknown);
       return interpretarPredios(await dados, { lat, lon }, 3000, raioM);
     },
+    // o mesmo arquivo tem as ruas e os parques da área baixada
+    buscarMalha: async (lat, lon, raioM) => {
+      dados ??= readFile(caminho, 'utf8').then((t) => JSON.parse(t) as unknown);
+      return interpretarMalha(await dados, { lat, lon }, raioM);
+    },
   };
+}
+
+/** Relevo lido de uma pasta com os blocos já baixados (`z-x-y.png`): testes e demonstração sem internet. */
+export function comRelevoDePasta(base: ServicosMapa, pasta: string): ServicosMapa {
+  return { ...base, buscarRelevo: (lat, lon, raioM) => lerRelevo({ lat, lon }, raioM, async (z, x, y) => new Uint8Array(await readFile(join(pasta, `${z}-${x}-${y}.png`)))) };
 }

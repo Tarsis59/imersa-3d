@@ -42,7 +42,7 @@ import { chamadaSimulada } from './ia/simulada';
 import { CanalUnidades } from './tempo-real/canal';
 import { ArmazenamentoLocal, ArmazenamentoS3, type Armazenamento } from './arquivos/armazenamento';
 import { clamav, semAntivirus, type Antivirus } from './arquivos/antivirus';
-import { comPrediosDeArquivo, servicosMapaReais, type ServicosMapa } from './mapa/osm';
+import { comPrediosDeArquivo, comRelevoDePasta, servicosMapaReais, type ServicosMapa } from './mapa/osm';
 
 export interface Deps {
   pool: pg.Pool;
@@ -373,7 +373,8 @@ export async function construirApp({ pool, config, logger = false, reportarErro,
     limiteBytes: (config.LIMITE_ARMAZENAMENTO_GB ?? 50) * 1024 ** 3,
   });
   const mapaReal = servicosMapaReais(config.OSM_USER_AGENT ?? 'Imersa3D-dev/0.1 (ambiente de desenvolvimento)');
-  const servicosMapa = mapa ?? (config.MAPA_ARQUIVO_PREDIOS ? comPrediosDeArquivo(mapaReal, config.MAPA_ARQUIVO_PREDIOS) : mapaReal);
+  const doArquivo = config.MAPA_ARQUIVO_PREDIOS ? comPrediosDeArquivo(mapaReal, config.MAPA_ARQUIVO_PREDIOS) : mapaReal;
+  const servicosMapa = mapa ?? (config.MAPA_PASTA_RELEVO ? comRelevoDePasta(doArquivo, config.MAPA_PASTA_RELEVO) : doArquivo);
   rotasMapa(app, { pool, exigir, mapa: servicosMapa });
   rotasTelemetria(app, { pool, exigir });
   rotasCapturas(app, { pool, exigir, armazenamento: arm });

@@ -224,8 +224,9 @@ export async function executarFerramenta(c: pg.PoolClient, ctx: ContextoIA, nome
     }
     case 'pontos_proximos': {
       const { categoria } = Pontos.parse(entrada);
+      // distância a pé pelas ruas quando calculada (Plano 11b); senão, em linha reta
       const r = await c.query<{ categoria: string; nome: string; distanciaM: number }>(
-        `SELECT p.categoria, p.nome, round(ST_Distance(p.geom::geography, pr.geom::geography))::int AS "distanciaM"
+        `SELECT p.categoria, p.nome, coalesce(p.caminho_m, round(ST_Distance(p.geom::geography, pr.geom::geography))::int) AS "distanciaM"
            FROM pois p JOIN projects pr ON pr.id = p.project_id
           WHERE p.project_id = $1 AND pr.geom IS NOT NULL AND ($2::text IS NULL OR p.categoria = $2) ORDER BY 3, 2 LIMIT 15`,
         [ctx.projetoId, categoria],

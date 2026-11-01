@@ -1,6 +1,7 @@
 import { lonLatToLocal, type LonLat } from '../geo/project';
 import type { Caixa } from '../units/tipos';
 import type { Building } from './osm';
+import type { AreaEntorno, RelevoEntorno, ViaEntorno } from './cidade';
 
 /** Prédio do entorno como a API entrega: contorno em [lon, lat]. */
 export interface PredioEntorno {
@@ -13,6 +14,10 @@ export interface Entorno {
   centro: LonLat;
   predios: PredioEntorno[];
   atribuicao: string;
+  /** Cidade completa (Plano 11b): ruas, verde, água e relevo. Ausentes = só os prédios num chão plano. */
+  vias?: ViaEntorno[];
+  areas?: AreaEntorno[];
+  relevo?: RelevoEntorno | null;
 }
 
 /**

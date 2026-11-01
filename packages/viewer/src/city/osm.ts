@@ -18,6 +18,8 @@ export interface Building {
   name?: string;
   height: number;
   footprint: Local[];
+  /** Altura do chão sob o prédio (relevo). */
+  base?: number;
 }
 
 const ALTURA_ANDAR_M = 3;
