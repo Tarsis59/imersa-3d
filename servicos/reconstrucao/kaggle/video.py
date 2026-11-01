@@ -4,7 +4,7 @@ Vídeo de marketing do prédio na GPU gratuita do Kaggle (Blender Cycles; o Blen
 Entrada (dataset privado anexado ao notebook, montado em /kaggle/input/<dataset>/):
   modelo.glb        modelo 3D do prédio, já sem compressão (o importador do Blender não lê Meshopt)
   video_blender.py  o roteiro que roda dentro do Blender
-  config.json       {"formato": "9:16", "segundos": 10, "fps": 30, "amostras": 128, "selo": "Imagem ilustrativa"}
+  config.json       {"formato": "9:16", "segundos": 10, "fps": 30, "amostras": 48, "selo": "Imagem ilustrativa"}
 
 Saída (/kaggle/working/, baixada pelo orquestrador):
   video.mp4, capa.jpg, video.json

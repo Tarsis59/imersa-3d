@@ -25,7 +25,7 @@ from .pipeline import RAIZ, ErroPipeline, Nuvem
 
 FORMATOS = ("9:16", "1:1", "16:9")
 SELO = "Imagem ilustrativa"
-PADRAO = {"segundos": 10.0, "fps": 30, "amostras": 128}
+PADRAO = {"segundos": 10.0, "fps": 30, "amostras": 48}
 #: um vídeo de 10 s em 1080p fica em poucos MB; acima disso algo saiu errado
 MAX_MB = 150
 

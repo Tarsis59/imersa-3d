@@ -488,6 +488,10 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
   const observador = new ResizeObserver(redimensionar);
   observador.observe(canvas.parentElement ?? canvas);
   redimensionar();
+  // fora da tela (a pessoa rolou até o formulário) o laço não desenha: poupa a bateria do celular e a CPU
+  let naTela = true;
+  const vigia = typeof IntersectionObserver === 'undefined' ? null : new IntersectionObserver(([e]) => (naTela = e?.isIntersecting ?? true));
+  vigia?.observe(canvas);
 
   let cbSelecao: ((id: string | null) => void) | null = null;
   let cbMudanca: ((e: EstadoViewer) => void) | null = null;
@@ -600,6 +604,10 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
   const proximoQuadro = () => new Promise<number>((ok) => esperandoQuadro.push(ok));
   renderer.setAnimationLoop((agora: number) => {
     if (pausado) return;
+    if (!naTela && !voo && !esperandoQuadro.length) {
+      ultimoQuadro = agora; // ao voltar, o intervalo parado não conta como quadro lento
+      return;
+    }
     const dtMs = agora - ultimoQuadro;
     ultimoQuadro = agora;
     if (dtMs > 0 && dtMs <= 250) {
@@ -817,6 +825,7 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
     destruir() {
       renderer.setAnimationLoop(null);
       observador.disconnect();
+      vigia?.disconnect();
       canvas.removeEventListener('pointerdown', aoApertar);
       canvas.removeEventListener('pointermove', aoMover);
       canvas.removeEventListener('pointerup', aoSoltar);

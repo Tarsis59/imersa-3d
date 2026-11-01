@@ -53,7 +53,7 @@ export const ConfigWorker = z.object({
   VIDEO_PROVEDOR: z.enum(['blender', 'simulado']).default('blender'),
   VIDEO_SIMULADO_MP4: z.string().optional(),
   VIDEO_SIMULADO_CAPA: z.string().optional(),
-  /** Qualidade (vazio = padrão do serviço: 10 s, 30 quadros/s, 128 amostras, 1080p). */
+  /** Qualidade (vazio = padrão do serviço: 10 s, 30 quadros/s, 48 amostras com redução de ruído, 1080p). */
   VIDEO_SEGUNDOS: z.coerce.number().positive().max(60).optional(),
   VIDEO_FPS: z.coerce.number().int().min(6).max(60).optional(),
   VIDEO_AMOSTRAS: z.coerce.number().int().min(1).max(4096).optional(),

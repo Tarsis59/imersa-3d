@@ -127,7 +127,7 @@ test('configurador: catálogo → acabamentos trocados em < 200 ms → móvel �
 
   // reabrir: acabamentos e móvel voltam como foram salvos
   await page.getByTestId('lista-configuracoes').getByRole('link', { name: 'Abrir' }).click();
-  await expect(page).toHaveURL(/configuracao=/);
+  await expect(page).toHaveURL(/configuracao=/, { timeout: 30_000 }); // no CI o modo dev compila a rota na hora
   await expect(tela).toHaveAttribute('data-estado', 'pronto', { timeout: 90_000 });
   await expect(tela).toHaveAttribute('data-moveis', '1');
   await expect(piso).toHaveValue(/.+/);
