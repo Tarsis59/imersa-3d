@@ -8,10 +8,13 @@ import { bilheteAoVivo, carregarEntorno, criarLazer, linkDoArquivo, removerLazer
 
 const NIVEIS_FIXOS = ['alto', 'medio', 'baixo'] as const;
 
-export default async function PaginaVitrine({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ qualidade?: string }> }) {
+export default async function PaginaVitrine({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ qualidade?: string; amostras?: string }> }) {
   const { id } = await params;
   // ?qualidade=alto|medio|baixo fixa o nível (testes visuais, comparação entre aparelhos)
-  const fixa = NIVEIS_FIXOS.indexOf((await searchParams).qualidade as (typeof NIVEIS_FIXOS)[number]);
+  const busca = await searchParams;
+  const fixa = NIVEIS_FIXOS.indexOf(busca.qualidade as (typeof NIVEIS_FIXOS)[number]);
+  // ?amostras=N: amostras da foto fotorrealista (testes e comparação; padrão 64)
+  const amostras = Number(busca.amostras);
   const volta = `/painel/predios/${id}/vitrine`;
   const r = await apiNaPagina<Espelho>(`/predios/${encodeURIComponent(id)}`, volta);
   if (r.status !== 200) notFound();
@@ -66,6 +69,7 @@ export default async function PaginaVitrine({ params, searchParams }: { params: 
         giroRenderizado={giros.status === 200 ? giros.dados.vitrine : null}
         assistenteUrl={ia.status === 200 && ia.dados.ligada ? `/painel/predios/${predio.id}/assistente` : null}
         qualidadeFixa={fixa >= 0 ? fixa : null}
+        amostrasFoto={Number.isInteger(amostras) && amostras >= 1 && amostras <= 2000 ? amostras : undefined}
         carregarEntorno={carregarEntorno.bind(null, predio.projetoId)}
         linkDoArquivo={linkDoArquivo}
         aoVivo={bilheteAoVivo.bind(null, predio.id)}

@@ -19,6 +19,8 @@ const ROTULO_NIVEL = { alto: 'alta', medio: 'média', baixo: 'baixa' } as const;
 const ROTULO_SOL: Record<PeriodoDeSol, string> = { manha: 'Sol da manhã', tarde: 'Sol da tarde', 'dia-todo': 'Sol o dia todo', 'pouco-sol': 'Pouco sol direto' };
 const horas = (h: number) => `${h.toLocaleString('pt-BR')} h`;
 const MAX_COMPARAR = 3;
+/** Amostras do path tracing na foto: ~5 a 15 s numa placa de vídeo comum. */
+const AMOSTRAS_FOTO = 64;
 
 /** Texto falado da unidade (narração pela voz do próprio navegador, em português). */
 function textoDaUnidade(u: UnidadeViewer, andar: string, sol: EstudoSolar | undefined): string {
@@ -80,6 +82,7 @@ export function Vitrine({
   linksParaConduzir = [],
   lazer = [],
   gerirLazer = null,
+  amostrasFoto = AMOSTRAS_FOTO,
 }: {
   predioId: string;
   projetoId: string;
@@ -122,6 +125,8 @@ export function Vitrine({
   /** Lazer do empreendimento marcado no 3D, na ordem do tour. */
   lazer?: ItemLazer[];
   /** Gestão: marcar e remover pontos do lazer (no painel). */
+  /** Amostras do path tracing na foto fotorrealista. */
+  amostrasFoto?: number;
   gerirLazer?: { criar: (d: NovoLazer) => Promise<{ item?: ItemLazer; erro?: string }>; remover: (id: string) => Promise<{ erro?: string }> } | null;
 }) {
   const canvas = useRef<HTMLCanvasElement>(null);
@@ -591,6 +596,34 @@ export function Vitrine({
       v.registrarErro();
     } finally {
       setProgressoGiro(null);
+    }
+  };
+  // foto fotorrealista (path tracing): a imagem revela na tela; cancelar mexendo no botão
+  const [foto, setFoto] = useState<{ feitas: number; total: number } | null>(null);
+  const [erroFoto, setErroFoto] = useState<string | null>(null);
+  const cancelarFoto = useRef<AbortController | null>(null);
+  const tirarFoto = async () => {
+    const v = viewer.current;
+    if (!v) return;
+    setErroFoto(null);
+    const controle = new AbortController();
+    cancelarFoto.current = controle;
+    setFoto({ feitas: 0, total: amostrasFoto });
+    try {
+      const png = await v.fotoRealista({ empresa, predio: predioNome, data: new Date() }, { amostras: amostrasFoto, sinal: controle.signal, aoProgredir: (feitas, total) => setFoto({ feitas, total }) });
+      const link = document.createElement('a');
+      link.href = URL.createObjectURL(png);
+      link.download = `${predioNome.replace(/[^\p{L}\p{N}]+/gu, '-').toLowerCase()}-foto-${hoje()}.png`;
+      link.click();
+      setTimeout(() => URL.revokeObjectURL(link.href), 10_000);
+    } catch (e) {
+      if ((e as Error).name !== 'AbortError') {
+        v.registrarErro();
+        setErroFoto(giroRenderizado ? 'Este aparelho não fez a foto fotorrealista. Use o giro 360° fotorrealista.' : 'Este aparelho não fez a foto fotorrealista. Tente num computador com placa de vídeo.');
+      }
+    } finally {
+      cancelarFoto.current = null;
+      setFoto(null);
     }
   };
   const baixarImagem = async () => {
@@ -1090,6 +1123,27 @@ export function Vitrine({
             <Botao type="button" variante="secundario" disabled={estado !== 'pronto' || progressoGiro !== null} onClick={() => void abrirGiro()}>
               {giro ? 'Abrir giro 360° (modo leve)' : 'Gerar giro 360° (modo leve)'}
             </Botao>
+            {!estande &&
+              (foto ? (
+                <div className="grid gap-2" data-testid="foto-revelando">
+                  <p role="status">
+                    Revelando a foto fotorrealista… {foto.feitas} de {foto.total}
+                  </p>
+                  <progress max={foto.total} value={foto.feitas} className="w-full" aria-label="Progresso da foto" />
+                  <Botao type="button" variante="secundario" onClick={() => cancelarFoto.current?.abort()}>
+                    Cancelar a foto
+                  </Botao>
+                </div>
+              ) : (
+                <Botao type="button" variante="secundario" disabled={estado !== 'pronto' || baixando} onClick={() => void tirarFoto()}>
+                  Foto fotorrealista (PNG)
+                </Botao>
+              ))}
+            {erroFoto && (
+              <p role="alert" className="text-sm text-perigo">
+                {erroFoto}
+              </p>
+            )}
             {!estande && (
               <Botao type="button" variante="secundario" disabled={estado !== 'pronto' || baixando} onClick={() => void baixarImagem()}>
                 {baixando ? 'Gerando imagem…' : 'Baixar imagem (PNG)'}

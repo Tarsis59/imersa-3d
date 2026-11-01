@@ -50,7 +50,7 @@ export function montarMaquete(objetos: readonly THREE.Object3D[], tamanhoM = TAM
   const conteudo = new THREE.Group();
   for (const o of objetos) {
     o.updateMatrixWorld(true);
-    conteudo.add(copiarSemInstancias(o));
+    conteudo.add(semInstancias(o));
   }
   const b = new THREE.Box3().setFromObject(conteudo);
   const caixa: Caixa = b.isEmpty() ? { minX: -1, maxX: 1, minY: 0, maxY: 1, minZ: -1, maxZ: 1 } : { minX: b.min.x, maxX: b.max.x, minY: b.min.y, maxY: b.max.y, minZ: b.min.z, maxZ: b.max.z };
@@ -62,8 +62,8 @@ export function montarMaquete(objetos: readonly THREE.Object3D[], tamanhoM = TAM
   return maquete;
 }
 
-/** Cópia que só leva o que está visível, já na posição do mundo, com instâncias desfeitas. */
-function copiarSemInstancias(origem: THREE.Object3D): THREE.Object3D {
+/** Cópia que só leva o que está visível, já na posição do mundo, com instâncias desfeitas (maquete e foto). */
+export function semInstancias(origem: THREE.Object3D): THREE.Object3D {
   const grupo = new THREE.Group();
   origem.traverseVisible((o) => {
     if (!(o instanceof THREE.Mesh)) return;

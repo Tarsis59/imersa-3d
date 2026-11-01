@@ -14,7 +14,10 @@
   "dependencies": {
     "@sparkjsdev/spark": "^2.4.0",
     "suncalc": "^2.1.1",
-    "three": "^0.187.0"
+    "three": "^0.187.0",
+    "three-gpu-pathtracer": "0.0.27",
+    "three-mesh-bvh": "^0.9.17",
+    "xatlas-web": "^0.1.0"
   },
   "devDependencies": {
     "@gltf-transform/core": "^4.5.1",

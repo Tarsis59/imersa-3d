@@ -182,6 +182,15 @@ importers:
       three:
         specifier: ^0.187.0
         version: 0.187.0
+      three-gpu-pathtracer:
+        specifier: 0.0.27
+        version: 0.0.27(three-mesh-bvh@0.9.17(three@0.187.0))(three@0.187.0)(xatlas-web@0.1.0)
+      three-mesh-bvh:
+        specifier: ^0.9.17
+        version: 0.9.17(three@0.187.0)
+      xatlas-web:
+        specifier: ^0.1.0
+        version: 0.1.0
     devDependencies:
       '@gltf-transform/core':
         specifier: ^4.5.1
@@ -2057,6 +2066,18 @@ packages:
     resolution: {integrity: sha512-e2zZ96wSChazBsbENf/Pcm/4swHt2cEKQ92rhUjkL9GCKiTDJIaTBenjE/m9DXi0QBmTMDkFDdOomUy20A1tDQ==}
     engines: {node: '>=20'}
 
+  three-gpu-pathtracer@0.0.27:
+    resolution: {integrity: sha512-NLUYnL9nSLcUFurIHHLHbnmpKLaXi8JbGqfTeWRSx4h+l7Ndpllwj2DK2uOYTSUaN5+PuZ1JRqv1ynHEB1XCwQ==}
+    peerDependencies:
+      three: '>=0.185.0'
+      three-mesh-bvh: '>=0.9.15'
+      xatlas-web: ^0.1.0
+
+  three-mesh-bvh@0.9.17:
+    resolution: {integrity: sha512-uU2DNnTHsMcrsAM1kiLXEeLx4JNsPLayLTPE5Rf7exbFRuQYEifS4DhGEA+lDiU8/7mID1PsE9sH8i6p5prZSg==}
+    peerDependencies:
+      three: '>= 0.159.0'
+
   three@0.187.0:
     resolution: {integrity: sha512-Qiu7R+Cmh8CstZsY1uJOSWnVlfo7ZtNLV7mF8Jltk3LB3AtDu9cRZlcnRKkAk8Y4z6KKw35z7Y7Urd7jWY8etA==}
 
@@ -2197,6 +2218,9 @@ packages:
   wrap-ansi@6.2.0:
     resolution: {integrity: sha512-r6lPcBGxZXlIcymEu7InxDMhdW0KDxpLgoFLcguasxCaJ/SOIZwINatK9KY/tf+ZrlywOKU0UDj3ATXUBfxJXA==}
     engines: {node: '>=8'}
+
+  xatlas-web@0.1.0:
+    resolution: {integrity: sha512-PprVfuXbaIskxLTLBUQRaWfgSy9xUQqAMIRooOw0P6NYqwgh6T0voeer6+Z5M7AFt5SGXUybuww/uDGs1yw8vQ==}
 
   xtend@4.0.2:
     resolution: {integrity: sha512-LKYU1iAXJXUgAXn9URjiu+MWhyUXHsvfp7mcuYm9dSUKK0/CjtrUwFAxD82/mCWbtLsGjFIad0wIsod4zrTAEQ==}
@@ -3814,6 +3838,16 @@ snapshots:
     dependencies:
       real-require: 1.0.0
 
+  three-gpu-pathtracer@0.0.27(three-mesh-bvh@0.9.17(three@0.187.0))(three@0.187.0)(xatlas-web@0.1.0):
+    dependencies:
+      three: 0.187.0
+      three-mesh-bvh: 0.9.17(three@0.187.0)
+      xatlas-web: 0.1.0
+
+  three-mesh-bvh@0.9.17(three@0.187.0):
+    dependencies:
+      three: 0.187.0
+
   three@0.187.0: {}
 
   tinybench@6.2.2: {}
@@ -3897,6 +3931,8 @@ snapshots:
       ansi-styles: 4.3.0
       string-width: 4.2.3
       strip-ansi: 6.0.1
+
+  xatlas-web@0.1.0: {}
 
   xtend@4.0.2: {}
 

@@ -26,6 +26,7 @@ import { criarConfigurador, type Configurador, type FonteMovel, type Superficie 
 import type { Acabamento } from './configurador/padroes';
 import { ajustarPose, type PoseMovel } from './configurador/moveis';
 import { exportarUsdz, montarMaquete } from './xr/maquete';
+import type { LuzDaFoto } from './captura/fotorrealista';
 import { caminhoRetangular, criarPessoas, MORADORES_POR_NIVEL, planejarMoradores, type Pessoas } from './ambiente/pessoas';
 import { criarAmbienteSonoro } from './ambiente/som';
 import { criarMarcadoresLazer, poseParaLazer, type MarcadoresLazer, type PontoLazer } from './ambiente/lazer';
@@ -154,6 +155,12 @@ export interface Viewer {
   definirEntorno(entorno: Entorno | null): Promise<number>;
   /** PNG da vista atual com faixa da marca (empresa, prédio, data, "imagem ilustrativa" e atribuição do OSM). */
   capturar(dados: Omit<DadosMarca, 'atribuicao'>): Promise<Blob>;
+  /**
+   * Foto fotorrealista da vista atual por path tracing (luz, sombra suave e reflexos de render), "revelando" na
+   * tela a cada amostra; depois, o PNG com a faixa da marca. O 3D fica parado enquanto isso. Rejeita se o
+   * aparelho não tiver o que o path tracing precisa (aí vale o giro fotorrealista do Blender) ou se for cancelada.
+   */
+  fotoRealista(dados: Omit<DadosMarca, 'atribuicao'>, opcoes?: { amostras?: number; aoProgredir?: (feitas: number, total: number) => void; sinal?: AbortSignal }): Promise<Blob>;
   metricas(): MetricasViewer;
   /** Renderiza o giro 360° (quadros + máscaras de unidade por cor-ID) a partir da vista atual. */
   gerarGiro(opcoes?: { quadros?: number; aoProgredir?: (feitos: number, total: number) => void }): Promise<Giro>;
@@ -671,6 +678,38 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
   function selecionar(id: string | null): void {
     selecionada = id && pecas.has(id) ? id : null;
     pintar();
+  }
+
+  /** Faixa da marca embaixo da imagem que está no canvas agora (copiar na mesma tarefa em que ela foi desenhada). */
+  function comMarca(dados: Omit<DadosMarca, 'atribuicao'>): Promise<Blob> {
+    const w = canvas.width;
+    const h = canvas.height;
+    const l = layoutMarca(w, h);
+    const tela = document.createElement('canvas');
+    tela.width = w;
+    tela.height = l.alturaTotal;
+    const ctx = tela.getContext('2d');
+    if (!ctx) return Promise.reject(new Error('Sem suporte a canvas 2D'));
+    ctx.drawImage(canvas, 0, 0);
+    ctx.fillStyle = '#0f172a';
+    ctx.fillRect(0, h, w, l.alturaFaixa);
+    const t = textoDaMarca({ ...dados, atribuicao: atribuicaoEntorno });
+    const y = t.rodape ? h + l.alturaFaixa * 0.38 : h + l.alturaFaixa / 2;
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = '#ffffff';
+    ctx.font = `600 ${l.fonte}px system-ui, sans-serif`;
+    ctx.textAlign = 'left';
+    ctx.fillText(t.esquerda, l.margem, y, w * 0.58);
+    ctx.font = `${l.fonte}px system-ui, sans-serif`;
+    ctx.textAlign = 'right';
+    ctx.fillText(t.direita, w - l.margem, y, w * 0.38);
+    if (t.rodape) {
+      ctx.fillStyle = '#cbd5e1';
+      ctx.font = `${Math.max(9, Math.round(l.fonte * 0.75))}px system-ui, sans-serif`;
+      ctx.textAlign = 'left';
+      ctx.fillText(t.rodape, l.margem, h + l.alturaFaixa * 0.76, w - 2 * l.margem);
+    }
+    return new Promise((ok, erro) => tela.toBlob((b) => (b ? ok(b) : erro(new Error('Falha ao gerar o PNG'))), 'image/png'));
   }
 
   // -------------------------------------------------------------- VR e AR
@@ -1374,34 +1413,37 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
     capturar(dados) {
       // desenha e copia na mesma tarefa: depois o navegador pode limpar o buffer do WebGL
       desenhar();
-      const w = canvas.width;
-      const h = canvas.height;
-      const l = layoutMarca(w, h);
-      const tela = document.createElement('canvas');
-      tela.width = w;
-      tela.height = l.alturaTotal;
-      const ctx = tela.getContext('2d');
-      if (!ctx) return Promise.reject(new Error('Sem suporte a canvas 2D'));
-      ctx.drawImage(canvas, 0, 0);
-      ctx.fillStyle = '#0f172a';
-      ctx.fillRect(0, h, w, l.alturaFaixa);
-      const t = textoDaMarca({ ...dados, atribuicao: atribuicaoEntorno });
-      const y = t.rodape ? h + l.alturaFaixa * 0.38 : h + l.alturaFaixa / 2;
-      ctx.textBaseline = 'middle';
-      ctx.fillStyle = '#ffffff';
-      ctx.font = `600 ${l.fonte}px system-ui, sans-serif`;
-      ctx.textAlign = 'left';
-      ctx.fillText(t.esquerda, l.margem, y, w * 0.58);
-      ctx.font = `${l.fonte}px system-ui, sans-serif`;
-      ctx.textAlign = 'right';
-      ctx.fillText(t.direita, w - l.margem, y, w * 0.38);
-      if (t.rodape) {
-        ctx.fillStyle = '#cbd5e1';
-        ctx.font = `${Math.max(9, Math.round(l.fonte * 0.75))}px system-ui, sans-serif`;
-        ctx.textAlign = 'left';
-        ctx.fillText(t.rodape, l.margem, h + l.alturaFaixa * 0.76, w - 2 * l.margem);
+      return comMarca(dados);
+    },
+    async fotoRealista(dados, opcoes = {}) {
+      if (pausado || imersiva) throw new Error('ocupado');
+      const { renderizarFotorrealista } = await import('./captura/fotorrealista');
+      const noite = luzNoturna;
+      const luzSol = csm.lights[0];
+      const luz: LuzDaFoto = {
+        direcao: csm.lightDirection.clone().normalize(),
+        cor: luzSol?.color.clone() ?? new THREE.Color(0xffffff),
+        intensidade: (luzSol?.intensity ?? 0) * 1.15,
+        horizonte: atmosfera.horizonte.clone(),
+        zenite: atmosfera.horizonte.clone().lerp(new THREE.Color(noite > 0.5 ? 0x050a1a : 0x2f6fc4), 0.6),
+        ceu: THREE.MathUtils.lerp(clima === 'limpo' ? 0.9 : 1.3, 0.12, noite),
+      };
+      const objetos = [raizPredio, paisagismo?.objeto, cidade, chao, pessoas?.objeto.visible ? pessoas.objeto : null].filter((o): o is THREE.Object3D => o != null);
+      pausado = true; // o 3D normal para: o canvas mostra a foto "revelando"
+      let png: Promise<Blob> | null = null;
+      try {
+        await renderizarFotorrealista(renderer, objetos, camera, luz, {
+          amostras: Math.max(1, Math.min(2000, Math.round(opcoes.amostras ?? 64))),
+          aoProgredir: opcoes.aoProgredir,
+          sinal: opcoes.sinal,
+          aoTerminar: () => (png = comMarca(dados)), // na mesma tarefa da última amostra: o canvas ainda tem a foto
+        });
+        if (!png) throw new Error('foto sem imagem');
+        return await png;
+      } finally {
+        pausado = false;
+        ultimoQuadro = performance.now(); // o tempo parado não conta como quadro lento
       }
-      return new Promise((ok, erro) => tela.toBlob((b) => (b ? ok(b) : erro(new Error('Falha ao gerar o PNG'))), 'image/png'));
     },
     aoSelecionar(cb) {
       cbSelecao = cb;
