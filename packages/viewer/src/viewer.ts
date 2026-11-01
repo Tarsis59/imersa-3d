@@ -5,6 +5,8 @@ import { ORIGEM_PAULISTA } from './geo/project';
 import { sunDirection, horaSaoPauloParaUtc } from './sun/sun';
 import { criarCeu, type Clima } from './ambiente/ceu';
 import type { PosProcessamento } from './ambiente/pos';
+import { planejarPaisagismo } from './ambiente/paisagismo';
+import { criarPaisagismo, type Paisagismo } from './ambiente/vegetacao';
 import { rumoDaCamera, paraReferenciaDoProjeto } from './sun/bussola';
 import { massaDoPredio } from './units/massa';
 import { ladoExterno, planejarFachada } from './units/fachada';
@@ -406,6 +408,19 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
     }
   }
 
+  // gramado, calçada, árvores e postes em volta do lote (refeito quando chegam os prédios vizinhos)
+  let paisagismo: Paisagismo | null = null;
+  function montarPaisagismo(): void {
+    if (paisagismo) {
+      cena.remove(paisagismo.objeto);
+      for (const m of paisagismo.materiais) materiais.delete(m);
+      paisagismo.destruir();
+    }
+    paisagismo = criarPaisagismo(planejarPaisagismo(caixaDoPredio(), obstaculos), (m) => prepararMaterial(m));
+    paisagismo.definirNoite(luzNoturna);
+    cena.add(paisagismo.objeto);
+  }
+
   function caixaDoPredio(): Caixa {
     const b = new THREE.Box3();
     for (const p of pecas.values()) b.union(new THREE.Box3(new THREE.Vector3(p.caixa.minX, p.caixa.minY, p.caixa.minZ), new THREE.Vector3(p.caixa.maxX, p.caixa.maxY, p.caixa.maxZ)));
@@ -625,6 +640,7 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
     luzNoturna = Math.round(noite * 20) / 20;
     if (luzNoturna !== antes && pecas.size) pintar();
     pos?.definirBrilho(luzNoturna);
+    paisagismo?.definirNoite(luzNoturna);
     (cena.background as THREE.Color).copy(atmosfera.horizonte);
     cena.fog?.color.copy(atmosfera.horizonte);
   }
@@ -909,6 +925,7 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
   const pronto = (config.modeloUrl ? montarModelo(config.modeloUrl) : Promise.resolve(montarVolumes())).then(() => {
     pintar();
     enquadrarPredio();
+    montarPaisagismo();
     ajustarPos(qualidade.nivel);
   });
   pronto.then(
@@ -1050,6 +1067,7 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
         minZ: Math.min(...b.footprint.map((q) => q.z)),
         maxZ: Math.max(...b.footprint.map((q) => q.z)),
       }));
+      montarPaisagismo(); // sem árvores dentro dos prédios vizinhos
       cidade = buildCityMesh(predios, materialCidade);
       cidade.castShadow = true;
       cidade.receiveShadow = true;
@@ -1168,6 +1186,7 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
       for (const ok of esperandoQuadro.splice(0)) ok(performance.now());
       csm.dispose();
       atmosfera.destruir();
+      paisagismo?.destruir();
       cena.traverse((o) => {
         if (o instanceof THREE.Mesh) o.geometry.dispose();
       });
