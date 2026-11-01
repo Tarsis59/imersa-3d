@@ -46,7 +46,7 @@ let pasta: string;
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Resp = { status: number; json: any };
-async function req(method: 'GET' | 'POST' | 'PATCH', url: string, body?: object, token?: string, ip = '203.0.113.7'): Promise<Resp> {
+async function req(method: 'GET' | 'POST' | 'PATCH' | 'DELETE', url: string, body?: object, token?: string, ip = '203.0.113.7'): Promise<Resp> {
   const r = await app.inject({
     method,
     url,
@@ -423,5 +423,41 @@ describe('estande de vendas (PC com tela touch)', () => {
     expect(r.json.tempoReal.aoVivo).toContain('/publico/links/{token}/ao-vivo');
     // sem modelo 3D ligado ao prédio, não há o que baixar
     expect((await req('GET', `/predios/${torreA}/pacote-unreal/modelo.glb`, undefined, gestao)).status).toBe(404);
+  });
+});
+
+describe('lazer do empreendimento (tour na Vitrine)', () => {
+  it('a gestão marca no 3D; o portal recebe na ordem do tour; tour completo conta nos números', async () => {
+    const novo = (corpo: object, token = gestao, predio = torreA) => req('POST', `/predios/${predio}/lazer`, corpo, token);
+    const piscina = await novo({ categoria: 'piscina', nome: 'Piscina adulto', descricao: 'Raia de 25 m, aquecida', x: 18.5, y: 0, z: -12 });
+    expect(piscina.status).toBe(201);
+    expect(piscina.json).toMatchObject({ categoria: 'piscina', nome: 'Piscina adulto', x: 18.5, z: -12, ordem: 0 });
+    const academia = await novo({ categoria: 'academia', nome: 'Academia', x: -10, z: 4 });
+    expect(academia.json.ordem).toBe(1); // entra no fim do tour
+    expect((await novo({ categoria: 'cassino', nome: 'X', x: 0, z: 0 })).status).toBe(400);
+    expect((await novo({ categoria: 'quadra', nome: 'Longe', x: 9000, z: 0 })).status).toBe(400);
+    expect((await novo({ categoria: 'quadra', nome: 'Quadra', x: 0, z: 0 }, ana)).status).toBe(403); // só a gestão marca
+    expect((await novo({ categoria: 'quadra', nome: 'Quadra', x: 0, z: 0 }, concorrente)).status).toBe(404);
+    expect((await req('GET', `/predios/${torreA}/lazer`, undefined, concorrente)).status).toBe(404);
+
+    // reordenar: a academia vira o 1º ponto; a posição muda sem perder a altura
+    const mudou = await req('PATCH', `/lazer/${academia.json.id}`, { ordem: 0, x: -11 }, gestao);
+    expect(mudou.json).toMatchObject({ ordem: 0, x: -11, y: 0 });
+    await req('PATCH', `/lazer/${piscina.json.id}`, { ordem: 1 }, gestao);
+    expect((await req('PATCH', `/lazer/${piscina.json.id}`, {}, gestao)).status).toBe(400);
+    expect((await req('PATCH', `/lazer/${piscina.json.id}`, { nome: 'x' }, concorrente)).status).toBe(404);
+
+    const link = tokenDe((await novoLink(ana)).json.url);
+    const portal = (await req('GET', `/publico/links/${link}`)).json;
+    expect(portal.lazer.map((l: { nome: string }) => l.nome)).toEqual(['Academia', 'Piscina adulto']);
+    expect(portal.lazer[1]).toMatchObject({ descricao: 'Raia de 25 m, aquecida', categoria: 'piscina' });
+
+    await req('POST', `/publico/links/${link}/eventos`, { sessao: randomUUID(), eventos: [{ tipo: 'abriu' }, { tipo: 'tour_lazer' }] });
+    expect((await req('GET', `/projetos/${projeto}/numeros?dias=30`, undefined, gestao)).json.toursLazer).toBeGreaterThanOrEqual(1);
+
+    expect((await req('DELETE', `/lazer/${academia.json.id}`, undefined, ana)).status).toBe(403);
+    expect((await req('DELETE', `/lazer/${academia.json.id}`, undefined, gestao)).status).toBe(204);
+    expect((await req('DELETE', `/lazer/${academia.json.id}`, undefined, gestao)).status).toBe(404);
+    expect((await req('GET', `/predios/${torreA}/lazer`, undefined, ana)).json).toHaveLength(1);
   });
 });

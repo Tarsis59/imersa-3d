@@ -26,6 +26,7 @@ import { criarConfigurador, type Configurador, type FonteMovel, type Superficie 
 import type { Acabamento } from './configurador/padroes';
 import { ajustarPose, type PoseMovel } from './configurador/moveis';
 import { exportarUsdz, montarMaquete } from './xr/maquete';
+import { criarMarcadoresLazer, poseParaLazer, type MarcadoresLazer, type PontoLazer } from './ambiente/lazer';
 import { iniciarAr, iniciarVr, type ContextoXr, type SessaoXr, type TipoXr } from './xr/sessao';
 
 export type ModoCamera = 'orbita' | 'primeira-pessoa';
@@ -112,8 +113,14 @@ export interface Viewer {
   entrarNaUnidade(unidadeId: string): boolean;
   /** Onde está a câmera e para onde olha (tour guiado ao vivo: a consultora transmite). */
   poseCamera(): { posicao: [number, number, number]; alvo: [number, number, number] };
-  /** Minimapa: o prédio e os prédios vizinhos até 150 m (caixas no chão, eixos da cena). */
-  mapaDoLote(): { predio: Caixa; vizinhos: Caixa[] };
+  /** Minimapa: o prédio, os prédios vizinhos até 150 m (caixas no chão, eixos da cena) e os pontos do lazer. */
+  mapaDoLote(): { predio: Caixa; vizinhos: Caixa[]; lazer: Array<{ id: string; x: number; z: number }> };
+  /** Lazer do empreendimento: marcadores com o nome (piscina, academia...). Lista vazia tira os marcadores. */
+  definirLazer(pontos: readonly PontoLazer[]): void;
+  /** Voa até o ponto do lazer, com ele em destaque (tour "Conheça o lazer"). */
+  voarParaLazer(id: string): boolean;
+  /** Toque num marcador do lazer. */
+  aoSelecionarLazer(cb: ((id: string) => void) | null): void;
   /** Segue a câmera de outra pessoa (cliente no tour guiado), suave; `null` devolve o controle. */
   seguirPose(pose: { posicao: [number, number, number]; alvo: [number, number, number] } | null): void;
   /**
@@ -502,6 +509,12 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
     orbita.maxDistance = Infinity;
   }
 
+  /** Câmera nos olhos da pessoa (a tela recebe a posição certa já no aviso, sem esperar o quadro). */
+  function posicionarPessoa(): void {
+    camera.position.set(pessoa.x, pessoa.y + ALTURA_OLHOS_M, pessoa.z);
+    camera.rotation.set(pessoa.pitch, pessoa.yaw, 0, 'YXZ');
+  }
+
   function definirModo(novo: ModoCamera): void {
     sairDaVista();
     modo = novo;
@@ -516,6 +529,7 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
       const c = caixaDoPredio();
       // na calçada ao sul do prédio, olhando para ele (norte)
       Object.assign(pessoa, { x: (c.minX + c.maxX) / 2, z: c.maxZ + 6, y: 0, yaw: 0, pitch: 0.15 });
+      posicionarPessoa();
     } else {
       enquadrarPredio();
     }
@@ -559,6 +573,10 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
   const raycaster = new THREE.Raycaster();
   let cbPiso: ((p: { x: number; y: number; z: number }) => void) | null = null;
   let cbMovel: ((id: string) => void) | null = null;
+  let cbLazer: ((id: string) => void) | null = null;
+  /** Lazer do empreendimento (marcadores no 3D). */
+  let marcadores: MarcadoresLazer | null = null;
+  let pontosLazer: readonly PontoLazer[] = [];
   const normalMundo = new THREE.Vector3();
   const aoSoltar = (e: PointerEvent) => {
     const a = apertado;
@@ -572,13 +590,21 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
         cbMovel(movel);
         return;
       }
-      if (cbPiso) {
-        // primeiro acerto em peça sólida ou no chão; vale se a face estiver virada para cima (piso, laje, terreno)
-        const acerto = raycaster.intersectObjects([...solidos, chao], false).find((h) => !corteY || h.point.y <= corteY + 0.01);
-        if (acerto?.face) {
-          normalMundo.copy(acerto.face.normal).transformDirection(acerto.object.matrixWorld);
-          if (normalMundo.y > 0.7) cbPiso({ x: acerto.point.x, y: acerto.point.y, z: acerto.point.z });
-        }
+    }
+    if (cbPiso) {
+      // colocar móvel ou marcar o lazer: primeiro acerto em peça sólida, laje ou chão; vale se a face estiver virada
+      // para cima (piso, laje, terreno, terraço)
+      const acerto = raycaster.intersectObjects([...solidos, chao, ...pisosExtras], false).find((h) => !corteY || h.point.y <= corteY + 0.01);
+      if (acerto?.face) {
+        normalMundo.copy(acerto.face.normal).transformDirection(acerto.object.matrixWorld);
+        if (normalMundo.y > 0.7) cbPiso({ x: acerto.point.x, y: acerto.point.y, z: acerto.point.z });
+      }
+      return;
+    }
+    if (marcadores && cbLazer) {
+      const lazer = marcadores.idDe(raycaster.intersectObjects(marcadores.clicaveis(), false)[0]?.object ?? null);
+      if (lazer) {
+        cbLazer(lazer);
         return;
       }
     }
@@ -849,6 +875,8 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
       new Promise<Blob>((ok, erro) => alvo.toBlob((b) => (b ? ok(b) : erro(new Error('Falha ao gerar a imagem'))), tipo, q));
 
     pausado = true;
+    const comLazer = marcadores?.objeto.visible ?? false;
+    if (marcadores) marcadores.objeto.visible = false; // fora das imagens e das máscaras do giro
     const quadros: Giro['quadros'] = [];
     try {
       for (let i = 0; i < total; i++) {
@@ -909,6 +937,7 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
       orbita.target.copy(guardada.alvo);
       camera.lookAt(guardada.alvo);
       pausado = false;
+      if (marcadores) marcadores.objeto.visible = comLazer;
     }
     return { quadros, unidades, largura: w, altura: h };
   }
@@ -979,36 +1008,42 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
     } else if (modo === 'orbita') {
       orbita.update();
     } else {
-      const dt = Math.min(dtMs, 100) / 1000;
-      let entrada = entradaAtual();
-      // controle de videogame: alavanca esquerda anda, direita olha
+      // quadro longo (aparelho lento, desenho por software): anda o tempo real em passos de até 0,1 s, para não
+      // atravessar parede nem ficar parado (antes o quadro valia no máximo 0,1 s, e a pessoa quase não andava)
+      const total = Math.min(dtMs, 1000) / 1000;
+      const passos = Math.max(1, Math.ceil(total / 0.1));
+      const dt = total / passos;
       const controle = navigator.getGamepads?.().find((g) => g?.connected);
-      if (controle) {
-        const c = entradaDoControle(controle.axes);
-        entrada = { frente: entrada.frente + c.andar.frente, lado: entrada.lado + c.andar.lado };
-        pessoa.yaw -= c.girar * dt * 2.2;
-        pessoa.pitch = THREE.MathUtils.clamp(pessoa.pitch - c.inclinar * dt * 1.6, -1.2, 1.2);
+      for (let passo = 0; passo < passos; passo++) {
+        let entrada = entradaAtual();
+        // controle de videogame: alavanca esquerda anda, direita olha
+        if (controle) {
+          const c = entradaDoControle(controle.axes);
+          entrada = { frente: entrada.frente + c.andar.frente, lado: entrada.lado + c.andar.lado };
+          pessoa.yaw -= c.girar * dt * 2.2;
+          pessoa.pitch = THREE.MathUtils.clamp(pessoa.pitch - c.inclinar * dt * 1.6, -1.2, 1.2);
+        }
+        // tocar no chão para ir: só enquanto ninguém usa teclado, joystick ou controle
+        if (entrada.frente !== 0 || entrada.lado !== 0) alvoCaminhada = null;
+        else if (alvoCaminhada) {
+          const r = rumoAoAlvo(pessoa, alvoCaminhada, dt);
+          pessoa.yaw = r.yaw;
+          entrada = r.entrada;
+          if (r.chegou) alvoCaminhada = null;
+        }
+        if (entrada.frente === 0 && entrada.lado === 0 && passo > 0) break; // parado: nada mais a simular
+        const antes = { x: pessoa.x, z: pessoa.z };
+        Object.assign(pessoa, passoPrimeiraPessoa(pessoa, entrada, dt, { velocidade: VELOCIDADE_M_S, bloqueado: (de, para) => bloqueado(de, para) || bloqueadoCidade(de, para) }));
+        // preso (parede no caminho do toque): desiste em 0,6 s
+        if (alvoCaminhada && entrada.frente > 0) {
+          paradoMs = pessoa.x === antes.x && pessoa.z === antes.z ? paradoMs + dt * 1000 : 0;
+          if (paradoMs > 600) alvoCaminhada = null;
+        }
+        // os pés seguem o piso: sobe escada e rampa, desce suave
+        const piso = seguirPiso(pessoa.y, pessoa.x, pessoa.z, alturaDoPiso);
+        pessoa.y = piso > pessoa.y ? piso : pessoa.y + (piso - pessoa.y) * Math.min(1, dt * 10);
       }
-      // tocar no chão para ir: só enquanto ninguém usa teclado, joystick ou controle
-      if (entrada.frente !== 0 || entrada.lado !== 0) alvoCaminhada = null;
-      else if (alvoCaminhada) {
-        const r = rumoAoAlvo(pessoa, alvoCaminhada, dt);
-        pessoa.yaw = r.yaw;
-        entrada = r.entrada;
-        if (r.chegou) alvoCaminhada = null;
-      }
-      const antes = { x: pessoa.x, z: pessoa.z };
-      Object.assign(pessoa, passoPrimeiraPessoa(pessoa, entrada, dt, { velocidade: VELOCIDADE_M_S, bloqueado: (de, para) => bloqueado(de, para) || bloqueadoCidade(de, para) }));
-      // preso (parede no caminho do toque): desiste em 0,6 s
-      if (alvoCaminhada && entrada.frente > 0) {
-        paradoMs = pessoa.x === antes.x && pessoa.z === antes.z ? paradoMs + dtMs : 0;
-        if (paradoMs > 600) alvoCaminhada = null;
-      }
-      // os pés seguem o piso: sobe escada e rampa, desce suave
-      const piso = seguirPiso(pessoa.y, pessoa.x, pessoa.z, alturaDoPiso);
-      pessoa.y = piso > pessoa.y ? piso : pessoa.y + (piso - pessoa.y) * Math.min(1, dt * 10);
-      camera.position.set(pessoa.x, pessoa.y + ALTURA_OLHOS_M, pessoa.z);
-      camera.rotation.set(pessoa.pitch, pessoa.yaw, 0, 'YXZ');
+      posicionarPessoa();
     }
 
     atualizarRaioX(modo === 'orbita' && !emVista ? orbita.target : null);
@@ -1066,6 +1101,7 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
       sairDaVista();
       if (modo !== 'orbita') definirModo('orbita');
       orbita.enabled = false;
+      marcadores?.destacar(null);
       voo = {
         trajeto: planejarVoo({ posicao: camera.position.clone(), alvo: orbita.target.clone() }, enquadrar(p.caixa, camera.fov, camera.aspect || 1, 20, 2.3)), // unidade com as vizinhas em volta
         inicio: performance.now(),
@@ -1095,7 +1131,32 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
       const cx = (predio.minX + predio.maxX) / 2;
       const cz = (predio.minZ + predio.maxZ) / 2;
       const vizinhos = obstaculos.filter((o) => Math.hypot((o.minX + o.maxX) / 2 - cx, (o.minZ + o.maxZ) / 2 - cz) < 150);
-      return { predio, vizinhos };
+      return { predio, vizinhos, lazer: pontosLazer.map((p) => ({ id: p.id, x: p.x, z: p.z })) };
+    },
+    definirLazer(pontos) {
+      if (marcadores) {
+        cena.remove(marcadores.objeto);
+        marcadores.destruir();
+        marcadores = null;
+      }
+      pontosLazer = [...pontos];
+      if (!pontos.length) return;
+      marcadores = criarMarcadoresLazer(pontos);
+      cena.add(marcadores.objeto);
+    },
+    voarParaLazer(id) {
+      const p = pontosLazer.find((x) => x.id === id);
+      if (!p) return false;
+      sairDaVista();
+      if (modo !== 'orbita') definirModo('orbita');
+      orbita.enabled = false;
+      const c = caixaDoPredio();
+      voo = { trajeto: planejarVoo({ posicao: camera.position.clone(), alvo: orbita.target.clone() }, poseParaLazer(p, { x: (c.minX + c.maxX) / 2, z: (c.minZ + c.maxZ) / 2 })), inicio: performance.now() };
+      marcadores?.destacar(id);
+      return true;
+    },
+    aoSelecionarLazer(cb) {
+      cbLazer = cb;
     },
     poseCamera() {
       const alvo = modo === 'orbita' ? orbita.target.clone() : camera.getWorldDirection(new THREE.Vector3()).multiplyScalar(5).add(camera.position);
@@ -1129,9 +1190,12 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
       const recuo = face ? 1.2 : 0;
       const y = solidos.length ? (alturaDoPiso(x, z, c.maxY - 0.2) ?? c.minY) : c.minY;
       Object.assign(pessoa, { x: x - (face?.normal.x ?? 0) * recuo, z: z - (face?.normal.z ?? 0) * recuo, y, yaw, pitch: -0.2 });
+      posicionarPessoa();
       interior = id;
       selecionada = id;
       pintar();
+      ultimoAviso = 0;
+      avisar(performance.now()); // a tela já recebe a posição dentro da unidade
       return true;
     },
     vistaDaUnidade(id) {
@@ -1162,6 +1226,7 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
     },
     visaoGeral() {
       orbita.autoRotate = false;
+      marcadores?.destacar(null);
       sairDaVista();
       if (modo !== 'orbita') definirModo('orbita');
       voo = null;
@@ -1319,6 +1384,7 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
       csm.dispose();
       atmosfera.destruir();
       paisagismo?.destruir();
+      marcadores?.destruir();
       cena.traverse((o) => {
         if (o instanceof THREE.Mesh) o.geometry.dispose();
       });

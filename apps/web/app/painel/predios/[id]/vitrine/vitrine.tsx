@@ -1,7 +1,7 @@
 'use client';
 import { useEffect, useMemo, useRef, useState, type PointerEvent as EventoPonteiro } from 'react';
 import { criarViewer, filtrar, suporteImersivo, type SuporteImersivo, type Caixa, type Clima, type EstudoSolar, type PeriodoDeSol, type Giro, filtroVazio, pontoCardeal, vetorJoystick, type EstadoViewer, type Filtro, type UnidadeViewer, type Viewer } from '@imersa/viewer';
-import type { StatusUnidade } from '@/lib/tipos';
+import type { ItemLazer, StatusUnidade } from '@/lib/tipos';
 import { Botao, Campo, Cartao, Selecao } from '@/components/ui';
 import { alternarFavorito, lerFavoritos, salvarFavoritos } from '@/lib/favoritos';
 import { brl, COR_STATUS, ROTULO_STATUS, STATUS_UNIDADE } from '@/lib/tipos';
@@ -12,6 +12,8 @@ import { InteriorSplat } from './interior';
 import { Giro360 } from './giro';
 import { Assistente, type AcaoAssistente } from './assistente';
 import { SimuladorFinanciamento } from './simulador';
+import { CartaoLazer, PainelDoPonto, passoDoTourMs, rotuloDoPonto, type EstadoTour } from './lazer';
+import type { NovoLazer } from './actions';
 
 const ROTULO_NIVEL = { alto: 'alta', medio: 'média', baixo: 'baixa' } as const;
 const ROTULO_SOL: Record<PeriodoDeSol, string> = { manha: 'Sol da manhã', tarde: 'Sol da tarde', 'dia-todo': 'Sol o dia todo', 'pouco-sol': 'Pouco sol direto' };
@@ -48,7 +50,7 @@ function alternar<T>(lista: T[], x: T): T[] {
 }
 
 /** O que o visitante fez, para os números de vendas (portal público). */
-export type EventoVitrine = { tipo: 'unidade' | 'favorito'; unidadeId: string } | { tipo: 'interior' };
+export type EventoVitrine = { tipo: 'unidade' | 'favorito'; unidadeId: string } | { tipo: 'interior' } | { tipo: 'tour_lazer' };
 
 type EstadoEntorno = { tipo: 'carregando' } | { tipo: 'pronto'; predios: number; atribuicao: string } | { tipo: 'sem_localizacao' } | { tipo: 'indisponivel' };
 
@@ -76,6 +78,8 @@ export function Vitrine({
   aoPedirContato,
   estande = null,
   linksParaConduzir = [],
+  lazer = [],
+  gerirLazer = null,
 }: {
   predioId: string;
   projetoId: string;
@@ -115,6 +119,10 @@ export function Vitrine({
   estande?: { apresentando: boolean; reinicio: number } | null;
   /** Painel: links ativos de clientes que a consultora pode conduzir ao vivo (a câmera do cliente segue a dela). */
   linksParaConduzir?: Array<{ id: string; titulo: string | null }>;
+  /** Lazer do empreendimento marcado no 3D, na ordem do tour. */
+  lazer?: ItemLazer[];
+  /** Gestão: marcar e remover pontos do lazer (no painel). */
+  gerirLazer?: { criar: (d: NovoLazer) => Promise<{ item?: ItemLazer; erro?: string }>; remover: (id: string) => Promise<{ erro?: string }> } | null;
 }) {
   const canvas = useRef<HTMLCanvasElement>(null);
   const coluna = useRef<HTMLDivElement>(null);
@@ -153,6 +161,12 @@ export function Vitrine({
   const [usdz, setUsdz] = useState<string | null>(null);
   const [erroImersivo, setErroImersivo] = useState<string | null>(null);
   const sobreposicaoAr = useRef<HTMLDivElement>(null);
+  // lazer: pontos no 3D, o tour "Conheça o lazer" e (gestão) a marcação clicando no 3D
+  const [itensLazer, setItensLazer] = useState<ItemLazer[]>(lazer);
+  const [pontoLazer, setPontoLazer] = useState<string | null>(null);
+  const [tour, setTour] = useState<EstadoTour | null>(null);
+  const [marcandoLazer, setMarcandoLazer] = useState<Omit<NovoLazer, 'x' | 'y' | 'z'> | null>(null);
+  const [erroLazer, setErroLazer] = useState<string | null>(null);
 
   // depois da hidratação: o servidor não conhece o navegador de quem vê
   useEffect(() => setFavoritos(lerFavoritos(predioId)), [predioId]);
@@ -190,6 +204,74 @@ export function Vitrine({
   useEffect(() => {
     if (emImersivo !== 'ar' && sobreposicaoAr.current) sobreposicaoAr.current.hidden = true;
   }, [emImersivo]);
+  // lazer no 3D: marcadores com o nome; tocar num marcador voa até ele
+  useEffect(() => {
+    if (estado !== 'pronto') return;
+    viewer.current?.definirLazer(itensLazer.map((l) => ({ id: l.id, x: l.x, y: l.y, z: l.z, rotulo: rotuloDoPonto(l) })));
+  }, [estado, itensLazer]);
+  useEffect(() => {
+    if (estado !== 'pronto') return;
+    viewer.current?.aoSelecionarLazer((id) => {
+      viewer.current?.voarParaLazer(id);
+      setPontoLazer(id);
+    });
+  }, [estado]);
+  // gestão: o próximo clique no 3D (chão, laje ou terraço) marca o espaço
+  useEffect(() => {
+    const v = viewer.current;
+    if (!v || estado !== 'pronto' || !gerirLazer || !marcandoLazer) return;
+    const d = marcandoLazer;
+    const cm = (n: number) => Math.round(n * 100) / 100;
+    v.aoClicarPiso((ponto) => {
+      setMarcandoLazer(null);
+      void gerirLazer.criar({ ...d, x: cm(ponto.x), y: cm(ponto.y), z: cm(ponto.z) }).then((r) => {
+        if (r.item) {
+          setItensLazer((l) => [...l, r.item!]);
+          setErroLazer(null);
+        } else setErroLazer(r.erro ?? 'Não foi possível salvar o ponto agora.');
+      });
+    });
+    return () => v.aoClicarPiso(null);
+  }, [marcandoLazer, estado, gerirLazer]);
+  const removerPontoLazer = async (id: string) => {
+    if (!gerirLazer) return;
+    const r = await gerirLazer.remover(id);
+    if (r.erro) return setErroLazer(r.erro);
+    setErroLazer(null);
+    setItensLazer((l) => l.filter((x) => x.id !== id));
+    setPontoLazer((p) => (p === id ? null : p));
+  };
+  // tour "Conheça o lazer em 2 min": um ponto de cada vez (sozinho ou no "Próximo"), checklist e evento no fim
+  const tourRef = useRef(tour);
+  tourRef.current = tour;
+  const irAoPontoLazer = (indice: number, emTour: boolean) => {
+    const item = itensLazer[indice];
+    if (!item) return;
+    setVista(null);
+    setInterior(null);
+    viewer.current?.voarParaLazer(item.id);
+    setPontoLazer(item.id);
+    if (emTour) setTour((t) => ({ indice, vistos: t?.vistos.includes(item.id) ? t.vistos : [...(t?.vistos ?? []), item.id], completo: false }));
+  };
+  const proximoDoTour = () => {
+    const t = tourRef.current;
+    if (!t || t.completo) return;
+    if (t.indice + 1 < itensLazer.length) return irAoPontoLazer(t.indice + 1, true);
+    setTour({ ...t, completo: true });
+    setPontoLazer(null);
+    aoEvento?.({ tipo: 'tour_lazer' });
+  };
+  useEffect(() => {
+    if (!tour || tour.completo) return;
+    const id = setTimeout(proximoDoTour, passoDoTourMs(itensLazer.length));
+    return () => clearTimeout(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tour?.indice, tour?.completo]);
+  const encerrarLazer = () => {
+    setTour(null);
+    setPontoLazer(null);
+    viewer.current?.visaoGeral();
+  };
   const entrarEmVr = async () => {
     setErroImersivo(null);
     if (!(await viewer.current?.entrarEmVr())) setErroImersivo('O óculos não abriu a visita. Confira se ele está ligado e se o navegador dele tem permissão para VR.');
@@ -564,6 +646,8 @@ export function Vitrine({
         data-elevador={elevador ? String(elevador.atual) : ''}
         data-acabamento={telemetria?.acabamento ? 'ligado' : 'desligado'}
         data-imersivo={emImersivo ?? ''}
+        data-lazer={itensLazer.length}
+        data-marcando-lazer={marcandoLazer ? 'sim' : ''}
         data-apresentacao={apresentando ? 'ligada' : 'desligada'}
         data-unidade-da-vez={vitrineDaVez ?? ''}
         className={`relative ${estande ? 'h-[calc(100dvh-7rem)]' : 'h-[70vh]'} min-h-96 overflow-hidden rounded-2xl border border-borda bg-fundo lg:sticky lg:top-6`}
@@ -574,6 +658,9 @@ export function Vitrine({
           aria-label="Prédio em 3D. Arraste para girar, role para aproximar, toque numa unidade para ver os detalhes."
         />
         {estado === 'carregando' && <p className="absolute inset-0 grid place-items-center text-suave">Carregando o 3D…</p>}
+        {(tour || pontoLazer) && !conducao?.ativo && (
+          <PainelDoPonto item={itensLazer.find((l) => l.id === pontoLazer) ?? null} tour={tour} total={itensLazer.length} aoProximo={proximoDoTour} aoEncerrar={encerrarLazer} />
+        )}
         {conducao?.ativo && (
           <div className="pointer-events-none absolute inset-x-0 top-3 z-10 flex justify-center px-16">
             <div className="pointer-events-auto flex flex-wrap items-center justify-center gap-2 rounded-2xl bg-acento px-3 py-1.5 text-center text-sm text-acento-texto shadow" role="status">
@@ -920,6 +1007,25 @@ export function Vitrine({
           </Cartao>
         )}
 
+        <CartaoLazer
+          itens={itensLazer}
+          pronto={estado === 'pronto'}
+          tour={tour}
+          aoIr={(id) => irAoPontoLazer(itensLazer.findIndex((l) => l.id === id), false)}
+          aoComecarTour={() => {
+            setTour({ indice: 0, vistos: [], completo: false });
+            irAoPontoLazer(0, true);
+          }}
+          gerir={gerirLazer !== null}
+          marcando={marcandoLazer !== null}
+          aoMarcar={(d) => {
+            setErroLazer(null);
+            setMarcandoLazer(d);
+          }}
+          aoCancelarMarcacao={() => setMarcandoLazer(null)}
+          aoRemover={(id) => void removerPontoLazer(id)}
+          erro={erroLazer}
+        />
         <Cartao titulo="Vista">
           <div className="grid gap-4 text-sm">
             <p data-testid="aviso-entorno" className="text-suave">
@@ -1062,7 +1168,7 @@ function Apresentacao({ unidade, nomeAndar }: { unidade: UnidadeViewer | null; n
 }
 
 /** Minimapa (primeira pessoa): o prédio, os vizinhos reais e você, com a seta para onde olha. */
-function Minimapa({ mapa, posicao, direcao }: { mapa: { predio: Caixa; vizinhos: Caixa[] }; posicao: { x: number; z: number }; direcao: { x: number; z: number } }) {
+function Minimapa({ mapa, posicao, direcao }: { mapa: { predio: Caixa; vizinhos: Caixa[]; lazer: Array<{ id: string; x: number; z: number }> }; posicao: { x: number; z: number }; direcao: { x: number; z: number } }) {
   const p = mapa.predio;
   const meio = { x: (p.minX + p.maxX) / 2, z: (p.minZ + p.maxZ) / 2 };
   const alcance = Math.max(p.maxX - p.minX, p.maxZ - p.minZ) / 2 + 35; // metros do centro até a borda do mapa
@@ -1078,6 +1184,9 @@ function Minimapa({ mapa, posicao, direcao }: { mapa: { predio: Caixa; vizinhos:
     <svg data-testid="minimapa" width={L} height={L} viewBox={`0 0 ${L} ${L}`} className="absolute bottom-9 right-3 rounded-xl border border-white/40 bg-slate-900/70 shadow" role="img" aria-label="Minimapa: você está no ponto azul">
       {mapa.vizinhos.map((c, i) => caixa(c, '#64748b', `v${i}`))}
       {caixa(p, '#e2e8f0', 'predio')}
+      {mapa.lazer.map((l) => (
+        <circle key={l.id} cx={Math.min(L - 4, Math.max(4, px(l.x)))} cy={Math.min(L - 4, Math.max(4, pz(l.z)))} r={3.5} fill="#f59e0b" />
+      ))}
       <circle cx={x} cy={y} r={5} fill="#0ea5e9" stroke="#fff" strokeWidth={2} />
       <line x1={x} y1={y} x2={x + direcao.x * 14} y2={y + direcao.z * 14} stroke="#0ea5e9" strokeWidth={3} strokeLinecap="round" />
     </svg>

@@ -7,7 +7,7 @@ import { conferir, inicial, tocar, type EstadoEstande } from '@/lib/estande';
 import type { Portal } from '@/lib/tipos';
 import type { DadosSinal, enviarSinal } from './actions';
 
-type EventoApi = { tipo: 'abriu' | 'unidade' | 'favorito' | 'interior' | 'tempo'; unidadeId?: string; duracaoS?: number };
+type EventoApi = { tipo: 'abriu' | 'unidade' | 'favorito' | 'interior' | 'tempo' | 'tour_lazer'; unidadeId?: string; duracaoS?: number };
 /** O PC do estande fica dias ligado: recarrega (memória limpa, versão nova do site) quando está só apresentando. */
 const RECARGA_H = 12;
 
@@ -287,6 +287,7 @@ export function TelaEstande({
           lat={portal.projeto.lat}
           lon={portal.projeto.lon}
           interiores={portal.interiores}
+          lazer={portal.lazer}
           giroRenderizado={portal.giro}
           assistenteUrl={portal.assistenteUrl}
           carregarEntorno={carregarEntorno}

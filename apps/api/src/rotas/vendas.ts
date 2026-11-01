@@ -159,9 +159,10 @@ export function rotasVendas(app: FastifyInstance, { pool, exigir, webUrl }: Depe
         )`;
       const p = [id, dela, dias];
       const t = (
-        await c.query<{ visitas: number; interiores: number; tempo: number | null; leads: number }>(
+        await c.query<{ visitas: number; interiores: number; toursLazer: number; tempo: number | null; leads: number }>(
           `${base} SELECT (SELECT count(*)::int FROM ev WHERE tipo = 'abriu') AS visitas,
                           (SELECT count(*)::int FROM ev WHERE tipo = 'interior') AS interiores,
+                          (SELECT count(*)::int FROM ev WHERE tipo = 'tour_lazer') AS "toursLazer",
                           (SELECT avg(duracao_s)::float8 FROM ev WHERE tipo = 'tempo') AS tempo,
                           (SELECT count(*)::int FROM ld) AS leads`,
           p,
@@ -192,6 +193,7 @@ export function rotasVendas(app: FastifyInstance, { pool, exigir, webUrl }: Depe
         dias,
         visitas: t.visitas,
         interiores: t.interiores,
+        toursLazer: t.toursLazer,
         tempoMedioS: t.tempo === null ? null : Math.round(t.tempo),
         leads: t.leads,
         conversao: t.visitas ? t.leads / t.visitas : 0,
