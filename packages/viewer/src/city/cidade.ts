@@ -126,7 +126,8 @@ export function terrenoDoRelevo(relevo: RelevoEntorno | null | undefined, centro
 }
 
 const LARGURA_CALCADA: Record<TipoVia, number> = { principal: 3, secundaria: 2.5, local: 2, servico: 0, pedestre: 0 };
-const PASSO_FAIXA_M = 6;
+/** Pontos da fita a cada ~10 m: acompanha o relevo (grade de ~16 m) sem pesar no celular. */
+const PASSO_FAIXA_M = 10;
 
 interface Faixa {
   pontos: Xz[];
@@ -422,7 +423,8 @@ export function criarCidade(
     });
     malhasArvores = [troncos, copas];
     for (const m of malhasArvores) {
-      m.castShadow = true;
+      // árvore de rua não projeta sombra (centenas delas): só recebe; as do lote (paisagismo) projetam
+      m.castShadow = false;
       m.receiveShadow = true;
       m.instanceMatrix.needsUpdate = true;
       m.computeBoundingSphere();

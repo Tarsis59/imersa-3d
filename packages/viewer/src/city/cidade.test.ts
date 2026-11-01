@@ -61,8 +61,8 @@ describe('geometrias', () => {
     const g = fita({ pontos: [{ x: 0, z: 0 }, { x: 60, z: 0 }, { x: 60, z: 40 }], largura: 8 }, (x) => x / 10, 0.07)!;
     expect(normalMedia(g)).toBeGreaterThan(0.9);
     const p = g.attributes.position as THREE.BufferAttribute;
-    // pontos a cada ~6 m (não só nos vértices do OSM)
-    expect(p.count).toBeGreaterThan(30);
+    // pontos a cada ~10 m (não só nos 3 vértices do OSM): 100 m de rua viram 11 pares de pontos
+    expect(p.count).toBe(22);
     for (let i = 0; i < p.count; i++) expect(p.getY(i)).toBeCloseTo(p.getX(i) / 10 + 0.07, 5);
   });
 
