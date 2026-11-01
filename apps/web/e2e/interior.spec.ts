@@ -60,10 +60,20 @@ test('interior real (splat) abre sob demanda na Vitrine, sem pesar a carga inici
   const novos = (await scripts(page)).filter((s) => !antes.has(s));
   expect(novos.length).toBeGreaterThan(0);
 
+  await expect(interior).toHaveAttribute('data-lod', 'nao'); // splat pequeno: carrega inteiro
+
   await page.getByRole('button', { name: 'Virar imagem' }).click();
   await page.getByRole('button', { name: '← Voltar ao prédio' }).click();
   await expect(interior).toHaveCount(0);
   await expect(page.getByTestId('vitrine-3d')).toHaveAttribute('data-estado', 'pronto');
+
+  // splat grande (a partir de 1 milhão de pontos) ganha a árvore de nível de detalhe do Spark; ?lod=sempre força
+  // a mesma árvore neste splat pequeno, para conferir o caminho inteiro (montagem no worker e desenho)
+  await page.goto(`${page.url()}?lod=sempre`);
+  await expect(page.getByTestId('vitrine-3d')).toHaveAttribute('data-estado', 'pronto', { timeout: 45_000 });
+  await page.getByRole('button', { name: 'Ver interior: sala-teste.splat' }).click();
+  await expect(interior).toHaveAttribute('data-estado', 'pronto', { timeout: 60_000 });
+  await expect(interior).toHaveAttribute('data-lod', 'sim');
 });
 
 test('splats gerados pelo pipeline de reconstrução (SOG e SPZ, via splat-transform) abrem no interior', async ({ page, request }) => {

@@ -16,6 +16,7 @@ export function InteriorSplat({
   const canvas = useRef<HTMLCanvasElement>(null);
   const interior = useRef<Interior | null>(null);
   const [estado, setEstado] = useState<'carregando' | 'pronto' | 'erro'>('carregando');
+  const [comLod, setComLod] = useState(false);
 
   useEffect(() => {
     let vivo = true;
@@ -24,10 +25,16 @@ export function InteriorSplat({
       const el = canvas.current;
       if (!vivo || !el) return;
       if (!url) return setEstado('erro');
-      aberto = abrirInterior(el, { url, nomeArquivo: arquivo.nome });
+      // ?lod=sempre: árvore de nível de detalhe mesmo em splat pequeno (conferência e testes)
+      const lodAcima = new URLSearchParams(window.location.search).get('lod') === 'sempre' ? 0 : undefined;
+      aberto = abrirInterior(el, { url, nomeArquivo: arquivo.nome, lodAcima });
       interior.current = aberto;
       aberto.pronto.then(
-        () => vivo && setEstado('pronto'),
+        () => {
+          if (!vivo) return;
+          setComLod(aberto?.comLod() ?? false);
+          setEstado('pronto');
+        },
         () => vivo && setEstado('erro'),
       );
     });
@@ -41,7 +48,7 @@ export function InteriorSplat({
   }, [arquivo.id, arquivo.nome]);
 
   return (
-    <div data-testid="interior" data-estado={estado} className="absolute inset-0 z-10 bg-black">
+    <div data-testid="interior" data-estado={estado} data-lod={comLod ? 'sim' : 'nao'} className="absolute inset-0 z-10 bg-black">
       <canvas ref={canvas} className="block h-full w-full touch-none" aria-label={`Interior real: ${arquivo.nome}. WASD ou setas para andar, arraste para olhar.`} />
       {estado === 'carregando' && <p className="absolute inset-0 grid place-items-center text-white">Carregando o interior…</p>}
       {estado === 'erro' && <p className="absolute inset-0 grid place-items-center text-red-300">Não foi possível abrir o interior.</p>}
