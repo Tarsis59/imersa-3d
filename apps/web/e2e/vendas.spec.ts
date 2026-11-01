@@ -105,32 +105,31 @@ test('vendas: link pelo WhatsApp → cliente no celular (sem login) → pedido d
   // fechar a aba: o tempo de visita e a unidade vista saem pelo sendBeacon (pagehide)
   await cliente.close({ runBeforeUnload: true });
 
-  // painel: lead com a unidade e a mensagem (espera a atualização da página depois da mudança de status)
-  await page.waitForLoadState('networkidle');
-  // a página do espelho ainda pode estar se atualizando (status ao vivo): uma navegação no meio é abortada; tenta de novo
-  await expect(async () => {
-    await page.goto('/painel/leads', { waitUntil: 'commit', timeout: 15_000 });
-  }).toPass({ timeout: 60_000 });
-  const lead = page.getByTestId('lista-leads').getByRole('listitem').filter({ hasText: 'Carla Mendes' });
+  // painel: lead com a unidade e a mensagem. Numa aba nova (processo próprio): a aba do espelho pode estar no meio
+  // da atualização depois da mudança de status, e no CI uma navegação nela às vezes ficava presa
+  const painel = await page.context().newPage();
+  await page.close();
+  await painel.goto('/painel/leads', { timeout: 120_000 });
+  const lead = painel.getByTestId('lista-leads').getByRole('listitem').filter({ hasText: 'Carla Mendes' });
   await expect(lead).toContainText('unidade 102');
   await expect(lead).toContainText('Posso visitar no sábado?');
   await expect(lead.getByRole('link', { name: 'WhatsApp' })).toHaveAttribute('href', 'https://wa.me/5511977776666');
   await lead.getByLabel('Situação de Carla Mendes').selectOption('em_contato');
-  await expect(page.getByTestId('lista-leads').getByRole('listitem').filter({ hasText: 'Carla Mendes' })).toHaveAttribute('data-status-lead', 'em_contato');
+  await expect(painel.getByTestId('lista-leads').getByRole('listitem').filter({ hasText: 'Carla Mendes' })).toHaveAttribute('data-status-lead', 'em_contato');
 
   // números do empreendimento
-  await page.goto(`${projetoUrl}/numeros`);
+  await painel.goto(`${projetoUrl}/numeros`);
   await expect
     .poll(
       async () => {
-        await page.reload();
-        return `${await page.getByTestId('numeros-visitas').textContent()}/${await page.getByTestId('numeros-leads').textContent()}`;
+        await painel.reload();
+        return `${await painel.getByTestId('numeros-visitas').textContent()}/${await painel.getByTestId('numeros-leads').textContent()}`;
       },
       { timeout: 30_000, intervals: [1_000] },
     )
     .toBe('1/1');
-  await expect(page.getByTestId('numeros-consultoras')).toContainText('Admin E2E');
-  await expect(page.getByTestId('numeros-unidades')).toContainText('102');
+  await expect(painel.getByTestId('numeros-consultoras')).toContainText('Admin E2E');
+  await expect(painel.getByTestId('numeros-unidades')).toContainText('102');
   await celular.close();
 
   // CRM: o webhook do lead chega assinado (o worker entrega), e a API com chave devolve o lead
@@ -144,11 +143,11 @@ test('vendas: link pelo WhatsApp → cliente no celular (sem login) → pedido d
   crm.close();
 
   // desativar o link: o cliente vê o aviso
-  await page.goBack();
-  await page.goto(projetoUrl);
-  await page.getByRole('link', { name: /ver espelho de vendas/ }).click();
-  await page.getByTestId('lista-links').getByRole('button', { name: 'Desativar' }).click();
-  await expect(page.getByTestId('lista-links').getByRole('listitem').first()).toHaveAttribute('data-status-link', 'revogado');
+  await painel.goBack();
+  await painel.goto(projetoUrl);
+  await painel.getByRole('link', { name: /ver espelho de vendas/ }).click();
+  await painel.getByTestId('lista-links').getByRole('button', { name: 'Desativar' }).click();
+  await expect(painel.getByTestId('lista-links').getByRole('listitem').first()).toHaveAttribute('data-status-link', 'revogado');
   const depois = await browser.newPage();
   await depois.goto(link);
   await expect(depois.getByRole('heading', { name: 'Este link não está mais disponível' })).toBeVisible();
