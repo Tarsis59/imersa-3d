@@ -17,7 +17,7 @@ import { entornoParaLocal, type Entorno } from './city/entorno';
 import { criarCidade, terrenoDoRelevo, type CidadeCompleta } from './city/cidade';
 import { montarDecorado, planejarDecorado, type Decorado, type EstiloDecorado } from './interior/decorado';
 import { criarQuadros, planejarQuadros, type FotoNoLugar, type QuadrosDeFoto } from './ambiente/fotos';
-import { cameraAtrasDoOmbro, criarBoneco, presetBoneco, type Boneco } from './cameras/boneco';
+import { cameraAtrasDoOmbro, CORRETORA, criarBoneco, presetBoneco, type Boneco } from './cameras/boneco';
 import { alturaDoCorte, planoDeCorte } from './units/corte';
 import { COR_UNIDADE, type Caixa, type StatusUnidade, type UnidadeViewer } from './units/tipos';
 import { planejarVoo, enquadrar, type Pose } from './cameras/voo';
@@ -76,6 +76,8 @@ export interface EstadoViewer {
   som: boolean;
   /** Móveis do apartamento decorado em que a pessoa está (0 = fora, ou unidade sem decorado). */
   decorado: number;
+  /** Corretora virtual na tela (e se está falando). */
+  corretora: 'fora' | 'parada' | 'falando';
   /** Modo jogo: câmera atrás do boneco (terceira pessoa). */
   terceiraPessoa: boolean;
   /** Boneco escolhido. */
@@ -158,6 +160,11 @@ export interface Viewer {
   definirCorrida(ligada: boolean): void;
   /** O boneco acena por 2 s (visita em grupo, corretora virtual). */
   acenar(): void;
+  /**
+   * Corretora virtual: personagem na calçada em frente à unidade (ou à entrada do prédio, sem unidade), virada para
+   * a câmera; acena enquanto `falando`. `null` tira a corretora.
+   */
+  mostrarCorretora(c: { unidadeId: string | null; falando: boolean } | null): void;
   /** Fotos do imóvel com GPS: quadros no 3D onde foram tiradas. Devolve quantos quadros ficaram (perto do prédio). */
   definirFotos(fotos: readonly FotoNoLugar[]): number;
   /** Põe a imagem (link assinado) no quadro da foto. */
@@ -618,6 +625,9 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
   let andadoQuadro = 0;
   let tempoQuadro = 0;
   const raioCamera = new THREE.Raycaster();
+  let corretora: Boneco | null = null;
+  let corretoraFalando = false;
+  let corretoraPos = { x: 0, z: 0 };
   function garantirBoneco(): Boneco {
     if (!boneco) {
       boneco = criarBoneco(presetBoneco(presetId), (m) => prepararMaterial(m));
@@ -1185,6 +1195,7 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
       moradores: pessoas?.objeto.visible ? (pessoas.objeto.children[0] as THREE.InstancedMesh).count : 0,
       som: som.ligado(),
       decorado: decorado?.moveis ?? 0,
+      corretora: !corretora || !corretora.objeto.visible ? 'fora' : corretoraFalando ? 'falando' : 'parada',
       terceiraPessoa,
       boneco: presetId,
       noAr,
@@ -1294,6 +1305,10 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
     }
 
     atualizarRaioX(modo === 'orbita' && !emVista ? orbita.target : null);
+    if (corretora?.objeto.visible) {
+      const yaw = Math.atan2(-(camera.position.x - corretoraPos.x), -(camera.position.z - corretoraPos.z));
+      corretora.atualizar({ x: corretoraPos.x, y: 0, z: corretoraPos.z, yaw }, { distancia: 0, velocidade: 0, noAr: false, acenando: corretoraFalando ? 1 : 0 }, agora / 1000, menosMovimento);
+    }
     atmosfera.quadro(camera, config.qualidadeFixa || menosMovimento ? 0 : agora / 1000); // qualidade fixa = cena determinística (nuvens paradas)
     pessoas?.quadro(agora / 1000);
     som.quadro(camera, agora / 1000, luzNoturna < 0.5);
@@ -1437,6 +1452,26 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
     },
     acenar() {
       acenarAte = performance.now() + 2000;
+    },
+    mostrarCorretora(c) {
+      if (!c) {
+        if (corretora) corretora.objeto.visible = false;
+        corretoraFalando = false;
+        ultimoAviso = 0;
+        return;
+      }
+      if (!corretora) {
+        corretora = criarBoneco(CORRETORA, (m) => prepararMaterial(m));
+        cena.add(corretora.objeto);
+      }
+      corretora.objeto.visible = true;
+      corretoraFalando = c.falando;
+      // na calçada da frente (+z, a entrada), alinhada com a unidade de que se fala
+      const lote = caixaDoPredio();
+      const u = c.unidadeId ? pecas.get(c.unidadeId)?.caixa : null;
+      const x = u ? THREE.MathUtils.clamp((u.minX + u.maxX) / 2, lote.minX + 1, lote.maxX - 1) : (lote.minX + lote.maxX) / 2 + 1.5;
+      corretoraPos = { x, z: lote.maxZ + 3.5 };
+      ultimoAviso = 0;
     },
     definirFotos(fotos) {
       fotosNoLugar = [...fotos];

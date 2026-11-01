@@ -34,17 +34,27 @@ test('assistente com IA: pergunta no painel destaca e voa até a unidade; no lin
 
   // painel: sugestão de pergunta → resposta em fluxo com os preços reais → só as de 3 quartos disponíveis em destaque
   const chat = page.getByTestId('assistente');
+  // corretora virtual: aparece no 3D (e lê as respostas em voz alta)
+  await page.getByLabel(/Corretora virtual/).check();
+  await expect(vitrine).not.toHaveAttribute('data-corretora', 'fora');
   await chat.getByRole('button', { name: 'Quais unidades de 3 quartos estão disponíveis?' }).click();
   const resposta = chat.locator('[data-papel="assistente"]').last();
   await expect(resposta).toHaveText(/^Encontrei 1 unidade: 102 \(R\$\s890\.000,00\)\. Destaquei no 3D\.$/, { timeout: 30_000 });
   await expect(vitrine).not.toHaveAttribute('data-destaque-ia', '');
   await expect(page.getByRole('heading', { name: 'Unidade 102' })).toBeVisible();
+  await vitrine.screenshot({ path: test.info().outputPath('corretora.png') });
+  // o que não é comando de tela, escrito na barra de comandos, vai para o assistente
+  await page.getByLabel('Peça o que quiser ver').fill('qual o valor do condomínio?');
+  await page.getByLabel('Peça o que quiser ver').press('Enter');
+  await expect(page.getByTestId('retorno-comando')).toHaveText('Perguntei ao assistente (veja a resposta abaixo).');
+  await expect(chat.locator('[data-papel="cliente"]').last()).toHaveText('qual o valor do condomínio?');
+  await expect(chat.locator('[data-papel="assistente"]').last()).not.toHaveText('', { timeout: 30_000 });
 
   // nova pergunta continua a conversa (o histórico vai junto)
   await chat.getByLabel('Sua pergunta').fill('E de 2 quartos?');
   await chat.getByRole('button', { name: 'Perguntar' }).click();
   await expect(chat.locator('[data-papel="assistente"]').last()).toHaveText(/^Encontrei 2 unidades: 101 \(R\$\s550\.000,00\), 202 \(R\$\s560\.000,00\)\. Destaquei no 3D\.$/, { timeout: 30_000 });
-  await expect(chat.locator('[data-papel="cliente"]')).toHaveCount(2);
+  await expect(chat.locator('[data-papel="cliente"]')).toHaveCount(3); // a do condomínio veio da barra de comandos
 
   // link do cliente (sem login): o assistente abre o formulário de contato com o motivo
   await page.goto(predio);

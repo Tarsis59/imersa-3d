@@ -27,6 +27,9 @@ export const BONECOS: readonly PresetBoneco[] = [
   { id: 'davi', nome: 'Davi', pele: 0xe2b48c, roupa: 0x4c6b3c, calca: 0x2a2a2e, sapato: 0xd94f2b, cabelo: 0x5a3a22, cabeloLongo: false, bone: null },
 ];
 
+/** A corretora virtual (Plano 11d, item 19): blazer escuro, guia o cliente pelo 3D. Não aparece na escolha de boneco. */
+export const CORRETORA: PresetBoneco = { id: 'corretora', nome: 'Corretora', pele: 0xb07a55, roupa: 0x1f2a44, calca: 0x1f2a44, sapato: 0x111111, cabelo: 0x3a2418, cabeloLongo: true, bone: null };
+
 export const presetBoneco = (id: string): PresetBoneco => BONECOS.find((b) => b.id === id) ?? BONECOS[0]!;
 
 /** Metros andados por ciclo de passo (duas passadas). */

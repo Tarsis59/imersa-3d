@@ -692,6 +692,13 @@ export function Vitrine({
     setSelecionada(id);
     viewer.current?.voarPara(id);
   };
+  // corretora virtual: personagem na frente da unidade de que o assistente fala, acenando enquanto fala
+  const [corretoraLigada, setCorretoraLigada] = useState(false);
+  const [corretoraFalando, setCorretoraFalando] = useState(false);
+  useEffect(() => {
+    if (estado !== 'pronto') return;
+    viewer.current?.mostrarCorretora(corretoraLigada ? { unidadeId: selecionada, falando: corretoraFalando } : null);
+  }, [estado, corretoraLigada, corretoraFalando, selecionada]);
   // missões e conquistas: cada uma conta uma vez por visita, vira evento e mostra o selo
   const [missoes, setMissoes] = useState<ReadonlySet<IdMissao>>(() => new Set());
   const [conquista, setConquista] = useState<string | null>(null);
@@ -861,6 +868,7 @@ export function Vitrine({
         data-decorado={telemetria?.decorado ?? 0}
         data-fotos={qtdFotos}
         data-missoes={missoes.size}
+        data-corretora={telemetria?.corretora ?? 'fora'}
         data-terceira={telemetria?.terceiraPessoa ? 'sim' : 'nao'}
         data-boneco={telemetria?.boneco ?? ''}
         data-no-ar={telemetria?.noAr ? 'sim' : 'nao'}
@@ -1147,7 +1155,11 @@ export function Vitrine({
         </Cartao>
         {assistenteUrl && (
           <Cartao titulo="Pergunte ao assistente">
-            <Assistente url={assistenteUrl} aoAcao={aoAcaoIA} pergunta={perguntaAssistente} />
+            <label className="mb-3 flex items-center gap-2 text-sm">
+              <input type="checkbox" checked={corretoraLigada} onChange={(e) => setCorretoraLigada(e.target.checked)} />
+              Corretora virtual (aparece no 3D e fala as respostas)
+            </label>
+            <Assistente url={assistenteUrl} aoAcao={aoAcaoIA} pergunta={perguntaAssistente} voz={corretoraLigada} aoFalar={setCorretoraFalando} />
           </Cartao>
         )}
         <Cartao titulo="Filtros">
