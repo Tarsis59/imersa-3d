@@ -225,6 +225,8 @@ export interface Portal {
   unidades: Array<{ id: string; codigo: string; andar: number; status: StatusUnidade; preco: number | null; meshNodeId: string | null; tipologia: string | null; areaM2: number | null; quartos: number | null }>;
   modeloUrl: string | null;
   interiores: Array<{ id: string; nome: string }>;
+  /** Giro 360° fotorrealista pronto do prédio (Blender), ou null. */
+  giro: { arquivoId: string; unidades: string[] } | null;
   /** Transmissão do status das unidades ao vivo (EventSource direto na API). */
   aoVivoUrl: string;
 }
@@ -242,4 +244,24 @@ export interface ConversaoBim {
   ambientes: number;
   bytesOriginal: number | null;
   bytes: number | null;
+}
+
+/** Giros 360° fotorrealistas do prédio (render no Blender, na GPU gratuita do Kaggle). */
+export interface GiroPredio {
+  id: string;
+  status: 'na_fila' | 'processando' | 'pronto' | 'erro';
+  mensagem: string | null;
+  quadros: number | null;
+  arquivoId: string | null;
+  metricas: { dispositivo?: string; mb?: number; tempos_s?: Record<string, number>; unidadesSemPeca?: number };
+  criadoEm: string;
+  atualizadoEm: string;
+  /** Feito com o modelo e os vínculos de unidade de hoje. */
+  atual: boolean;
+}
+export interface GirosDoPredio {
+  temModelo: boolean;
+  ultimo: GiroPredio | null;
+  pronto: GiroPredio | null;
+  vitrine: { arquivoId: string; unidades: string[] } | null;
 }

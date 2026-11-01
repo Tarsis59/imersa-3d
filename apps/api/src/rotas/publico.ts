@@ -8,6 +8,7 @@ import { hashToken } from '../auth/hash';
 import type { Armazenamento } from '../arquivos/armazenamento';
 import type { criarEntorno } from './mapa';
 import { transmitirPredio, type CanalUnidades } from '../tempo-real/canal';
+import { giroDaVitrine } from './giros';
 
 interface Dependencias {
   pool: pg.Pool;
@@ -110,9 +111,9 @@ export function rotasPublicas(app: FastifyInstance, { pool, armazenamento, entor
           [base.projeto.id, base.modeloId],
         )
       ).rows;
-      return { base, andares, unidades, arquivos };
+      return { base, andares, unidades, arquivos, giro: await giroDaVitrine(c, l.predioId) };
     });
-    const { base, andares, unidades, arquivos } = dados;
+    const { base, andares, unidades, arquivos, giro } = dados;
     const modelo = arquivos.find((a) => a.id === base.modeloId && a.tipo === 'modelo_3d');
     return {
       empresa: { nome: base.empresa },
@@ -125,6 +126,7 @@ export function rotasPublicas(app: FastifyInstance, { pool, armazenamento, entor
         ? await armazenamento.urlDownload({ chave: modelo.chave, assetId: modelo.id, tenantId: l.tenantId, nomeArquivo: modelo.nome, expiraS: DOWNLOAD_S })
         : null,
       interiores: arquivos.filter((a) => a.tipo === 'splat').map((a) => ({ id: a.id, nome: a.nome })),
+      giro,
       aoVivoUrl: `${apiPublica}/publico/links/${(req.params as { token: string }).token}/ao-vivo`,
     };
   });
@@ -141,7 +143,7 @@ export function rotasPublicas(app: FastifyInstance, { pool, armazenamento, entor
     return entorno.obter(daEmpresa(l), projetoId);
   });
 
-  /** Link de um arquivo 3D do empreendimento do link (interior real ou modelo do prédio). */
+  /** Link de um arquivo 3D do empreendimento do link (interior real, modelo do prédio ou o giro 360° do prédio). */
   app.get('/publico/links/:token/arquivos/:id', limite(60, '1 minute'), async (req) => {
     const l = await resolver(req);
     const { id } = TokenArquivo.parse(req.params);
@@ -149,7 +151,8 @@ export function rotasPublicas(app: FastifyInstance, { pool, armazenamento, entor
       (
         await c.query<{ chave: string; nome: string }>(
           `SELECT a.chave, a.nome FROM assets a JOIN buildings b ON b.project_id = a.project_id
-            WHERE a.id = $1 AND b.id = $2 AND a.status = 'pronto' AND a.tipo IN ('splat', 'modelo_3d')`,
+            WHERE a.id = $1 AND b.id = $2 AND a.status = 'pronto'
+              AND (a.tipo IN ('splat', 'modelo_3d') OR EXISTS (SELECT 1 FROM giros g WHERE g.zip_asset_id = a.id AND g.building_id = b.id))`,
           [id, l.predioId],
         )
       ).rows[0],

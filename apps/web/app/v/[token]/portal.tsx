@@ -87,6 +87,7 @@ export function PortalVitrine({
         lat={portal.projeto.lat}
         lon={portal.projeto.lon}
         interiores={portal.interiores}
+        giroRenderizado={portal.giro}
         carregarEntorno={carregarEntorno}
         linkDoArquivo={linkDoArquivo}
         telemetria={false}

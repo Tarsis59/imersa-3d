@@ -258,3 +258,32 @@ describe('plantas: leitura da planta → editor → 3D', () => {
     await expect(comoA((c) => c.query("UPDATE plantas SET edicao = '[]' WHERE id = $1", [pA]))).rejects.toThrow(/check/);
   });
 });
+
+describe('giros 360° fotorrealistas', () => {
+  it('giro isolado por empresa, só com modelo da empresa, um ativo por prédio e fila entre empresas', async () => {
+    const modelo = (c: pg.PoolClient, projeto: string, chave: string) =>
+      c.query<{ id: string }>("INSERT INTO assets (project_id, tipo, nome, chave, tamanho_declarado) VALUES ($1, 'modelo_3d', 'm.glb', $2, 1000) RETURNING id", [projeto, chave]).then((r) => r.rows[0]!.id);
+    const mA = await comoA((c) => modelo(c, projA, 'a/giro.glb'));
+    const mB = await comoB((c) => modelo(c, projB, 'b/giro.glb'));
+    const predioB = await comoB((c) => c.query<{ id: string }>("INSERT INTO buildings (project_id, nome) VALUES ($1, 'Torre Giro') RETURNING id", [projB]).then((r) => r.rows[0]!.id));
+    const novo = (c: pg.PoolClient, predio: string, m: string) => c.query<{ id: string }>('INSERT INTO giros (building_id, modelo_asset_id) VALUES ($1, $2) RETURNING id', [predio, m]).then((r) => r.rows[0]!.id);
+    // BLINDAGEM: modelo ou prédio de outra empresa não entram
+    await expect(comoA((c) => novo(c, predioA, mB))).rejects.toThrow(/foreign key/);
+    await expect(comoA((c) => novo(c, predioB, mA))).rejects.toThrow(/foreign key/);
+    const gA = await comoA((c) => novo(c, predioA, mA));
+    await expect(comoA((c) => novo(c, predioA, mA))).rejects.toThrow(/giros_ativo_uk/);
+    expect(await comoB(async (c) => (await c.query('SELECT * FROM giros')).rowCount)).toBe(0);
+    await comoB((c) => novo(c, predioB, mB));
+    // ZIP do giro é um tipo de arquivo próprio
+    await comoA((c) => c.query("INSERT INTO assets (project_id, tipo, nome, chave, tamanho_declarado) VALUES ($1, 'giro', 'g.zip', 'a/g.zip', 10)", [projA]));
+    expect((await app.query('SELECT ha_giro_pendente() AS p')).rows[0].p).toBe(true);
+    const pegar = () => app.query<{ id: string; tenant_id: string }>('SELECT * FROM pegar_proximo_giro()').then((r) => r.rows[0] ?? null);
+    expect(await pegar()).toEqual({ id: gA, tenant_id: A });
+    expect((await pegar())?.tenant_id).toBe(B);
+    expect(await pegar()).toBeNull();
+    expect((await app.query('SELECT ha_giro_pendente() AS p')).rows[0].p).toBe(false);
+    await expect(comoA((c) => c.query("UPDATE giros SET unidades = '{}' WHERE id = $1", [gA]))).rejects.toThrow(/check/);
+    // giro não se apaga pela aplicação (some com o prédio)
+    await expect(comoA((c) => c.query('DELETE FROM giros WHERE id = $1', [gA]))).rejects.toThrow(/permission denied/);
+  });
+});

@@ -41,6 +41,8 @@ const MENSAGENS: Record<string, string> = {
   arquivo_invalido_para_planta: 'Escolha uma planta (PDF, imagem ou DXF) já verificada deste empreendimento.',
   dwg_salvar_como_dxf: 'DWG é um formato fechado: no CAD, use Salvar como → DXF e envie o DXF.',
   leitura_em_andamento: 'Essa planta já está sendo lida.',
+  predio_sem_modelo: 'Ligue um modelo 3D ao prédio antes de pedir o giro.',
+  giro_em_andamento: 'Já há um giro deste prédio na fila ou sendo renderizado.',
   planta_nao_lida: 'A leitura da planta ainda não terminou.',
   predio_de_outro_empreendimento: 'O prédio é de outro empreendimento.',
 };

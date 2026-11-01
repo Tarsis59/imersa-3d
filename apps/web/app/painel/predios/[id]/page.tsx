@@ -2,8 +2,9 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { Cartao } from '@/components/ui';
 import { apiNaPagina } from '@/lib/sessao';
-import { ehGestao, type Arquivo, type Espelho, type LinkCliente, type Me } from '@/lib/tipos';
-import { criarLink, mudarStatus, revogarLink, vincularModelo } from './actions';
+import { ehGestao, type Arquivo, type Espelho, type GirosDoPredio, type LinkCliente, type Me } from '@/lib/tipos';
+import { criarLink, mudarStatus, pedirGiro, revogarLink, vincularModelo } from './actions';
+import { GiroRenderizado } from './giro-renderizado';
 import { LinksClientes } from './links-clientes';
 import { EspelhoVendas } from './espelho';
 import { ModeloDoPredio } from './modelo-3d';
@@ -20,6 +21,7 @@ export default async function PaginaPredio({ params }: { params: Promise<{ id: s
   // gestão e consultoras geram links para clientes (cada consultora vê só os dela)
   const podeLinks = ehGestao(me.papel) || me.papel === 'consultora';
   const links = podeLinks ? (await apiNaPagina<LinkCliente[]>(`/predios/${encodeURIComponent(id)}/links`, volta)).dados : [];
+  const giros = (await apiNaPagina<GirosDoPredio>(`/predios/${encodeURIComponent(id)}/giros`, volta)).dados;
   return (
     <>
       <div className="grid gap-1">
@@ -60,6 +62,9 @@ export default async function PaginaPredio({ params }: { params: Promise<{ id: s
           podeEditar={ehGestao(me.papel) && me.mfa}
           acao={vincularModelo.bind(null, espelho.predio.id)}
         />
+      </Cartao>
+      <Cartao titulo="Giro 360° fotorrealista">
+        <GiroRenderizado giros={giros} podePedir={ehGestao(me.papel) && me.mfa} pedir={pedirGiro.bind(null, espelho.predio.id)} />
       </Cartao>
     </>
   );

@@ -2,19 +2,25 @@
 import { useEffect, useRef, useState } from 'react';
 import { indiceDaCor, quadroPorArrasto, type Giro } from '@imersa/viewer';
 import { Botao } from '@/components/ui';
+import { pontoNaImagem } from '@/lib/giro-zip';
 
 /**
  * Giro 360° em imagens: arrastar troca o quadro e tocar lê a cor da máscara para saber a unidade.
  * Não desenha 3D nenhum, por isso fica fluido até em celular fraco.
+ * `fotorrealista`: o giro renderizado no Blender (tamanho fixo): a imagem cabe inteira na área, sem esticar, e o
+ * toque desconta as faixas em volta. O giro leve é feito do tamanho da própria tela e ocupa a área toda.
  */
+
 export function Giro360({
   giro,
   quadro,
   aoMudarQuadro: setQuadro,
   aoSelecionar,
   aoFechar,
+  fotorrealista = false,
 }: {
   giro: Giro;
+  fotorrealista?: boolean;
   /** Controlado por quem usa: fechar e abrir de novo volta ao mesmo ângulo. */
   quadro: number;
   aoMudarQuadro: (q: number) => void;
@@ -49,7 +55,7 @@ export function Giro360({
   }
 
   return (
-    <div className="absolute inset-0 z-10 bg-fundo" data-testid="giro" data-quadro={quadro}>
+    <div className="absolute inset-0 z-10 bg-fundo" data-testid="giro" data-quadro={quadro} data-tipo={fotorrealista ? 'fotorrealista' : 'leve'}>
       <div
         role="slider"
         tabIndex={0}
@@ -80,12 +86,14 @@ export function Giro360({
           arrasto.current = null;
           if (!a || a.moveu) return;
           const r = e.currentTarget.getBoundingClientRect();
-          void unidadeNoPonto(quadro, (e.clientX - r.left) / r.width, (e.clientY - r.top) / r.height).then(aoSelecionar);
+          const p = pontoNaImagem(e.clientX - r.left, e.clientY - r.top, { largura: r.width, altura: r.height }, fotorrealista ? { largura: giro.largura, altura: giro.altura } : null);
+          if (!p) return aoSelecionar(null); // tocou na faixa fora da imagem
+          void unidadeNoPonto(quadro, p.fx, p.fy).then(aoSelecionar);
         }}
       >
-        {/* object-fill: a imagem ocupa exatamente a área, então o ponto tocado corresponde ao pixel da máscara */}
-        {/* eslint-disable-next-line @next/next/no-img-element -- imagens geradas no navegador (blob:) */}
-        {urls[quadro] && <img src={urls[quadro]} alt="" draggable={false} className="pointer-events-none h-full w-full object-fill" />}
+        {/* leve: object-fill (a imagem ocupa exatamente a área); fotorrealista: object-contain (pontoNaImagem desconta as faixas) */}
+        {/* eslint-disable-next-line @next/next/no-img-element -- imagens em blob: */}
+        {urls[quadro] && <img src={urls[quadro]} alt="" draggable={false} className={`pointer-events-none h-full w-full ${fotorrealista ? 'object-contain' : 'object-fill'}`} />}
       </div>
       <div className="absolute left-3 top-3 flex gap-2">
         <Botao type="button" variante="secundario" onClick={aoFechar}>
@@ -93,7 +101,7 @@ export function Giro360({
         </Botao>
       </div>
       <p className="absolute bottom-2 left-3 rounded bg-black/60 px-2 py-0.5 text-xs text-white">
-        Modo leve: {total} imagens · arraste para girar · toque numa unidade
+        {fotorrealista ? 'Fotorrealista' : 'Modo leve'}: {total} imagens · arraste para girar · toque numa unidade
       </p>
     </div>
   );

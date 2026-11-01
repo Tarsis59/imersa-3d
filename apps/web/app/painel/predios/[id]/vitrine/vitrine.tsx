@@ -6,6 +6,7 @@ import { Botao, Campo, Cartao, Selecao } from '@/components/ui';
 import { alternarFavorito, lerFavoritos, salvarFavoritos } from '@/lib/favoritos';
 import { brl, COR_STATUS, ROTULO_STATUS, STATUS_UNIDADE } from '@/lib/tipos';
 import { DECODIFICADORES } from '@/lib/decodificadores';
+import { giroDoZip } from '@/lib/giro-zip';
 import type { ResultadoEntorno } from './actions';
 import { InteriorSplat } from './interior';
 import { Giro360 } from './giro';
@@ -43,6 +44,7 @@ export function Vitrine({
   telemetria: comTelemetria = true,
   aoEvento,
   aoVivo,
+  giroRenderizado = null,
 }: {
   predioId: string;
   projetoId: string;
@@ -69,6 +71,8 @@ export function Vitrine({
   aoEvento?: (e: EventoVitrine) => void;
   /** Endereço da transmissão de status ao vivo (EventSource). Pedido de novo a cada reconexão (o bilhete do painel vence). */
   aoVivo?: () => Promise<string | null>;
+  /** Giro 360° fotorrealista pronto (Blender): ZIP + a unidade de cada cor-ID. */
+  giroRenderizado?: { arquivoId: string; unidades: string[] } | null;
 }) {
   const canvas = useRef<HTMLCanvasElement>(null);
   const viewer = useRef<Viewer | null>(null);
@@ -223,15 +227,42 @@ export function Vitrine({
   const [mostrarGiro, setMostrarGiro] = useState(false);
   const [quadroGiro, setQuadroGiro] = useState(0);
   const [progressoGiro, setProgressoGiro] = useState<string | null>(null);
+  const [giroFoto, setGiroFoto] = useState<Giro | null>(null);
+  const [tipoGiro, setTipoGiro] = useState<'leve' | 'fotorrealista'>('leve');
+  const [erroGiro, setErroGiro] = useState<string | null>(null);
+  const mostrar = (tipo: 'leve' | 'fotorrealista', g: Giro) => {
+    setTipoGiro(tipo);
+    setQuadroGiro((q) => q % g.quadros.length);
+    setMostrarGiro(true);
+  };
+  /** Baixa o ZIP do giro renderizado (uma vez por visita) e abre no mesmo tocador do giro leve. */
+  const abrirGiroFoto = async () => {
+    if (!giroRenderizado) return;
+    if (giroFoto) return mostrar('fotorrealista', giroFoto);
+    setErroGiro(null);
+    setProgressoGiro('Baixando o giro fotorrealista…');
+    try {
+      const url = await linkDoArquivo(giroRenderizado.arquivoId);
+      const r = url ? await fetch(url) : null;
+      if (!r?.ok) throw new Error('Não foi possível baixar o giro.');
+      const g = giroDoZip(new Uint8Array(await r.arrayBuffer()), giroRenderizado.unidades);
+      setGiroFoto(g);
+      mostrar('fotorrealista', g);
+    } catch (e) {
+      setErroGiro((e as Error).message);
+    } finally {
+      setProgressoGiro(null);
+    }
+  };
   const abrirGiro = async () => {
     const v = viewer.current;
     if (!v) return;
-    if (giro) return setMostrarGiro(true); // já gerado nesta visita
+    if (giro) return mostrar('leve', giro); // já gerado nesta visita
     setProgressoGiro('Preparando…');
     try {
       const g = await v.gerarGiro({ quadros: 72, aoProgredir: (feitos, total) => setProgressoGiro(`Gerando ${feitos} de ${total} imagens…`) });
       setGiro(g);
-      setMostrarGiro(true);
+      mostrar('leve', g);
     } catch {
       v.registrarErro();
     } finally {
@@ -296,7 +327,16 @@ export function Vitrine({
             {entorno.atribuicao}
           </a>
         )}
-        {giro && mostrarGiro && <Giro360 giro={giro} quadro={quadroGiro} aoMudarQuadro={setQuadroGiro} aoSelecionar={setSelecionada} aoFechar={() => setMostrarGiro(false)} />}
+        {mostrarGiro && (tipoGiro === 'fotorrealista' ? giroFoto : giro) && (
+          <Giro360
+            giro={(tipoGiro === 'fotorrealista' ? giroFoto : giro)!}
+            fotorrealista={tipoGiro === 'fotorrealista'}
+            quadro={quadroGiro}
+            aoMudarQuadro={setQuadroGiro}
+            aoSelecionar={setSelecionada}
+            aoFechar={() => setMostrarGiro(false)}
+          />
+        )}
         {progressoGiro && <p className="absolute inset-x-0 bottom-12 mx-auto w-fit rounded-md bg-black/70 px-3 py-1 text-sm text-white">{progressoGiro}</p>}
         {interiorAberto && <InteriorSplat arquivo={interiorAberto} linkDoArquivo={linkDoArquivo} aoFechar={() => setInteriorAberto(null)} />}
         {modo === 'primeira-pessoa' && <Joystick aoMover={(e) => viewer.current?.definirEntrada(e)} />}
@@ -446,6 +486,16 @@ export function Vitrine({
                 <input id="hora-sol" type="range" min={6} max={19} step={0.25} value={horaSol} onChange={(e) => setHoraSol(Number(e.target.value))} />
               </label>
             </div>
+            {giroRenderizado && (
+              <Botao type="button" disabled={progressoGiro !== null} onClick={() => void abrirGiroFoto()}>
+                Abrir giro 360° fotorrealista
+              </Botao>
+            )}
+            {erroGiro && (
+              <p role="alert" className="text-sm text-perigo">
+                {erroGiro}
+              </p>
+            )}
             <Botao type="button" variante="secundario" disabled={estado !== 'pronto' || progressoGiro !== null} onClick={() => void abrirGiro()}>
               {giro ? 'Abrir giro 360° (modo leve)' : 'Gerar giro 360° (modo leve)'}
             </Botao>

@@ -2,7 +2,7 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import type { UnidadeViewer } from '@imersa/viewer';
 import { apiNaPagina } from '@/lib/sessao';
-import type { Arquivo, DetalheProjeto, Espelho, Me } from '@/lib/tipos';
+import type { Arquivo, DetalheProjeto, Espelho, GirosDoPredio, Me } from '@/lib/tipos';
 import { Vitrine } from './vitrine';
 import { bilheteAoVivo, carregarEntorno, linkDoArquivo } from './actions';
 
@@ -17,11 +17,12 @@ export default async function PaginaVitrine({ params, searchParams }: { params: 
   if (r.status !== 200) notFound();
   const { predio, andares } = r.dados;
   // independentes entre si: em paralelo (cada ida à API custa uma volta de rede)
-  const [detalhe, lista, download, me] = await Promise.all([
+  const [detalhe, lista, download, me, giros] = await Promise.all([
     apiNaPagina<DetalheProjeto>(`/projetos/${encodeURIComponent(predio.projetoId)}`, volta),
     apiNaPagina<Arquivo[]>(`/projetos/${encodeURIComponent(predio.projetoId)}/arquivos`, volta),
     predio.modeloArquivoId ? apiNaPagina<{ url: string }>(`/arquivos/${predio.modeloArquivoId}/download`, volta) : null,
     apiNaPagina<Me>('/me', volta),
+    apiNaPagina<GirosDoPredio>(`/predios/${encodeURIComponent(id)}/giros`, volta),
   ]);
   const empresa = me.dados.empresas.find((e) => e.id === me.dados.tenantId)?.nome ?? '';
   const projeto = detalhe.dados.projeto;
@@ -56,6 +57,7 @@ export default async function PaginaVitrine({ params, searchParams }: { params: 
         lat={projeto.lat}
         lon={projeto.lon}
         interiores={interiores}
+        giroRenderizado={giros.status === 200 ? giros.dados.vitrine : null}
         qualidadeFixa={fixa >= 0 ? fixa : null}
         carregarEntorno={carregarEntorno.bind(null, predio.projetoId)}
         linkDoArquivo={linkDoArquivo}

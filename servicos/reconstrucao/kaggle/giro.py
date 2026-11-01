@@ -1,0 +1,125 @@
+"""
+Giro 360° fotorrealista na GPU gratuita do Kaggle (Blender Cycles).
+
+Entrada (dataset privado anexado ao notebook, montado em /kaggle/input/<dataset>/):
+  modelo.glb        modelo 3D do prédio, já sem compressão (o importador do Blender não lê Meshopt)
+  nos.json          nós das unidades, na ordem dos índices das máscaras
+  giro_blender.py   o roteiro que roda dentro do Blender
+  config.json       {"quadros": 72, "largura": 1280, "altura": 720, "amostras": 96}
+
+Saída (/kaggle/working/, baixada pelo orquestrador):
+  giro.zip          cor_###.jpg, mascara_###.png e giro.json
+  resultado.json    etapa, mensagem, dispositivo e tempos
+"""
+
+import json
+import os
+import subprocess
+import sys
+import tarfile
+import time
+import urllib.request
+import zipfile
+from pathlib import Path
+
+#: Blender 4.2 LTS (GPL; usado só como programa, nada dele vai para o produto)
+BLENDER_URL = "https://download.blender.org/release/Blender4.2/blender-4.2.23-linux-x64.tar.xz"
+INICIO = time.time()
+SAIDA = Path("/kaggle/working")
+TEMP = Path("/tmp/imersa-giro")
+RESULTADO: dict = {"etapa": "preparando", "tempos_s": {}}
+
+
+def gravar(**mudancas) -> None:
+    RESULTADO.update(mudancas)
+    RESULTADO["decorrido_s"] = round(time.time() - INICIO, 1)
+    (SAIDA / "resultado.json").write_text(json.dumps(RESULTADO, ensure_ascii=False, indent=2))
+    print("[imersa]", json.dumps({k: v for k, v in RESULTADO.items() if k != "tempos_s"}, ensure_ascii=False), flush=True)
+
+
+def falhar(codigo: str, mensagem: str) -> None:
+    gravar(etapa="erro", erro=codigo, mensagem=mensagem)
+    sys.exit(0)  # sai "com sucesso" para o Kaggle guardar o resultado.json
+
+
+def achar_entrada() -> Path:
+    for arquivo in Path("/kaggle/input").rglob("nos.json"):
+        if (arquivo.parent / "modelo.glb").is_file():
+            return arquivo.parent
+    falhar("entrada_ausente", "Dataset de entrada não encontrado (precisa de modelo.glb e nos.json).")
+    raise SystemExit
+
+
+def tem_gpu() -> bool:
+    try:
+        return subprocess.run(["nvidia-smi", "-L"], capture_output=True, timeout=60).returncode == 0
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+
+
+def baixar_blender() -> Path:
+    TEMP.mkdir(parents=True, exist_ok=True)
+    pacote = TEMP / "blender.tar.xz"
+    for tentativa in range(3):
+        try:
+            urllib.request.urlretrieve(BLENDER_URL, pacote)
+            break
+        except OSError:
+            if tentativa == 2:
+                falhar("sem_internet", "Não foi possível baixar o Blender. Confirme o celular na conta do Kaggle (libera a internet dos notebooks).")
+            time.sleep(20)
+    with tarfile.open(pacote) as t:
+        try:
+            t.extractall(TEMP, filter="data")
+        except TypeError:  # Python sem o filtro (anterior a 3.11.4)
+            t.extractall(TEMP)
+    pacote.unlink()
+    exe = next(TEMP.glob("blender-*/blender"))
+    if subprocess.run([str(exe), "-b", "--factory-startup", "--version"], capture_output=True).returncode != 0:
+        # imagem sem as bibliotecas de janela que o Blender carrega mesmo sem tela
+        subprocess.run(["apt-get", "update", "-qq"], capture_output=True)
+        libs = ["libxi6", "libxxf86vm1", "libxfixes3", "libxrender1", "libgl1", "libxkbcommon0", "libsm6", "libice6", "libegl1"]
+        subprocess.run(["apt-get", "install", "-y", "-qq", *libs], capture_output=True)
+    return exe
+
+
+def principal() -> None:
+    SAIDA.mkdir(parents=True, exist_ok=True)
+    entrada = achar_entrada()
+    config = json.loads((entrada / "config.json").read_text())
+    if not tem_gpu():
+        falhar(
+            "sem_gpu",
+            "O notebook rodou sem GPU. Na conta do Kaggle, confirme o celular (Settings → Phone Verification): "
+            "é o que libera a GPU gratuita e a internet dos notebooks.",
+        )
+    gravar(etapa="baixando_blender")
+    t0 = time.time()
+    blender = baixar_blender()
+    RESULTADO["tempos_s"]["blender"] = round(time.time() - t0, 1)
+
+    gravar(etapa="renderizando")
+    quadros = TEMP / "quadros"
+    t0 = time.time()
+    comando = [
+        str(blender), "-b", "--factory-startup", "-noaudio", "-P", str(entrada / "giro_blender.py"), "--",
+        "--glb", str(entrada / "modelo.glb"), "--unidades", str(entrada / "nos.json"), "--saida", str(quadros),
+        "--quadros", str(config["quadros"]), "--largura", str(config["largura"]), "--altura", str(config["altura"]),
+        "--amostras", str(config["amostras"]), "--gpu",
+    ]  # fmt: skip
+    r = subprocess.run(comando, capture_output=True, text=True, env={**os.environ, "PYTHONUNBUFFERED": "1"})
+    RESULTADO["tempos_s"]["render"] = round(time.time() - t0, 1)
+    if r.returncode != 0 or not (quadros / "giro.json").exists():
+        print((r.stdout or "")[-4000:], (r.stderr or "")[-4000:], flush=True)
+        falhar("falha_no_render", "O Blender não terminou o giro. " + ((r.stderr or r.stdout or "").strip().splitlines() or [""])[-1][:300])
+    giro = json.loads((quadros / "giro.json").read_text())
+
+    with zipfile.ZipFile(SAIDA / "giro.zip", "w") as z:
+        for arquivo in sorted(quadros.iterdir()):
+            # JPEG e PNG já vêm comprimidos: guardar sem comprimir de novo (abrir no celular fica mais rápido)
+            z.write(arquivo, arquivo.name, compress_type=zipfile.ZIP_DEFLATED if arquivo.suffix == ".json" else zipfile.ZIP_STORED)
+    gravar(etapa="pronto", dispositivo=giro["dispositivo"], quadros=giro["quadros"], nos_sem_peca=giro["nos_sem_peca"], mb=round((SAIDA / "giro.zip").stat().st_size / 2**20, 2))
+
+
+if __name__ == "__main__":
+    principal()

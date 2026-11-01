@@ -12,6 +12,15 @@ const PRODUCAO = process.env.E2E_PRODUCAO === '1';
 const CHROMIUM_3D = process.env.E2E_GPU === '1' ? ['--ignore-gpu-blocklist', '--enable-gpu-rasterization', '--use-angle=default'] : ['--use-angle=swiftshader', '--enable-unsafe-swiftshader'];
 /** Worker de capturas sem GPU: devolve esta esfera (gerada pelo pipeline real: PLY → SOG). */
 const SPLAT_SIMULADO = fileURLToPath(new URL('./e2e/fixtures/esfera.sog', import.meta.url));
+/**
+ * Giro 360° fotorrealista: com IMERSA_BLENDER (executável do Blender 4.2) o worker renderiza de verdade nesta
+ * máquina; sem ele, devolve um giro de 8 quadros já renderizado pelo Blender (a casa FZK).
+ */
+const GIRO_SIMULADO = fileURLToPath(new URL('./e2e/fixtures/giro-fzk.zip', import.meta.url));
+const BLENDER = process.env.IMERSA_BLENDER;
+const GIRO: Record<string, string> = BLENDER
+  ? { GIRO_RENDERIZADOR: 'python', GIRO_BLENDER: BLENDER, GIRO_QUADROS: '24', GIRO_LARGURA: '640', GIRO_ALTURA: '360', GIRO_AMOSTRAS: '16' }
+  : { GIRO_RENDERIZADOR: 'simulado', GIRO_SIMULADO_ZIP: GIRO_SIMULADO, GIRO_SIMULADO_QUADROS: '8' };
 const PREDIOS_PAULISTA = fileURLToPath(new URL('../../exemplos/cidade-real/sao-paulo-paulista-osm.json', import.meta.url));
 
 export default defineConfig({
@@ -45,7 +54,7 @@ export default defineConfig({
       url: 'http://localhost:3335',
       reuseExistingServer: false,
       timeout: 60_000,
-      env: { DATABASE_URL: DB_APP, ARMAZENAMENTO_PASTA: 'armazenamento-e2e', API_URL_PUBLICA: 'http://localhost:3334', RECONSTRUTOR: 'simulado', RECONSTRUTOR_SPLAT_SIMULADO: SPLAT_SIMULADO, WORKER_PORTA: '3335', WORKER_INTERVALO_S: '2', WORKER_PASTA: 'trabalho-worker-e2e', WEBHOOK_PERMITIR_LOCAL: 'true' },
+      env: { DATABASE_URL: DB_APP, ARMAZENAMENTO_PASTA: 'armazenamento-e2e', API_URL_PUBLICA: 'http://localhost:3334', RECONSTRUTOR: 'simulado', RECONSTRUTOR_SPLAT_SIMULADO: SPLAT_SIMULADO, WORKER_PORTA: '3335', WORKER_INTERVALO_S: '2', WORKER_PASTA: 'trabalho-worker-e2e', WEBHOOK_PERMITIR_LOCAL: 'true', ...GIRO },
     },
     {
       command: PRODUCAO ? 'pnpm build && pnpm exec next start -p 3100' : 'node scripts/decodificadores.mjs && pnpm exec next dev -p 3100',

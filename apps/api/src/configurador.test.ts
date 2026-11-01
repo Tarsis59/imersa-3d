@@ -323,3 +323,129 @@ describe('plantas: leitura → edição → modelo do prédio', () => {
     expect((await req('GET', `/plantas/${id}`, undefined, gestaoA)).json).toMatchObject({ status: 'erro', mensagem: 'imagem ilegível' });
   });
 });
+
+describe('giro 360° fotorrealista (Blender na GPU do Kaggle)', () => {
+  /** GLB mínimo válido (só o JSON): o worker só confere o cabeçalho e as extensões antes de mandar para o Blender. */
+  const glbMinimo = (extensoes: string[] = []) => {
+    const js = Buffer.from(JSON.stringify({ asset: { version: '2.0' }, extensionsUsed: extensoes, extensionsRequired: extensoes }).padEnd(120, ' '));
+    const cab = Buffer.alloc(20);
+    cab.write('glTF', 0);
+    cab.writeUInt32LE(2, 4);
+    cab.writeUInt32LE(20 + js.length, 8);
+    cab.writeUInt32LE(js.length, 12);
+    cab.writeUInt32LE(0x4e4f534a, 16);
+    return Buffer.concat([cab, js]);
+  };
+
+  it('pedido só da gestão e com modelo, worker grava o ZIP, unidades na ordem da máscara e o giro novo substitui o antigo', async () => {
+    const { ArmazenamentoLocal } = await import('./arquivos/armazenamento');
+    const { processarProximoGiro } = await import('./giros/worker');
+    const { mkdtemp, readFile, writeFile } = await import('node:fs/promises');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+    const pasta = await mkdtemp(join(tmpdir(), 'giros-'));
+    const armazenamento = new ArmazenamentoLocal(join(pasta, 'arq'), 'https://api.exemplo.com', config.JWT_SECRET);
+
+    expect((await req('POST', `/predios/${outro}/giros`, {}, gestaoA)).json.erro).toBe('predio_sem_modelo');
+    const modelo = (
+      await owner.query<{ id: string; chave: string }>(
+        "INSERT INTO assets (tenant_id, project_id, tipo, nome, chave, tamanho_declarado, status) SELECT tenant_id, id, 'modelo_3d', 'outro.glb', 't/outro.glb', 10, 'pronto' FROM projects WHERE id = $1 RETURNING id, chave",
+        [projeto],
+      )
+    ).rows[0]!;
+    await armazenamento.salvar(modelo.chave, glbMinimo(), 'model/gltf-binary');
+    await owner.query('UPDATE buildings SET modelo_asset_id = $2 WHERE id = $1', [outro, modelo.id]);
+    await owner.query("UPDATE units SET mesh_node_id = 'no-x1' WHERE id = $1", [uX]);
+
+    expect((await req('POST', `/predios/${outro}/giros`, {}, consultoraA)).status).toBe(403);
+    expect((await req('POST', `/predios/${outro}/giros`, {}, semMfaA)).status).toBe(403);
+    expect((await req('POST', `/predios/${outro}/giros`, {}, gestaoB)).status).toBe(404);
+    const r = await req('POST', `/predios/${outro}/giros`, {}, gestaoA);
+    expect(r.status).toBe(201);
+    expect((await req('POST', `/predios/${outro}/giros`, {}, gestaoA)).json.erro).toBe('giro_em_andamento');
+    expect((await req('GET', `/predios/${outro}/giros`, undefined, consultoraA)).json).toMatchObject({ temModelo: true, ultimo: { id: r.json.id, status: 'na_fila' }, pronto: null });
+
+    // render de mentira (o Blender e o Kaggle têm os próprios testes no serviço Python)
+    let recebido: { nos: string[]; glb: string } | null = null;
+    const renderizador = async (e: { glb: string; nos: string[]; pasta: string }) => {
+      recebido = { nos: e.nos, glb: (await readFile(e.glb)).subarray(0, 4).toString() };
+      const zip = join(e.pasta, 'giro.zip');
+      await writeFile(zip, Buffer.from('PK zip de teste'));
+      return { ok: true as const, zip, quadros: 72, largura: 1280, altura: 720, dispositivo: 'OPTIX', mb: 0.1, nos_sem_peca: [], tempos_s: { render: 300 } };
+    };
+    expect(await processarProximoGiro({ pool, armazenamento, renderizador, pastaTrabalho: pasta })).toBe('ok');
+    expect(await processarProximoGiro({ pool, armazenamento, renderizador, pastaTrabalho: pasta })).toBe('vazia');
+    expect(recebido).toEqual({ nos: ['no-x1'], glb: 'glTF' });
+    const lido = (await req('GET', `/predios/${outro}/giros`, undefined, consultoraA)).json;
+    expect(lido.pronto).toMatchObject({ id: r.json.id, status: 'pronto', quadros: 72, unidades: [uX], atual: true, metricas: { dispositivo: 'OPTIX' } });
+    const zip = (await req('GET', `/arquivos/${lido.pronto.arquivoId}/download`, undefined, consultoraA)).json;
+    expect(zip.nome).toBe('giro-360-Outro.zip');
+    // o ZIP é do sistema: não aparece na lista de arquivos do empreendimento
+    expect((await req('GET', `/projetos/${projeto}/arquivos`, undefined, gestaoA)).json.some((a: { tipo: string }) => a.tipo === 'giro')).toBe(false);
+
+    expect(lido.vitrine).toEqual({ arquivoId: lido.pronto.arquivoId, unidades: [uX] });
+
+    // portal do comprador (sem login): recebe o giro e baixa só o ZIP do giro deste prédio
+    const link = (await req('POST', `/predios/${outro}/links`, {}, consultoraA)).json;
+    const token = link.url.split('/v/')[1];
+    expect((await req('GET', `/publico/links/${token}`)).json.giro).toEqual({ arquivoId: lido.pronto.arquivoId, unidades: [uX] });
+    expect((await req('GET', `/publico/links/${token}/arquivos/${lido.pronto.arquivoId}`)).status).toBe(200);
+    const deCasa = (await req('POST', `/predios/${casa}/links`, {}, consultoraA)).json.url.split('/v/')[1];
+    expect((await req('GET', `/publico/links/${deCasa}`)).json.giro).toBeNull();
+    expect((await req('GET', `/publico/links/${deCasa}/arquivos/${lido.pronto.arquivoId}`)).status).toBe(404);
+
+    // vínculo de unidade mudou: o giro pronto fica desatualizado (a gestão vê o aviso e pede outro); a Vitrine
+    // continua abrindo, porque cada cor-ID guarda a unidade de quando foi renderizado
+    await owner.query('UPDATE units SET mesh_node_id = NULL WHERE id = $1', [uX]);
+    const mudou = (await req('GET', `/predios/${outro}/giros`, undefined, gestaoA)).json;
+    expect(mudou.pronto.atual).toBe(false);
+    expect(mudou.vitrine).toEqual({ arquivoId: lido.pronto.arquivoId, unidades: [uX] });
+
+    const novo = (await req('POST', `/predios/${outro}/giros`, {}, gestaoA)).json.id;
+    expect(await processarProximoGiro({ pool, armazenamento, renderizador, pastaTrabalho: pasta })).toBe('ok');
+    const depois = (await req('GET', `/predios/${outro}/giros`, undefined, gestaoA)).json;
+    expect(depois.pronto).toMatchObject({ id: novo, unidades: [], atual: true });
+    expect((await owner.query("SELECT count(*)::int AS n FROM assets WHERE tipo = 'giro'")).rows[0].n).toBe(1);
+    expect((await owner.query('SELECT zip_asset_id FROM giros WHERE id = $1', [r.json.id])).rows[0].zip_asset_id).toBeNull();
+    // modelo trocado: o giro é de outro prédio na prática; a Vitrine deixa de oferecer
+    await owner.query("UPDATE buildings SET modelo_asset_id = NULL WHERE id = $1", [outro]);
+    expect((await req('GET', `/predios/${outro}/giros`, undefined, gestaoA)).json).toMatchObject({ temModelo: false, vitrine: null });
+  });
+
+  it('falha da nuvem volta para a fila uma vez; modelo que o Blender não lê vira erro sem nova tentativa', async () => {
+    const { ArmazenamentoLocal } = await import('./arquivos/armazenamento');
+    const { processarProximoGiro } = await import('./giros/worker');
+    const { mkdtemp } = await import('node:fs/promises');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+    const pasta = await mkdtemp(join(tmpdir(), 'giros-'));
+    const armazenamento = new ArmazenamentoLocal(join(pasta, 'arq'), 'https://api.exemplo.com', config.JWT_SECRET);
+    const modelo = (
+      await owner.query<{ id: string; chave: string }>(
+        "INSERT INTO assets (tenant_id, project_id, tipo, nome, chave, tamanho_declarado, status) SELECT tenant_id, id, 'modelo_3d', 'casa.glb', 't/casa-giro.glb', 10, 'pronto' FROM projects WHERE id = $1 RETURNING id, chave",
+        [projeto],
+      )
+    ).rows[0]!;
+    await armazenamento.salvar(modelo.chave, glbMinimo(), 'model/gltf-binary');
+    await owner.query('UPDATE buildings SET modelo_asset_id = $2 WHERE id = $1', [casa, modelo.id]);
+    const id = (await req('POST', `/predios/${casa}/giros`, {}, gestaoA)).json.id;
+    let chamadas = 0;
+    const renderizador = async () => {
+      chamadas++;
+      return { ok: false as const, erro: 'falha_na_gpu', mensagem: 'Kaggle fora do ar' };
+    };
+    expect(await processarProximoGiro({ pool, armazenamento, renderizador, pastaTrabalho: pasta })).toBe('erro');
+    expect((await owner.query('SELECT status FROM giros WHERE id = $1', [id])).rows[0].status).toBe('na_fila');
+    expect(await processarProximoGiro({ pool, armazenamento, renderizador, pastaTrabalho: pasta })).toBe('erro');
+    expect((await req('GET', `/predios/${casa}/giros`, undefined, gestaoA)).json.ultimo).toMatchObject({ status: 'erro', mensagem: 'Kaggle fora do ar' });
+    expect(chamadas).toBe(2);
+
+    // texturas KTX2: o importador do Blender não lê; nem chega a ir para a GPU
+    await armazenamento.salvar(modelo.chave, glbMinimo(['KHR_texture_basisu']), 'model/gltf-binary');
+    const ktx = (await req('POST', `/predios/${casa}/giros`, {}, gestaoA)).json.id;
+    expect(await processarProximoGiro({ pool, armazenamento, renderizador, pastaTrabalho: pasta })).toBe('erro');
+    expect(chamadas).toBe(2);
+    expect((await owner.query('SELECT status, mensagem FROM giros WHERE id = $1', [ktx])).rows[0]).toMatchObject({ status: 'erro', mensagem: expect.stringContaining('KHR_texture_basisu') });
+    expect((await owner.query('SELECT ha_giro_pendente() AS p')).rows[0].p).toBe(false);
+  });
+});

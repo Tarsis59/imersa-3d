@@ -1,5 +1,5 @@
 // Worker em processo próprio: `pnpm --filter @imersa/api worker`. Pode haver vários (as filas não repetem).
-// `--uma-vez`: processa as capturas da fila até esvaziar e sai (execução agendada no GitHub Actions).
+// `--uma-vez`: processa as capturas e os giros 360° da fila até esvaziar e sai (execução agendada no GitHub Actions).
 import { createServer } from 'node:http';
 import pg from 'pg';
 import { lerConfig } from './config';
@@ -11,7 +11,7 @@ const pool = new pg.Pool({ connectionString: config.DATABASE_URL, max: 3 });
 
 if (process.argv.includes('--uma-vez')) {
   const n = await processarFila(pool, config, extra);
-  console.info(`[worker] fila vazia: ${n} captura(s) processada(s)`);
+  console.info(`[worker] fila vazia: ${n} trabalho(s) processado(s)`);
   await pool.end();
   process.exit(0);
 }

@@ -9,6 +9,7 @@ import { anonimizarEventos, periodica } from '../vendas/retencao';
 import { entregarWebhooks } from '../integracoes/entregas';
 import { conversorPython, processarProximaConversao } from '../bim/worker';
 import { leitorPython, processarProximaPlanta } from '../plantas/worker';
+import { processarProximoGiro, renderizadorPython, renderizadorSimulado } from '../giros/worker';
 
 export const ConfigWorker = z.object({
   RECONSTRUTOR: z.enum(['python', 'simulado']).default('python'),
@@ -36,6 +37,17 @@ export const ConfigWorker = z.object({
     .enum(['true', 'false'])
     .default('true')
     .transform((v) => v === 'true'),
+  /** Giro 360° fotorrealista: Blender na GPU do Kaggle ('python'), ou um ZIP pronto (testes e demonstração). */
+  GIRO_RENDERIZADOR: z.enum(['python', 'simulado']).default('python'),
+  GIRO_SIMULADO_ZIP: z.string().optional(),
+  GIRO_SIMULADO_QUADROS: z.coerce.number().int().positive().default(72),
+  /** Executável do Blender desta máquina: renderiza aqui em vez de no Kaggle (quem tem placa de vídeo). */
+  GIRO_BLENDER: z.string().optional(),
+  /** Qualidade do giro (vazio = padrão do serviço: 72 quadros de 1280×720 com 96 amostras). */
+  GIRO_QUADROS: z.coerce.number().int().min(8).max(360).optional(),
+  GIRO_LARGURA: z.coerce.number().int().min(160).max(3840).optional(),
+  GIRO_ALTURA: z.coerce.number().int().min(90).max(2160).optional(),
+  GIRO_AMOSTRAS: z.coerce.number().int().min(1).max(4096).optional(),
 });
 export type ConfigWorker = z.infer<typeof ConfigWorker>;
 
@@ -54,15 +66,38 @@ function montarDeps(pool: pg.Pool, config: Config, extra: ConfigWorker) {
   return { pool, armazenamento: armazenamentoDaConfig(config), reconstrutor, pastaTrabalho: resolve(extra.WORKER_PASTA) };
 }
 
-/** Processa as capturas da fila até ela esvaziar e devolve quantas processou (execução agendada, ex.: GitHub Actions). */
+/** Giro 360° fotorrealista: mesmo serviço Python (e mesma conta do Kaggle) das capturas; longo como elas. */
+function montarGiros(pool: pg.Pool, config: Config, extra: ConfigWorker) {
+  const pythonPadrao = resolve(extra.RECONSTRUCAO_DIR, process.platform === 'win32' ? '.venv/Scripts/python.exe' : '.venv/bin/python');
+  if (extra.GIRO_RENDERIZADOR === 'simulado' && !extra.GIRO_SIMULADO_ZIP) throw new Error('Defina GIRO_SIMULADO_ZIP');
+  const renderizador =
+    extra.GIRO_RENDERIZADOR === 'simulado'
+      ? renderizadorSimulado(extra.GIRO_SIMULADO_ZIP!, extra.GIRO_SIMULADO_QUADROS)
+      : renderizadorPython({
+          python: extra.RECONSTRUCAO_PYTHON ?? pythonPadrao,
+          diretorio: extra.RECONSTRUCAO_DIR,
+          usuarioKaggle: extra.KAGGLE_USERNAME,
+          blender: extra.GIRO_BLENDER,
+          qualidade: { quadros: extra.GIRO_QUADROS, largura: extra.GIRO_LARGURA, altura: extra.GIRO_ALTURA, amostras: extra.GIRO_AMOSTRAS },
+        });
+  return { pool, armazenamento: armazenamentoDaConfig(config), renderizador, pastaTrabalho: resolve(extra.WORKER_PASTA) };
+}
+
+/**
+ * Processa as capturas e os giros da fila até ela esvaziar e devolve quantos processou (execução agendada, ex.:
+ * GitHub Actions).
+ */
 export async function processarFila(pool: pg.Pool, config: Config, extra: ConfigWorker): Promise<number> {
   const deps = montarDeps(pool, config, extra);
+  const giros = montarGiros(pool, config, extra);
   let n = 0;
   for (;;) {
     const r = await processarProxima(deps);
-    if (r === 'vazia') return n;
-    n++;
-    console.info(`[worker] captura processada: ${r}`);
+    if (r !== 'vazia') console.info(`[worker] captura processada: ${r}`);
+    const g = await processarProximoGiro(giros);
+    if (g !== 'vazia') console.info(`[worker] giro 360° renderizado: ${g}`);
+    if (r === 'vazia' && g === 'vazia') return n;
+    n += Number(r !== 'vazia') + Number(g !== 'vazia');
   }
 }
 
@@ -79,6 +114,7 @@ function montarPlantas(pool: pg.Pool, config: Config, extra: ConfigWorker) {
 
 export function iniciarWorker(pool: pg.Pool, config: Config, extra: ConfigWorker) {
   const deps = extra.WORKER_CAPTURAS ? montarDeps(pool, config, extra) : null;
+  const giros = extra.WORKER_CAPTURAS ? montarGiros(pool, config, extra) : null;
   const bim = extra.WORKER_BIM ? montarBim(pool, config, extra) : null;
   const plantas = extra.WORKER_BIM ? montarPlantas(pool, config, extra) : null;
   const retencao = periodica(6 * 3600 * 1000, async () => {
@@ -108,7 +144,9 @@ export function iniciarWorker(pool: pg.Pool, config: Config, extra: ConfigWorker
         if (planta !== 'vazia') console.info(`[worker] leitura de planta: ${planta}`);
         const r = deps ? await processarProxima(deps) : 'vazia';
         if (r !== 'vazia') console.info(`[worker] captura processada: ${r}`);
-        if (r === 'vazia' && conversao === 'vazia' && planta === 'vazia' && ativo) await esperar(extra.WORKER_INTERVALO_S * 1000);
+        const giro = giros ? await processarProximoGiro(giros) : 'vazia';
+        if (giro !== 'vazia') console.info(`[worker] giro 360° renderizado: ${giro}`);
+        if (r === 'vazia' && conversao === 'vazia' && planta === 'vazia' && giro === 'vazia' && ativo) await esperar(extra.WORKER_INTERVALO_S * 1000);
       } catch (e) {
         console.error('[worker] erro inesperado', e);
         if (ativo) await esperar(extra.WORKER_INTERVALO_S * 1000);

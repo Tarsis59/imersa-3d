@@ -65,3 +65,11 @@ export async function revogarLink(predioId: string, linkId: string): Promise<{ e
   revalidatePath(`/painel/predios/${predioId}`);
   return {};
 }
+
+/** Pede o giro 360° fotorrealista do modelo atual (render no Blender, na GPU gratuita do Kaggle). */
+export async function pedirGiro(predioId: string): Promise<{ erro?: string }> {
+  const r = await api(`/predios/${encodeURIComponent(predioId)}/giros`, { metodo: 'POST', corpo: {}, token: await tokenParaAcao() });
+  if (r.status !== 201) return { erro: mensagem(r.status, r.dados) };
+  revalidatePath(`/painel/predios/${predioId}`);
+  return {};
+}
