@@ -103,11 +103,13 @@ test('lazer: a gestão marca no 3D, o tour "Conheça o lazer" mostra cada espaç
   await page.getByRole('button', { name: 'Desligar o som ambiente' }).click();
   await expect(vitrine).toHaveAttribute('data-som', 'desligado', { timeout: 10_000 });
 
-  // cliente no celular: vê os mesmos pontos e faz o tour (o tour completo vai para os Números)
+  // cliente no celular: vê os mesmos pontos e faz o tour (o tour completo vai para os Números). A Vitrine da gestão
+  // sai da tela antes: no CI (desenho por software) dois 3D ao mesmo tempo dividem a CPU e o do celular não carregava
+  await page.goto(`${paginaProjeto}/numeros`);
   const celular = await browser.newContext({ ...devices['Pixel 7'], deviceScaleFactor: 1 });
   const cliente = await celular.newPage();
   await cliente.goto(link);
-  await expect(cliente.getByTestId('vitrine-3d')).toHaveAttribute('data-estado', 'pronto', { timeout: 60_000 });
+  await expect(cliente.getByTestId('vitrine-3d')).toHaveAttribute('data-estado', 'pronto', { timeout: 120_000 });
   await expect(cliente.getByTestId('vitrine-3d')).toHaveAttribute('data-lazer', '2');
   await expect(cliente.getByTestId('lazer').getByRole('button', { name: 'Marcar no 3D' })).toHaveCount(0); // só a gestão marca
   await cliente.getByRole('button', { name: 'Conheça o lazer em 2 min' }).tap();
