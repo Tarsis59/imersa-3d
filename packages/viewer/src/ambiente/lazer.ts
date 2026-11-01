@@ -9,6 +9,8 @@ export interface PontoLazer {
   z: number;
   /** Texto da placa (nome, com o ícone da categoria). */
   rotulo: string;
+  /** Piscina ou espelho d'água: o som ambiente põe água ali. */
+  agua?: boolean;
 }
 
 /** Altura da bolinha do marcador acima do piso, em metros. */
@@ -89,7 +91,7 @@ export function criarMarcadoresLazer(pontos: readonly PontoLazer[]): MarcadoresL
   for (const p of pontos) {
     const g = new THREE.Group();
     g.position.set(p.x, p.y, p.z);
-    const material = new THREE.MeshBasicMaterial({ color: COR, depthTest: false, transparent: true });
+    const material = new THREE.MeshBasicMaterial({ color: COR }); // a bolinha some atrás das paredes; a placa fica sempre à vista
     const mHaste = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.8 });
     const mAnel = new THREE.MeshBasicMaterial({ color: COR, transparent: true, opacity: 0.7, side: THREE.DoubleSide });
     materiais.push(material, mHaste, mAnel);

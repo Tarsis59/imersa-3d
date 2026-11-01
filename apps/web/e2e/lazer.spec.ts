@@ -76,6 +76,33 @@ test('lazer: a gestão marca no 3D, o tour "Conheça o lazer" mostra cada espaç
   await painel.getByRole('button', { name: 'Voltar ao prédio' }).click();
   await expect(painel).toHaveCount(0);
 
+  // moradores caminhando na calçada: quantos depende da qualidade (no aparelho fraco, nenhum)
+  const POR_NIVEL: Record<string, string> = { alto: '16', medio: '8', baixo: '0' };
+  await expect
+    .poll(async () => {
+      const [nivel, n] = [await vitrine.getAttribute('data-nivel'), await vitrine.getAttribute('data-moradores')];
+      return nivel ? POR_NIVEL[nivel] === n : false;
+    })
+    .toBe(true);
+  // na calçada, a pé: os moradores passando (imagem anexada para revisão)
+  await page.getByRole('button', { name: 'Andar a pé (1ª pessoa)' }).click();
+  await page.keyboard.down('s'); // dois passos para trás, até o meio da calçada
+  await page.waitForTimeout(1500);
+  await page.keyboard.up('s');
+  const quadro = (await vitrine.boundingBox())!;
+  await page.mouse.move(quadro.x + quadro.width * 0.3, quadro.y + quadro.height * 0.5);
+  await page.mouse.down();
+  await page.mouse.move(quadro.x + quadro.width * 0.3 + 390, quadro.y + quadro.height * 0.5, { steps: 12 }); // olha ao longo da calçada
+  await page.mouse.up();
+  await page.waitForTimeout(3000);
+  await vitrine.screenshot({ path: test.info().outputPath('calcada-moradores.png') });
+  await page.getByRole('button', { name: 'Voltar para a vista de cima' }).click();
+  // som ambiente: liga no toque (pássaros, rua, água da piscina) e desliga
+  await page.getByRole('button', { name: 'Ligar o som ambiente' }).click();
+  await expect(vitrine).toHaveAttribute('data-som', 'ligado');
+  await page.getByRole('button', { name: 'Desligar o som ambiente' }).click();
+  await expect(vitrine).toHaveAttribute('data-som', 'desligado', { timeout: 10_000 });
+
   // cliente no celular: vê os mesmos pontos e faz o tour (o tour completo vai para os Números)
   const celular = await browser.newContext({ ...devices['Pixel 7'], deviceScaleFactor: 1 });
   const cliente = await celular.newPage();

@@ -207,7 +207,7 @@ export function Vitrine({
   // lazer no 3D: marcadores com o nome; tocar num marcador voa até ele
   useEffect(() => {
     if (estado !== 'pronto') return;
-    viewer.current?.definirLazer(itensLazer.map((l) => ({ id: l.id, x: l.x, y: l.y, z: l.z, rotulo: rotuloDoPonto(l) })));
+    viewer.current?.definirLazer(itensLazer.map((l) => ({ id: l.id, x: l.x, y: l.y, z: l.z, rotulo: rotuloDoPonto(l), agua: l.categoria === 'piscina' })));
   }, [estado, itensLazer]);
   useEffect(() => {
     if (estado !== 'pronto') return;
@@ -647,6 +647,9 @@ export function Vitrine({
         data-acabamento={telemetria?.acabamento ? 'ligado' : 'desligado'}
         data-imersivo={emImersivo ?? ''}
         data-lazer={itensLazer.length}
+        data-moradores={telemetria?.moradores ?? 0}
+        data-nivel={telemetria?.nivel ?? ''}
+        data-som={telemetria?.som ? 'ligado' : 'desligado'}
         data-marcando-lazer={marcandoLazer ? 'sim' : ''}
         data-apresentacao={apresentando ? 'ligada' : 'desligada'}
         data-unidade-da-vez={vitrineDaVez ?? ''}
@@ -1065,6 +1068,15 @@ export function Vitrine({
                 ))}
               </div>
             </fieldset>
+            <Botao
+              type="button"
+              variante="secundario"
+              disabled={estado !== 'pronto'}
+              aria-pressed={telemetria?.som ?? false}
+              onClick={() => void viewer.current?.definirSom(!telemetria?.som)}
+            >
+              {telemetria?.som ? 'Desligar o som ambiente' : 'Ligar o som ambiente'}
+            </Botao>
             {giroRenderizado && (
               <Botao type="button" disabled={progressoGiro !== null} onClick={() => void abrirGiroFoto()}>
                 Abrir giro 360° fotorrealista

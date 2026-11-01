@@ -26,6 +26,8 @@ import { criarConfigurador, type Configurador, type FonteMovel, type Superficie 
 import type { Acabamento } from './configurador/padroes';
 import { ajustarPose, type PoseMovel } from './configurador/moveis';
 import { exportarUsdz, montarMaquete } from './xr/maquete';
+import { caminhoRetangular, criarPessoas, MORADORES_POR_NIVEL, planejarMoradores, type Pessoas } from './ambiente/pessoas';
+import { criarAmbienteSonoro } from './ambiente/som';
 import { criarMarcadoresLazer, poseParaLazer, type MarcadoresLazer, type PontoLazer } from './ambiente/lazer';
 import { iniciarAr, iniciarVr, type ContextoXr, type SessaoXr, type TipoXr } from './xr/sessao';
 
@@ -61,6 +63,10 @@ export interface EstadoViewer {
   direcao: { x: number; z: number };
   /** Passeio no óculos (`vr`) ou maquete na mesa pela câmera (`ar`); `null` = tela normal. */
   imersivo: TipoXr | null;
+  /** Moradores caminhando na calçada (0 no aparelho fraco e nas cenas de teste). */
+  moradores: number;
+  /** Som ambiente tocando. */
+  som: boolean;
 }
 
 /** Resumo da visita para a telemetria. */
@@ -119,6 +125,11 @@ export interface Viewer {
   definirLazer(pontos: readonly PontoLazer[]): void;
   /** Voa até o ponto do lazer, com ele em destaque (tour "Conheça o lazer"). */
   voarParaLazer(id: string): boolean;
+  /**
+   * Som ambiente (pássaros, rua, água da piscina), posicionado no espaço. Ligar precisa vir de um gesto da pessoa.
+   * Resolve se ficou tocando.
+   */
+  definirSom(ligado: boolean): Promise<boolean>;
   /** Toque num marcador do lazer. */
   aoSelecionarLazer(cb: ((id: string) => void) | null): void;
   /** Segue a câmera de outra pessoa (cliente no tour guiado), suave; `null` devolve o controle. */
@@ -323,7 +334,10 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
   /** 0 de dia → 1 à noite: janelas acesas nas unidades (só no prédio desenhado pela fachada procedural). */
   let luzNoturna = 0;
   const LUZ_JANELA = 0xffb46b;
-  /** Unidade com luz acesa à noite (fixo por unidade, ~60%): o prédio parece habitado sem piscar. */
+  /**
+   * Unidade com luz acesa à noite (~60%), pelo código da unidade (fixo; o id muda a cada banco e a foto da noite
+   * nunca saía igual): o prédio parece habitado sem piscar.
+   */
   const acesaANoite = (id: string) => {
     let h = 0;
     for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) | 0;
@@ -345,7 +359,7 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
       }
       const marcada = id === selecionada ? COR_SELECAO : favoritos.has(id) ? COR_FAVORITA : null;
       // à noite, janelas acesas (luz quente atrás do vidro; os caixilhos da textura continuam escuros)
-      const acesa = marcada === null && luzNoturna > 0 && p.material.map !== null && (p.unidade.status === 'disponivel' || acesaANoite(id));
+      const acesa = marcada === null && luzNoturna > 0 && p.material.map !== null && (p.unidade.status === 'disponivel' || acesaANoite(`${p.unidade.andar}:${p.unidade.codigo}`));
       if (marcada !== null || !acesa) p.material.emissive.setHex(marcada ?? 0x000000);
       // luz quente puxada para a cor da situação: à noite continua dando para ver o que está à venda
       else p.material.emissive.setHex(LUZ_JANELA).lerp(new THREE.Color(COR_UNIDADE[p.unidade.status]), 0.45);
@@ -452,10 +466,30 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
       for (const m of paisagismo.materiais) materiais.delete(m);
       paisagismo.destruir();
     }
-    paisagismo = criarPaisagismo(planejarPaisagismo(caixaDoPredio(), obstaculos), (m) => prepararMaterial(m));
+    const plano = planejarPaisagismo(caixaDoPredio(), obstaculos);
+    paisagismo = criarPaisagismo(plano, (m) => prepararMaterial(m));
     paisagismo.definirNoite(luzNoturna);
     cena.add(paisagismo.objeto);
+    arvoresDoLote = plano.arvores;
+    som.definirFontes({ arvores: arvoresDoLote, agua: aguaDoLazer() });
+    // moradores caminhando no meio da calçada (fora das cenas de teste, que precisam sair sempre iguais)
+    if (pessoas) {
+      cena.remove(pessoas.objeto);
+      for (const m of pessoas.materiais) materiais.delete(m);
+      pessoas.destruir();
+      pessoas = null;
+    }
+    if (!config.qualidadeFixa) {
+      const caminho = caminhoRetangular(plano.calcada, 1.5);
+      pessoas = criarPessoas(caminho, planejarMoradores(MORADORES_POR_NIVEL.alto, caminho.comprimento), (m) => prepararMaterial(m));
+      pessoas.definirQuantidade(MORADORES_POR_NIVEL[qualidade.nivel.nome]);
+      cena.add(pessoas.objeto);
+    }
   }
+  let pessoas: Pessoas | null = null;
+  let arvoresDoLote: ReadonlyArray<{ x: number; z: number; altura: number }> = [];
+  const som = criarAmbienteSonoro();
+  const aguaDoLazer = () => pontosLazer.filter((p) => p.agua).map((p) => ({ x: p.x, y: p.y, z: p.z }));
 
   function caixaDoPredio(): Caixa {
     const b = new THREE.Box3();
@@ -772,6 +806,7 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
       }
     }
     for (const m of materiais) m.needsUpdate = true;
+    pessoas?.definirQuantidade(MORADORES_POR_NIVEL[n.nome]);
     ajustarPos(n);
   }
 
@@ -877,6 +912,8 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
     pausado = true;
     const comLazer = marcadores?.objeto.visible ?? false;
     if (marcadores) marcadores.objeto.visible = false; // fora das imagens e das máscaras do giro
+    const comPessoas = pessoas?.objeto.visible ?? false;
+    if (pessoas) pessoas.objeto.visible = false;
     const quadros: Giro['quadros'] = [];
     try {
       for (let i = 0; i < total; i++) {
@@ -938,6 +975,7 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
       camera.lookAt(guardada.alvo);
       pausado = false;
       if (marcadores) marcadores.objeto.visible = comLazer;
+      if (pessoas) pessoas.objeto.visible = comPessoas;
     }
     return { quadros, unidades, largura: w, altura: h };
   }
@@ -959,6 +997,8 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
       posicao: { x: camera.position.x, y: camera.position.y, z: camera.position.z },
       acabamento: pos !== null,
       imersivo: imersiva?.tipo ?? null,
+      moradores: pessoas?.objeto.visible ? (pessoas.objeto.children[0] as THREE.InstancedMesh).count : 0,
+      som: som.ligado(),
       direcao: { x: direcaoCamera.x / (Math.hypot(direcaoCamera.x, direcaoCamera.z) || 1), z: direcaoCamera.z / (Math.hypot(direcaoCamera.x, direcaoCamera.z) || 1) },
     });
   };
@@ -968,6 +1008,8 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
       imersiva.quadro(frame);
       if (imersiva.tipo === 'vr') {
         atmosfera.quadro(camera, agora / 1000);
+        pessoas?.quadro(agora / 1000);
+        som.quadro(camera, agora / 1000, luzNoturna < 0.5);
         csm.update();
       }
       renderer.render(imersiva.cena, camera);
@@ -1048,6 +1090,8 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
 
     atualizarRaioX(modo === 'orbita' && !emVista ? orbita.target : null);
     atmosfera.quadro(camera, config.qualidadeFixa || menosMovimento ? 0 : agora / 1000); // qualidade fixa = cena determinística (nuvens paradas)
+    pessoas?.quadro(agora / 1000);
+    som.quadro(camera, agora / 1000, luzNoturna < 0.5);
     csm.update();
     desenhar();
     if (esperandoQuadro.length) for (const ok of esperandoQuadro.splice(0)) ok(performance.now());
@@ -1143,6 +1187,14 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
       if (!pontos.length) return;
       marcadores = criarMarcadoresLazer(pontos);
       cena.add(marcadores.objeto);
+      som.definirFontes({ arvores: arvoresDoLote, agua: aguaDoLazer() }); // a água da piscina entra no som
+    },
+    async definirSom(ligado) {
+      if (!ligado) {
+        som.desligar();
+        return false;
+      }
+      return som.ligar();
     },
     voarParaLazer(id) {
       const p = pontosLazer.find((x) => x.id === id);
@@ -1385,6 +1437,8 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
       atmosfera.destruir();
       paisagismo?.destruir();
       marcadores?.destruir();
+      pessoas?.destruir();
+      som.destruir();
       cena.traverse((o) => {
         if (o instanceof THREE.Mesh) o.geometry.dispose();
       });

@@ -21,3 +21,4 @@ export { estudoSolar, type EstudoSolar, type PeriodoDeSol } from './sun/insolaca
 export { suporteImersivo, type SuporteImersivo } from './xr/suporte';
 export { escalaDaMaquete, gestoDeDoisDedos, pontoDeEntrada, TAMANHO_MAQUETE_M } from './xr/maquete';
 export { poseParaLazer, type PontoLazer } from './ambiente/lazer';
+export { volumeDaRua, cantoDePassaro } from './ambiente/som';
