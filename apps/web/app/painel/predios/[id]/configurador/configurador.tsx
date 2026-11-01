@@ -21,6 +21,7 @@ import {
   type Orcamento,
 } from '@/lib/configurador';
 import { ESTILOS, LISTA_ESTILOS, escolhasDoEstilo, type Estilo } from '@/lib/estilos';
+import { lerPedidosAcabamento, materialDoPedido, superficiesDoPedido } from '@/lib/acabamento-por-texto';
 import type { DadosSalvar } from './actions';
 
 const PASSO_M = 0.1;
@@ -198,6 +199,28 @@ export function Configurador({
   }
 
   /** Todas as superfícies de uma vez, com o material do catálogo que combina com o estilo. */
+  // pedido por texto (Plano 11e, item 21): "piso de madeira na sala, parede verde no quarto"
+  const [pedidoTexto, setPedidoTexto] = useState('');
+  const [retornoTexto, setRetornoTexto] = useState<string | null>(null);
+  async function pedirPorTexto() {
+    const pedidos = lerPedidosAcabamento(pedidoTexto);
+    if (!pedidos.length) return setRetornoTexto('Não entendi. Ex.: "piso de madeira na sala, parede verde no quarto".');
+    const feitos: string[] = [];
+    const faltas: string[] = [];
+    for (const p of pedidos) {
+      const chaves = superficiesDoPedido(p, superficies);
+      const m = materialDoPedido(p, materiais);
+      if (!chaves.length) faltas.push(`não achei ${p.categoria}${p.comodo ? ` em ${p.comodo}` : ''} neste modelo`);
+      else if (!m) faltas.push(`o catálogo não tem ${p.categoria} parecido com "${p.frase}"`);
+      else {
+        for (const c of chaves) await trocar(c, m.id);
+        feitos.push(`${m.nome} em ${chaves.length} superfície${chaves.length > 1 ? 's' : ''}`);
+      }
+    }
+    setRetornoTexto([feitos.length ? `Troquei: ${feitos.join('; ')}.` : '', faltas.length ? `Não deu: ${faltas.join('; ')}.` : ''].filter(Boolean).join(' '));
+    if (feitos.length) setPedidoTexto('');
+  }
+
   async function aplicarEstilo(nome: Estilo) {
     const v = viewer.current;
     if (!v) return;
@@ -284,6 +307,39 @@ export function Configurador({
       <div className="grid gap-6 md:grid-cols-2">
         <Cartao titulo="Acabamentos">
           {estado === 'pronto' && superficies.length === 0 && <p className="text-sm text-suave">Este modelo não tem superfícies que possam ser trocadas.</p>}
+          {superficies.length > 0 && (
+            <form
+                className="mb-4 grid gap-2"
+                data-testid="acabamento-por-texto"
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  void pedirPorTexto();
+                }}
+              >
+                <label htmlFor="pedido-acabamento" className="text-sm font-medium">
+                  Peça por texto
+                </label>
+                <div className="flex gap-2">
+                  <input
+                    id="pedido-acabamento"
+                    value={pedidoTexto}
+                    maxLength={400}
+                    disabled={estado !== 'pronto'}
+                    onChange={(e) => setPedidoTexto(e.target.value)}
+                    placeholder="Ex.: piso de madeira na sala, parede verde no quarto"
+                    className="min-w-0 flex-1 rounded-lg border border-borda bg-superficie px-3 py-2 text-sm"
+                  />
+                  <button type="submit" disabled={estado !== 'pronto' || !pedidoTexto.trim()} className="rounded-lg bg-acento px-3 text-sm font-semibold text-acento-texto disabled:opacity-50">
+                    Trocar
+                  </button>
+                </div>
+                {retornoTexto && (
+                  <p role="status" className="text-sm text-suave" data-testid="retorno-acabamento">
+                    {retornoTexto}
+                  </p>
+                )}
+              </form>
+          )}
           {superficies.length > 0 && (
             <fieldset className="mb-4 grid gap-2" data-testid="estilos">
               <legend className="text-sm font-medium">Decoração com um toque</legend>
