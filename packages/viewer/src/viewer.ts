@@ -469,6 +469,8 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
   let cidadeCompleta: CidadeCompleta | null = null;
   /** Carros andando pelas ruas do entorno (Plano 12a, item 10). */
   let carros: Carros | null = null;
+  /** Último entorno recebido: os lotes chegam depois e a cidade é remontada sem os prédios do OSM em cima deles. */
+  let entornoAtual: Entorno | null = null;
   let atribuicaoEntorno: string | null = null;
   // cor de cada prédio vem do vértice (acabamento real); janelas e laje no shader (ver city/fachadaCidade)
   const materialCidade = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.88, vertexColors: true });
@@ -719,6 +721,13 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
     for (const p of pecas.values()) b.union(new THREE.Box3(new THREE.Vector3(p.caixa.minX, p.caixa.minY, p.caixa.minZ), new THREE.Vector3(p.caixa.maxX, p.caixa.maxY, p.caixa.maxZ)));
     for (const s of solidos) b.union(new THREE.Box3().setFromObject(s));
     return b.isEmpty() ? { minX: -10, maxX: 10, minY: 0, maxY: 10, minZ: -10, maxZ: 10 } : caixaDe(b);
+  }
+  /** Onde os prédios do OSM não entram: a caixa do prédio unida à dos lotes (loteamento). */
+  function areaDoEmpreendimento(): Caixa {
+    const c = caixaDoPredio();
+    if (!loteamento) return c;
+    const l = loteamento.caixa;
+    return { ...c, minX: Math.min(c.minX, l.minX), maxX: Math.max(c.maxX, l.maxX), minZ: Math.min(c.minZ, l.minZ), maxZ: Math.max(c.maxZ, l.maxZ) };
   }
   /** Para a telemetria: a distância atual da câmera, na mesma escala 0..1 do zoom (reflete roda e pinça também). */
   function zoomAtual(): number {
@@ -1905,6 +1914,7 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
       }
       loteamento = criarLotes(lotes, centro, rotacao, cidadeCompleta?.terreno.altura);
       cena.add(loteamento.objeto);
+      if (entornoAtual) void this.definirEntorno(entornoAtual); // a cidade já veio: tira os prédios que ficam em cima dos lotes
       // loteamento não tem torre: o jardim e a fachada do "prédio" vazio sairiam por cima dos lotes
       if (paisagismo) paisagismo.objeto.visible = false;
       if (raizPredio) raizPredio.visible = false;
@@ -2394,6 +2404,7 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
       await pronto;
       apagarRota();
       centroEntorno = entorno ? { lon: entorno.centro.lon, lat: entorno.centro.lat } : null;
+      entornoAtual = entorno;
       // montar a cidade e compilar os materiais dela travam alguns quadros: não é o aparelho, não baixa a qualidade
       qualidade.ignorarCarga();
       if (cidade) {
@@ -2420,7 +2431,8 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
       obstaculos = [];
       estudo = null;
       if (!entorno) return 0;
-      const lote = caixaDoPredio();
+      // o terreno do empreendimento: o prédio e, num loteamento, a área dos lotes (sem prédios do OSM em cima deles)
+      const lote = areaDoEmpreendimento();
       const predios = entornoParaLocal(entorno.predios, entorno.centro, rotacao, lote);
       // prédios no chão de verdade: a base de cada um é a altura do terreno no meio dele
       const terrenoDe = terrenoDoRelevo(entorno.relevo, entorno.centro, rotacao, lote);
