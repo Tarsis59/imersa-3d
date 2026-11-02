@@ -22,7 +22,8 @@ export type AcaoComando =
   | { tipo: 'corte'; andar: number | null }
   | { tipo: 'modo'; modo: 'orbita' | 'primeira-pessoa' }
   | { tipo: 'visao_geral' }
-  | { tipo: 'som'; ligado: boolean };
+  | { tipo: 'som'; ligado: boolean }
+  | { tipo: 'separar_andares'; ligado: boolean };
 
 export interface Interpretacao {
   acoes: AcaoComando[];
@@ -180,7 +181,12 @@ export function interpretarComando(texto: string): Interpretacao {
   // hora do dia (o "sol da manhã" é filtro, não hora)
   let hora: number | null = null;
   const h = n.match(/\b(?:as|a|pelas?|de)\s*(\d{1,2})\s*(?:h|horas?|hs)\b/) ?? n.match(/\b(\d{1,2})\s*h\b/);
-  if (h && Number(h[1]) <= 23) hora = Number(h[1]);
+  // "10 da manhã", "3 da tarde", "8 da noite"
+  const falada = n.match(/\b(\d{1,2})\s*(?:h|horas?|hs)?\s*da\s*(manha|tarde|noite|madrugada)\b/);
+  if (falada && Number(falada[1]) >= 1 && Number(falada[1]) <= 12) {
+    const x = Number(falada[1]);
+    hora = falada[2] === 'tarde' ? (x === 12 ? 12 : x + 12) : falada[2] === 'noite' ? (x === 12 ? 0 : x + 12) : x === 12 ? 0 : x;
+  } else if (h && Number(h[1]) <= 23) hora = Number(h[1]);
   else if (/\b(a|de|pela|durante a) noite\b|\bnoturn[ao]\b|\banoitecer\b/.test(n)) hora = 21;
   else if (/\b(por|pôr) do sol\b|\bentardecer\b|\bfim de tarde\b/.test(n)) hora = 18;
   else if (/\bnascer do sol\b|\bamanhecer\b|\balvorada\b/.test(n)) hora = 6;
@@ -224,6 +230,14 @@ export function interpretarComando(texto: string): Interpretacao {
   } else if (/\b(vista de cima|visao geral|volta(r)? (para|pro|ao) (o )?predio|mostra(r)? o predio( todo)?|de cima)\b/.test(n)) {
     acoes.push({ tipo: 'visao_geral' });
     partes.push('visão geral');
+  }
+  // vista explodida (os andares separados no alto)
+  if (/\b(junta(r)?|une|unir|fecha(r)?) (os )?andares\b/.test(n)) {
+    acoes.push({ tipo: 'separar_andares', ligado: false });
+    partes.push('andares juntos');
+  } else if (/\bexplodid[ao]\b|\bexplod(e|ir)\b|\b(separa(r)?|separe|abre|abrir|abra) (os )?andares\b|\bandares separados\b/.test(n)) {
+    acoes.push({ tipo: 'separar_andares', ligado: true });
+    partes.push('andares separados');
   }
   if (/\b(desliga(r)?|sem|tira(r)?|para(r)?) (o )?(som|barulho|audio)\b|\bsilencio\b|\bmudo\b/.test(n)) {
     acoes.push({ tipo: 'som', ligado: false });

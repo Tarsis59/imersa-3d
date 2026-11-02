@@ -48,10 +48,10 @@ export async function vincularPeca(predioId: string, unidadeId: string, meshNode
 }
 
 /** Link novo para o cliente. O endereço completo só aparece agora (o banco guarda só o hash do token). */
-export async function criarLink(predioId: string, titulo: string, dias: number): Promise<{ url: string; expiraEm: string } | { erro: string }> {
+export async function criarLink(predioId: string, titulo: string, dias: number, whatsapp = ''): Promise<{ url: string; expiraEm: string } | { erro: string }> {
   const r = await api<{ url: string; expiraEm: string }>(`/predios/${encodeURIComponent(predioId)}/links`, {
     metodo: 'POST',
-    corpo: { ...(titulo.trim() ? { titulo: titulo.trim() } : {}), dias },
+    corpo: { ...(titulo.trim() ? { titulo: titulo.trim() } : {}), dias, ...(whatsapp.trim() ? { whatsapp: whatsapp.trim() } : {}) },
     token: await tokenParaAcao(),
   });
   if (r.status !== 201) return { erro: mensagem(r.status, r.dados) };
@@ -106,6 +106,20 @@ export async function comandarEstande(predioId: string, estandeId: string, coman
 export async function comandoGestao(predioId: string, texto: string, aplicar: boolean): Promise<import('./pedir-por-texto').RespostaComando> {
   const r = await api<import('./pedir-por-texto').RespostaComando>(`/predios/${encodeURIComponent(predioId)}/comandos`, { metodo: 'POST', corpo: { texto, aplicar }, token: await tokenParaAcao() });
   if (r.status !== 200) return { aplicado: false, mudancas: [], avisos: [], acoes: [], erro: mensagem(r.status, r.dados) };
+  if (aplicar) revalidatePath(`/painel/predios/${predioId}`);
+  return r.dados;
+}
+
+export type PreviaLotes = { lotes: number; quadras: string[]; areaTotalM2: number; avisos: string[]; aplicado: boolean };
+
+/** Loteamento (Plano 12d): DXF/DWG exportado em DXF, ou GeoJSON do QGIS. Sem `aplicar`, só a prévia. */
+export async function importarLotes(predioId: string, formato: 'dxf' | 'geojson', conteudo: string, fuso: number | null, aplicar: boolean): Promise<PreviaLotes | { erro: string }> {
+  const r = await api<PreviaLotes>(`/predios/${encodeURIComponent(predioId)}/lotes/importar`, {
+    metodo: 'POST',
+    corpo: { formato, conteudo, ...(fuso ? { fuso } : {}), aplicar },
+    token: await tokenParaAcao(),
+  });
+  if (r.status !== 200) return { erro: r.status === 400 ? 'Não deu para ler o arquivo. Confira se é DXF (texto) ou GeoJSON.' : mensagem(r.status, r.dados) };
   if (aplicar) revalidatePath(`/painel/predios/${predioId}`);
   return r.dados;
 }

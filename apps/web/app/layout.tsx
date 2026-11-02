@@ -7,7 +7,7 @@ import type { ReactNode } from 'react';
 const SITE_URL =
   process.env.SITE_URL ?? (process.env.VERCEL_PROJECT_PRODUCTION_URL ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}` : 'http://localhost:3000');
 
-export const metadata: Metadata = { metadataBase: new URL(SITE_URL), title: 'Imersa 3D', description: 'Plataforma imobiliária 3D' };
+export const metadata: Metadata = { metadataBase: new URL(SITE_URL), title: 'Imersa 3D', description: 'Plataforma imobiliária 3D', manifest: '/app.webmanifest', appleWebApp: { capable: true, title: 'Imersa 3D', statusBarStyle: 'black-translucent' } };
 
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (

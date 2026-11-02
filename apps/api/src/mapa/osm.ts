@@ -91,6 +91,35 @@ export function espacar(intervaloMs: number) {
   };
 }
 
+/**
+ * O Overpass público aceita poucas consultas ao mesmo tempo por endereço e recusa na hora (429) ou cai por tempo
+ * (504) quando está cheio. Por isso as consultas saem uma de cada vez e tentam de novo com espera crescente.
+ */
+export function filaOverpass(fazer: (consulta: string, tempoMs: number) => Promise<Response>, esperas: readonly number[] = [2_000, 6_000]) {
+  let corrente: Promise<unknown> = Promise.resolve();
+  return <T>(consulta: string, tempoMs: number, ler: (json: unknown) => T): Promise<T> => {
+    const vez = corrente.then(async () => {
+      for (let tentativa = 0; ; tentativa++) {
+        let motivo: string;
+        try {
+          const r = await fazer(consulta, tempoMs);
+          if (r.ok) return ler(await r.json());
+          motivo = `Overpass respondeu ${r.status}`;
+          if (r.status !== 429 && r.status < 500) throw new Error(motivo);
+        } catch (e) {
+          // consulta errada (4xx) não melhora repetindo; e quem já esperou o tempo todo não espera de novo
+          if ((e as Error).message?.startsWith('Overpass respondeu 4') || (e as Error).name === 'TimeoutError') throw e;
+          motivo = (e as Error).message;
+        }
+        if (tentativa >= esperas.length) throw new Error(motivo);
+        await new Promise((ok) => setTimeout(ok, esperas[tentativa]));
+      }
+    });
+    corrente = vez.catch(() => undefined);
+    return vez;
+  };
+}
+
 export interface ServicosMapa {
   buscarEndereco(texto: string): Promise<Endereco[]>;
   buscarPois(lat: number, lon: number, raioM: number): Promise<PoiOsm[]>;
@@ -167,6 +196,14 @@ export function interpretarPredios(json: unknown, centro: { lat: number; lon: nu
 /** Serviços reais do OpenStreetMap. `userAgent` deve identificar a empresa (exigência do Nominatim). */
 export function servicosMapaReais(userAgent: string): ServicosMapa {
   const fila = espacar(1100);
+  const overpass = filaOverpass((consulta, tempoMs) =>
+    fetch('https://overpass-api.de/api/interpreter', {
+      method: 'POST',
+      headers: { 'user-agent': userAgent, 'content-type': 'application/x-www-form-urlencoded', accept: 'application/json' },
+      body: new URLSearchParams({ data: consulta }),
+      signal: AbortSignal.timeout(tempoMs),
+    }),
+  );
   return {
     buscarEndereco: (texto) =>
       fila(async () => {
@@ -175,36 +212,9 @@ export function servicosMapaReais(userAgent: string): ServicosMapa {
         if (!r.ok) throw new Error(`Nominatim respondeu ${r.status}`);
         return interpretarNominatim(await r.json());
       }),
-    buscarPois: async (lat, lon, raioM) => {
-      const r = await fetch('https://overpass-api.de/api/interpreter', {
-        method: 'POST',
-        headers: { 'user-agent': userAgent, 'content-type': 'application/x-www-form-urlencoded', accept: 'application/json' },
-        body: new URLSearchParams({ data: consultaOverpass(lat, lon, raioM) }),
-        signal: AbortSignal.timeout(40_000),
-      });
-      if (!r.ok) throw new Error(`Overpass respondeu ${r.status}`);
-      return interpretarOverpass(await r.json());
-    },
-    buscarPredios: async (lat, lon, raioM) => {
-      const r = await fetch('https://overpass-api.de/api/interpreter', {
-        method: 'POST',
-        headers: { 'user-agent': userAgent, 'content-type': 'application/x-www-form-urlencoded', accept: 'application/json' },
-        body: new URLSearchParams({ data: consultaPredios(lat, lon, raioM) }),
-        signal: AbortSignal.timeout(60_000),
-      });
-      if (!r.ok) throw new Error(`Overpass respondeu ${r.status}`);
-      return interpretarPredios(await r.json(), { lat, lon }, 3000, raioM);
-    },
-    buscarMalha: async (lat, lon, raioM) => {
-      const r = await fetch('https://overpass-api.de/api/interpreter', {
-        method: 'POST',
-        headers: { 'user-agent': userAgent, 'content-type': 'application/x-www-form-urlencoded', accept: 'application/json' },
-        body: new URLSearchParams({ data: consultaMalha(lat, lon, raioM) }),
-        signal: AbortSignal.timeout(60_000),
-      });
-      if (!r.ok) throw new Error(`Overpass respondeu ${r.status}`);
-      return interpretarMalha(await r.json(), { lat, lon }, raioM);
-    },
+    buscarPois: (lat, lon, raioM) => overpass(consultaOverpass(lat, lon, raioM), 40_000, (j) => interpretarOverpass(j)),
+    buscarPredios: (lat, lon, raioM) => overpass(consultaPredios(lat, lon, raioM), 60_000, (j) => interpretarPredios(j, { lat, lon }, 3000, raioM)),
+    buscarMalha: (lat, lon, raioM) => overpass(consultaMalha(lat, lon, raioM), 60_000, (j) => interpretarMalha(j, { lat, lon }, raioM)),
     buscarRelevo: (lat, lon, raioM) =>
       lerRelevo({ lat, lon }, raioM, async (z, x, y) => {
         const r = await fetch(`https://s3.amazonaws.com/elevation-tiles-prod/terrarium/${z}/${x}/${y}.png`, { headers: { 'user-agent': userAgent }, signal: AbortSignal.timeout(20_000) });

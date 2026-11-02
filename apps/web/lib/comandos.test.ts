@@ -72,6 +72,25 @@ describe('comandos da Vitrine (50 frases)', () => {
     expect(interpretarComando('   ').acoes).toEqual([]);
   });
 
+  it('hora falada: "10 da manhã", "3 da tarde", "8 da noite", "meia-noite" não confunde', () => {
+    const hora = (f: string) => interpretarComando(f).acoes.find((a) => a.tipo === 'hora');
+    expect(hora('mostre às 10 da manhã')).toEqual({ tipo: 'hora', hora: 10 });
+    expect(hora('como fica às 3 da tarde')).toEqual({ tipo: 'hora', hora: 15 });
+    expect(hora('8 da noite')).toEqual({ tipo: 'hora', hora: 20 });
+    expect(hora('às 12 da noite')).toEqual({ tipo: 'hora', hora: 0 });
+    expect(hora('ao meio dia')).toEqual({ tipo: 'hora', hora: 12 });
+    // "de manhã" sozinho continua 9h
+    expect(hora('mostre de manhã')).toEqual({ tipo: 'hora', hora: 9 });
+  });
+
+  it('vista explodida: separar e juntar os andares', () => {
+    const acao = (f: string) => interpretarComando(f).acoes.find((x) => x.tipo === 'separar_andares');
+    expect(acao('separe os andares')).toEqual({ tipo: 'separar_andares', ligado: true });
+    expect(acao('mostre a vista explodida')).toEqual({ tipo: 'separar_andares', ligado: true });
+    expect(acao('junta os andares de novo')).toEqual({ tipo: 'separar_andares', ligado: false });
+    expect(acao('mostre o 5 andar')).toBeUndefined();
+  });
+
   it('números por extenso', () => {
     expect(numeros('vinte e um andares')).toBe('21 andares');
     expect(numeros('novecentos mil')).toBe('900 mil');

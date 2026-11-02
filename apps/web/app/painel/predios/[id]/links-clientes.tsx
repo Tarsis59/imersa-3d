@@ -1,5 +1,5 @@
 'use client';
-import { useState, useTransition } from 'react';
+import { useEffect, useState, useTransition } from 'react';
 import { Aviso, Botao, Campo, Selecao } from '@/components/ui';
 import type { LinkCliente, StatusLink } from '@/lib/tipos';
 
@@ -21,11 +21,20 @@ export function LinksClientes({
   predioNome: string;
   projetoNome: string;
   links: LinkCliente[];
-  criar: (titulo: string, dias: number) => Promise<{ url: string; expiraEm: string } | { erro: string }>;
+  criar: (titulo: string, dias: number, whatsapp: string) => Promise<{ url: string; expiraEm: string } | { erro: string }>;
   revogar: (linkId: string) => Promise<{ erro?: string }>;
 }) {
   const [titulo, setTitulo] = useState('');
   const [dias, setDias] = useState('30');
+  // o WhatsApp do corretor fica lembrado neste aparelho (é o mesmo em todo link que ele gera)
+  const [whatsapp, setWhatsapp] = useState('');
+  useEffect(() => {
+    try {
+      setWhatsapp(localStorage.getItem('imersa:whatsapp-corretor') ?? '');
+    } catch {
+      // sem armazenamento: o campo começa vazio
+    }
+  }, []);
   const [novo, setNovo] = useState<{ url: string; expiraEm: string } | null>(null);
   const [copiado, setCopiado] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
@@ -36,8 +45,17 @@ export function LinksClientes({
   return (
     <div className="grid gap-4">
       <p className="text-sm text-suave">Mande o link pelo WhatsApp: o cliente abre no celular, sem cadastro, e pode pedir contato. Cada visita e cada pedido aparecem aqui e em Leads.</p>
-      <div className="grid gap-3 sm:grid-cols-[1fr_160px_auto] sm:items-end">
+      <div className="grid gap-3 sm:grid-cols-[1fr_180px_140px_auto] sm:items-end">
         <Campo id="link-titulo" rotulo="Para quem (opcional)" placeholder="Família Souza" maxLength={120} value={titulo} onChange={(e) => setTitulo(e.target.value)} />
+        <Campo
+          id="link-whatsapp"
+          rotulo="Seu WhatsApp (opcional)"
+          placeholder="(11) 98888-7777"
+          inputMode="tel"
+          maxLength={20}
+          value={whatsapp}
+          onChange={(e) => setWhatsapp(e.target.value)}
+        />
         <Selecao id="link-dias" rotulo="Vale por" value={dias} onChange={(e) => setDias(e.target.value)}>
           <option value="7">7 dias</option>
           <option value="30">30 dias</option>
@@ -50,7 +68,12 @@ export function LinksClientes({
             iniciar(async () => {
               setErro(null);
               setCopiado(false);
-              const r = await criar(titulo, Number(dias));
+              const r = await criar(titulo, Number(dias), whatsapp);
+              try {
+                localStorage.setItem('imersa:whatsapp-corretor', whatsapp);
+              } catch {
+                // sem armazenamento (aba anônima): só não lembra da próxima vez
+              }
               if ('erro' in r) return setErro(r.erro);
               setNovo(r);
               setTitulo('');

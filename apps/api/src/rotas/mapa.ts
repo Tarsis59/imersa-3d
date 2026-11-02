@@ -8,7 +8,7 @@ import type { Sessao } from '../auth/tokens';
 import { registrarAuditoria } from '../auditoria';
 import { IdParam } from '../esquemas';
 import type { PredioOsm, ServicosMapa } from '../mapa/osm';
-import { distanciasAPe, type Area, type Via } from '../mapa/malha';
+import { distanciasAPe, rotaAPe, type Area, type Via } from '../mapa/malha';
 import type { Relevo } from '../mapa/relevo';
 
 interface Dependencias {
@@ -43,6 +43,8 @@ const ATRIBUICAO_COMPLETA = `${ATRIBUICAO_OSM} · relevo: Terrain Tiles (AWS Ope
 /** Ruas, verde e relevo vão um pouco além dos prédios (o chão chega ao horizonte da neblina). */
 const RAIO_CIDADE_M = 600;
 const REPETIR_RELEVO_H = 6;
+/** Ruas e verde que não vieram (o mapa público cheio): tenta de novo depois disso, sem travar cada visita. */
+const REPETIR_MALHA_MIN = 10;
 
 type Contexto = { tenantId: string; userId: string | null };
 
@@ -57,17 +59,17 @@ export function criarEntorno(pool: pg.Pool, mapa: ServicosMapa) {
   }
   /**
    * Ruas, verde, água e relevo: nunca derrubam o entorno (sem eles, a cidade fica só com os prédios num chão plano).
-   * Falha da malha grava lista vazia (não tenta de novo a cada visita; "Atualizar entorno" busca de novo); falha do
-   * relevo fica null e é tentada de novo depois de `REPETIR_RELEVO_H`.
+   * Falha da malha fica null ("não sei ainda", diferente de lista vazia = "não há ruas aqui") e é tentada de novo
+   * depois de `REPETIR_MALHA_MIN`; falha do relevo fica null e é tentada de novo depois de `REPETIR_RELEVO_H`.
    */
-  async function buscarCidade(centro: { lat: number; lon: number }): Promise<{ vias: Via[]; areas: Area[]; relevo: Relevo | null }> {
+  async function buscarCidade(centro: { lat: number; lon: number }): Promise<{ vias: Via[] | null; areas: Area[] | null; relevo: Relevo | null }> {
     const [malha, relevo] = await Promise.all([
       mapa.buscarMalha ? mapa.buscarMalha(centro.lat, centro.lon, RAIO_CIDADE_M).catch(() => null) : Promise.resolve(null),
       mapa.buscarRelevo ? mapa.buscarRelevo(centro.lat, centro.lon, RAIO_CIDADE_M).catch(() => null) : Promise.resolve(null),
     ]);
-    return { vias: malha?.vias ?? [], areas: malha?.areas ?? [], relevo };
+    return { vias: malha?.vias ?? null, areas: malha?.areas ?? null, relevo };
   }
-  const gravar = (c: pg.PoolClient, id: string, centro: { lat: number; lon: number }, predios: PredioOsm[], cidade?: { vias: Via[]; areas: Area[]; relevo: Relevo | null }) =>
+  const gravar = (c: pg.PoolClient, id: string, centro: { lat: number; lon: number }, predios: PredioOsm[], cidade?: { vias: Via[] | null; areas: Area[] | null; relevo: Relevo | null }) =>
     c.query(
       `INSERT INTO entornos (project_id, centro, raio_m, predios, vias, areas, relevo) VALUES ($1, ST_SetSRID(ST_MakePoint($3, $2), 4326), $4, $5::jsonb, $6::jsonb, $7::jsonb, $8::jsonb)
        ON CONFLICT (project_id) DO UPDATE SET centro = EXCLUDED.centro, raio_m = EXCLUDED.raio_m, predios = EXCLUDED.predios,
@@ -78,8 +80,8 @@ export function criarEntorno(pool: pg.Pool, mapa: ServicosMapa) {
         centro.lon,
         RAIO_ENTORNO_M,
         JSON.stringify(predios),
-        cidade ? JSON.stringify(cidade.vias) : null,
-        cidade ? JSON.stringify(cidade.areas) : null,
+        cidade?.vias ? JSON.stringify(cidade.vias) : null,
+        cidade?.areas ? JSON.stringify(cidade.areas) : null,
         cidade?.relevo ? JSON.stringify(cidade.relevo) : null,
       ],
     );
@@ -99,22 +101,60 @@ export function criarEntorno(pool: pg.Pool, mapa: ServicosMapa) {
     if (cache && cache.raio === RAIO_ENTORNO_M && cache.desvio <= DESVIO_MAX_CACHE_M) {
       let { vias, areas, relevo } = cache;
       // cache de antes da cidade completa (ou relevo que falhou há tempo): completa agora, sem refazer os prédios
-      const velho = Date.now() - new Date(cache.atualizadoEm).getTime() > REPETIR_RELEVO_H * 3_600_000;
-      if (vias === null || (relevo === null && velho)) {
+      const idadeMs = Date.now() - new Date(cache.atualizadoEm).getTime();
+      if ((vias === null && idadeMs > REPETIR_MALHA_MIN * 60_000) || (relevo === null && idadeMs > REPETIR_RELEVO_H * 3_600_000)) {
         const cidade = await buscarCidade(centro);
         vias = vias ?? cidade.vias;
         areas = areas ?? cidade.areas;
         relevo = relevo ?? cidade.relevo;
-        await withTenant(pool, contexto, (c) => gravar(c, id, centro, cache.predios, { vias: vias!, areas: areas ?? [], relevo }));
+        await withTenant(pool, contexto, (c) => gravar(c, id, centro, cache.predios, { vias, areas, relevo }));
       }
-      return { semLocalizacao: false, centro, predios: cache.predios, vias, areas: areas ?? [], relevo, atualizadoEm: cache.atualizadoEm, atribuicao: ATRIBUICAO_COMPLETA };
+      return { semLocalizacao: false, centro, predios: cache.predios, vias: vias ?? [], areas: areas ?? [], relevo, atualizadoEm: cache.atualizadoEm, atribuicao: ATRIBUICAO_COMPLETA };
     }
     const [predios, cidade] = await Promise.all([buscarPredios(centro), buscarCidade(centro)]);
     await withTenant(pool, contexto, (c) => gravar(c, id, centro, predios, cidade));
-    return { semLocalizacao: false, centro, predios, ...cidade, atualizadoEm: new Date(), atribuicao: ATRIBUICAO_COMPLETA };
+    return { semLocalizacao: false, centro, predios, vias: cidade.vias ?? [], areas: cidade.areas ?? [], relevo: cidade.relevo, atualizadoEm: new Date(), atribuicao: ATRIBUICAO_COMPLETA };
   }
 
   return { obter, buscarPredios, buscarCidade, gravar };
+}
+
+const IdPoi = z.object({ id: z.uuid(), poiId: z.uuid() });
+
+/** Escolas, mercados, metrô... do projeto, os mais perto a pé primeiro (painel, link do cliente e IA). */
+export async function poisDoProjeto(c: pg.PoolClient, projetoId: string) {
+  const geo = (await c.query<{ tem: boolean }>('SELECT geom IS NOT NULL AS tem FROM projects WHERE id = $1', [projetoId])).rows[0];
+  if (!geo?.tem) return { semLocalizacao: true, pois: [] };
+  const pois = (
+    await c.query<{ id: string; categoria: string; nome: string; origem: string; lat: number; lon: number; distanciaM: number; caminhoM: number | null }>(
+      `SELECT p.id, p.categoria, p.nome, p.origem, ST_Y(p.geom) AS lat, ST_X(p.geom) AS lon,
+              round(ST_Distance(p.geom::geography, pr.geom::geography))::int AS "distanciaM", p.caminho_m AS "caminhoM"
+         FROM pois p JOIN projects pr ON pr.id = p.project_id
+        WHERE p.project_id = $1 ORDER BY coalesce(p.caminho_m, round(ST_Distance(p.geom::geography, pr.geom::geography))), p.nome`,
+      [projetoId],
+    )
+  ).rows;
+  // a pé pelas ruas quando dá para calcular; senão, linha reta
+  return { semLocalizacao: false, pois: pois.map((p) => ({ ...p, minutosAPe: Math.max(1, Math.ceil((p.caminhoM ?? p.distanciaM) / METROS_POR_MINUTO)) })) };
+}
+
+/**
+ * Rota a pé do empreendimento até o ponto, pelas ruas do entorno guardado. `undefined` = o ponto não é deste projeto;
+ * `null` = sem ruas em volta (o 3D mostra só a distância em linha reta).
+ */
+export async function rotaDoPoi(c: pg.PoolClient, projetoId: string, poiId: string) {
+  const r = (
+    await c.query<{ lat: number; lon: number; plat: number | null; plon: number | null; vias: Via[] | null }>(
+      `SELECT ST_Y(p.geom) AS lat, ST_X(p.geom) AS lon, ST_Y(pr.geom) AS plat, ST_X(pr.geom) AS plon, e.vias
+         FROM pois p JOIN projects pr ON pr.id = p.project_id LEFT JOIN entornos e ON e.project_id = pr.id
+        WHERE p.id = $1 AND p.project_id = $2`,
+      [poiId, projetoId],
+    )
+  ).rows[0];
+  if (!r) return undefined;
+  if (r.plat === null || r.plon === null || !r.vias?.length) return null;
+  const rota = rotaAPe(r.vias, { lat: r.plat, lon: r.plon }, { lat: r.lat, lon: r.lon });
+  return rota ? { ...rota, minutosAPe: Math.max(1, Math.ceil(rota.metros / METROS_POR_MINUTO)) } : null;
 }
 
 /**
@@ -201,19 +241,18 @@ export function rotasMapa(app: FastifyInstance, { pool, exigir, mapa }: Dependen
     const s = await exigir(req, 'projeto:ler');
     const { id } = IdParam.parse(req.params);
     return withTenant(pool, ctx(s), async (c) => {
-      if (!(await localizacao(c, id))) return { semLocalizacao: true, pois: [] };
-      const pois = (
-        await c.query<{ distanciaM: number; caminhoM: number | null }>(
-          `SELECT p.id, p.categoria, p.nome, p.origem, ST_Y(p.geom) AS lat, ST_X(p.geom) AS lon,
-                  round(ST_Distance(p.geom::geography, pr.geom::geography))::int AS "distanciaM", p.caminho_m AS "caminhoM"
-             FROM pois p JOIN projects pr ON pr.id = p.project_id
-            WHERE p.project_id = $1 ORDER BY coalesce(p.caminho_m, round(ST_Distance(p.geom::geography, pr.geom::geography))), p.nome`,
-          [id],
-        )
-      ).rows;
-      // a pé pelas ruas quando dá para calcular; senão, linha reta
-      return { semLocalizacao: false, pois: pois.map((p) => ({ ...p, minutosAPe: Math.max(1, Math.ceil((p.caminhoM ?? p.distanciaM) / METROS_POR_MINUTO)) })) };
+      await localizacao(c, id); // projeto de outra empresa (ou inexistente): 404
+      return poisDoProjeto(c, id);
     });
+  });
+
+  /** A rota a pé desenhada até um ponto (Plano 12a, item 11). */
+  app.get('/projetos/:id/pois/:poiId/rota', async (req) => {
+    const s = await exigir(req, 'projeto:ler');
+    const { id, poiId } = IdPoi.parse(req.params);
+    const r = await withTenant(pool, ctx(s), (c) => rotaDoPoi(c, id, poiId));
+    if (r === undefined) throw new ErroHttp(404, 'nao_encontrado');
+    return { rota: r };
   });
 
   app.post('/projetos/:id/pois/osm', async (req) => {

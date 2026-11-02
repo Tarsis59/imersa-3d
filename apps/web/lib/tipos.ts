@@ -249,7 +249,8 @@ export interface ItemLazer {
 
 export interface Portal {
   empresa: { nome: string };
-  consultora: { nome: string };
+  /** `whatsapp`: só dígitos com o 55 (o corretor informa ao gerar o link); null = sem botão de WhatsApp. */
+  consultora: { nome: string; whatsapp: string | null };
   projeto: { id: string; nome: string; descricao: string | null; cidade: string | null; uf: string | null; lat: number | null; lon: number | null; rotacaoGraus: number; estiloDecorado: 'moderno' | 'classico' | 'jovem' };
   predio: { id: string; nome: string };
   andares: Array<{ numero: number; nome: string }>;
@@ -260,6 +261,8 @@ export interface Portal {
   giro: { arquivoId: string; unidades: string[] } | null;
   /** Lazer do empreendimento marcado no 3D, na ordem do tour. */
   lazer: ItemLazer[];
+  /** Loteamento: os lotes com quadra, medidas, preço e situação (vazio num prédio). */
+  lotes: import('@/app/painel/predios/[id]/vitrine/lotes').LoteVitrine[];
   /** Fotos do imóvel com GPS (quadros no 3D). */
   fotos: Array<{ id: string; nome: string; lat: number; lon: number; rumo: number | null }>;
   /** Assistente com IA (direto na API), ou null se desligado. */

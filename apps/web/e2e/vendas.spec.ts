@@ -50,6 +50,7 @@ test('vendas: link pelo WhatsApp → cliente no celular (sem login) → pedido d
 
   // consultora/gestão gera o link
   await page.getByLabel('Para quem (opcional)').fill('Família Souza');
+  await page.getByLabel('Seu WhatsApp (opcional)').fill('(11) 97777-1234');
   await page.getByRole('button', { name: 'Gerar link' }).click();
   const link = (await page.getByTestId('link-cliente').textContent())!.trim();
   expect(link).toMatch(/^http:\/\/localhost:3100\/v\/[\w-]{43}$/);
@@ -57,6 +58,10 @@ test('vendas: link pelo WhatsApp → cliente no celular (sem login) → pedido d
   await expect(page.getByTestId('lista-links').getByRole('listitem').first()).toContainText('Família Souza');
 
   // prévia do WhatsApp: título, descrição e imagem gerada
+  // app instalável: o manifesto do link abre direto neste empreendimento (Plano 12b)
+  const manifesto = await (await request.get(`${link}/app.webmanifest`)).json();
+  expect(manifesto).toMatchObject({ start_url: new URL(link).pathname, scope: new URL(link).pathname, display: 'standalone', name: 'Residencial Aurora em 3D' });
+  expect((await request.get(`${new URL(link).origin}/v/token-que-nao-existe-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/app.webmanifest`)).status()).toBe(404);
   const html = await (await request.get(link)).text();
   expect(html).toContain('<meta property="og:title" content="Residencial Aurora · Torre V em 3D"');
   expect(html).toMatch(/<meta name="robots" content="noindex, nofollow"/);
@@ -80,6 +85,8 @@ test('vendas: link pelo WhatsApp → cliente no celular (sem login) → pedido d
   expect(await cliente.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   await cliente.getByTestId('lista-vitrine').getByRole('button', { name: /^102/ }).tap();
   await expect(cliente.getByRole('heading', { name: 'Unidade 102' })).toBeVisible();
+  // o card da unidade fala com o corretor no WhatsApp, com a unidade já na mensagem (Plano 12b)
+  await expect(cliente.getByTestId('falar-corretor').getByRole('link')).toHaveAttribute('href', /^https:\/\/wa\.me\/5511977771234\?text=.*unidade%20102/);
 
   // ao vivo: a gestão reserva a 101 e o cliente vê na hora, sem recarregar
   await expect(vitrine).toHaveAttribute('data-ao-vivo', 'conectado', { timeout: 30_000 });

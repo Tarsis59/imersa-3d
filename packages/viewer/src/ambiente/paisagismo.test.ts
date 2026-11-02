@@ -35,3 +35,21 @@ describe('paisagismo do lote', () => {
     expect(p.arvores.length).toBeLessThan(planejarPaisagismo(PREDIO).arvores.length);
   });
 });
+
+describe('vento nas copas', () => {
+  it('encaixa no shader do three e respeita quem já mexia no material', async () => {
+    const THREE = await import('three');
+    const { balancarComVento, VENTO } = await import('./vegetacao');
+    const m = new THREE.MeshStandardMaterial();
+    let antes = 0;
+    m.onBeforeCompile = () => void antes++;
+    balancarComVento(m);
+    const shader = { uniforms: {}, vertexShader: THREE.ShaderLib.physical.vertexShader, fragmentShader: '' } as unknown as Parameters<typeof m.onBeforeCompile>[0];
+    m.onBeforeCompile(shader, undefined as never);
+    expect(antes).toBe(1);
+    expect(shader.vertexShader).toContain('uniform float uVento;');
+    expect(shader.vertexShader).toContain('transformed.x += sin(uVento');
+    expect((shader.uniforms as Record<string, unknown>).uVento).toBe(VENTO.tempo);
+    expect(m.customProgramCacheKey()).toMatch(/-vento$/);
+  });
+});

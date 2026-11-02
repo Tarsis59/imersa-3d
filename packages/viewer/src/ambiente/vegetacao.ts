@@ -10,6 +10,35 @@ export interface Paisagismo {
   destruir(): void;
 }
 
+/** Relógio do vento (segundos): o 3D avança a cada quadro; parado em "menos movimento" e na cena de teste. */
+export const VENTO = { tempo: { value: 0 } };
+
+/**
+ * Copas balançando com o vento (Plano 12a, item 8): só o topo da copa se mexe, cada árvore no seu ritmo (pela
+ * posição da instância). Chamar depois de preparar o material (encadeia o `onBeforeCompile` que já existe).
+ */
+export function balancarComVento(m: THREE.Material): void {
+  const antes = m.onBeforeCompile;
+  m.onBeforeCompile = (shader, r) => {
+    antes.call(m, shader, r);
+    shader.uniforms.uVento = VENTO.tempo;
+    shader.vertexShader = shader.vertexShader.replace('#include <common>', '#include <common>\nuniform float uVento;').replace(
+      '#include <begin_vertex>',
+      `#include <begin_vertex>
+      #ifdef USE_INSTANCING
+        float ventoFase = instanceMatrix[3].x * 0.31 + instanceMatrix[3].z * 0.17;
+      #else
+        float ventoFase = 0.0;
+      #endif
+      float ventoPeso = clamp(transformed.y + 1.0, 0.0, 2.0) * 0.5;
+      transformed.x += sin(uVento * 1.4 + ventoFase) * 0.05 * ventoPeso;
+      transformed.z += cos(uVento * 1.1 + ventoFase * 1.3) * 0.04 * ventoPeso;`,
+    );
+  };
+  const chave = m.customProgramCacheKey.bind(m);
+  m.customProgramCacheKey = () => `${chave()}-vento`;
+}
+
 const VERDE_ESCURO = new THREE.Color(0x3f6b2e);
 const VERDE_CLARO = new THREE.Color(0x7aa547);
 
@@ -47,7 +76,9 @@ export function criarPaisagismo(plano: PlanoPaisagismo, preparar: (m: THREE.Mate
     const copa = new THREE.IcosahedronGeometry(1, 2);
     geos.push(tronco, copa);
     const troncos = new THREE.InstancedMesh(tronco, material(new THREE.MeshStandardMaterial({ color: 0x5b4636, roughness: 0.95 })), plano.arvores.length);
-    const copas = new THREE.InstancedMesh(copa, material(new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.9, flatShading: true })), plano.arvores.length);
+    const matCopa = material(new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.9, flatShading: true }));
+    balancarComVento(matCopa);
+    const copas = new THREE.InstancedMesh(copa, matCopa, plano.arvores.length);
     plano.arvores.forEach((a, i) => {
       const alturaTronco = a.altura * 0.42;
       m4.compose(new THREE.Vector3(a.x, 0, a.z), q.identity(), new THREE.Vector3(1, alturaTronco, 1));

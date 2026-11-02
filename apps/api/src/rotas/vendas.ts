@@ -20,7 +20,21 @@ export const STATUS_LEAD = ['novo', 'em_contato', 'convertido', 'descartado'] as
 const Ponto = z.tuple([z.number().finite().min(-10_000).max(10_000), z.number().finite().min(-10_000).max(10_000), z.number().finite().min(-10_000).max(10_000)]);
 /** Câmera da consultora no tour guiado ao vivo. */
 const Conducao = z.object({ ativo: z.boolean(), posicao: Ponto.optional(), alvo: Ponto.optional(), unidade: z.uuid().nullable().optional() });
-const NovoLink = z.object({ titulo: z.string().trim().min(1).max(120).optional(), dias: z.number().int().min(1).max(90).default(30) });
+/** WhatsApp do corretor: aceita "(11) 98888-7777" ou "+55 11 98888-7777"; guarda só dígitos com o 55 na frente. */
+const WhatsappBr = z
+  .string()
+  // com "+" na frente o código do país já veio (só vale o +55); sem ele, DDD + número ganha o 55
+  .transform((v) => {
+    const digitos = v.replace(/\D/g, '');
+    if (v.trim().startsWith('+')) return digitos;
+    return digitos.length === 10 || digitos.length === 11 ? `55${digitos}` : digitos;
+  })
+  .refine((v) => /^55[1-9][0-9]{9,10}$/.test(v), 'WhatsApp com DDD, ex.: (11) 98888-7777');
+const NovoLink = z.object({
+  titulo: z.string().trim().min(1).max(120).optional(),
+  dias: z.number().int().min(1).max(90).default(30),
+  whatsapp: WhatsappBr.optional(),
+});
 const MudarLead = z.object({ status: z.enum(STATUS_LEAD) });
 const FiltroLeads = z.object({ projetoId: z.uuid().optional(), status: z.enum(STATUS_LEAD).optional() });
 const Periodo = z.object({ dias: z.coerce.number().int().min(1).max(365).default(30) });
@@ -39,8 +53,8 @@ export function rotasVendas(app: FastifyInstance, { pool, exigir, webUrl }: Depe
     const criado = await withTenant(pool, ctx(s), async (c) => {
       if (!(await c.query('SELECT 1 FROM buildings WHERE id = $1', [id])).rowCount) throw new ErroHttp(404, 'nao_encontrado');
       const r = await c.query<{ id: string; expira_em: Date }>(
-        'INSERT INTO share_links (building_id, token_hash, titulo, criado_por, expira_em) VALUES ($1, $2, $3, $4, now() + make_interval(days => $5)) RETURNING id, expira_em',
-        [id, hashToken(token), d.titulo ?? null, s.userId, d.dias],
+        'INSERT INTO share_links (building_id, token_hash, titulo, criado_por, expira_em, whatsapp) VALUES ($1, $2, $3, $4, now() + make_interval(days => $5), $6) RETURNING id, expira_em',
+        [id, hashToken(token), d.titulo ?? null, s.userId, d.dias, d.whatsapp ?? null],
       );
       const l = r.rows[0]!;
       await registrarAuditoria(c, { userId: s.userId, acao: 'link.criar', entidade: 'share_link', entidadeId: l.id, depois: { predio: id, dias: d.dias, titulo: d.titulo } });

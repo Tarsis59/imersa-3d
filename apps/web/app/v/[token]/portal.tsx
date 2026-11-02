@@ -4,6 +4,7 @@ import type { UnidadeViewer } from '@imersa/viewer';
 import { Aviso, Botao, Campo, Cartao, Selecao } from '@/components/ui';
 import { Vitrine, type EventoVitrine } from '@/app/painel/predios/[id]/vitrine/vitrine';
 import type { ResultadoEntorno } from '@/app/painel/predios/[id]/vitrine/actions';
+import type { FonteProximidades } from '@/app/painel/predios/[id]/vitrine/proximidades';
 import type { Portal } from '@/lib/tipos';
 import type { DadosLead } from './actions';
 
@@ -56,12 +57,14 @@ export function PortalVitrine({
   token,
   portal,
   carregarEntorno,
+  proximidades,
   linkDoArquivo,
   enviarLead,
 }: {
   token: string;
   portal: Portal;
   carregarEntorno: () => Promise<ResultadoEntorno>;
+  proximidades: FonteProximidades;
   linkDoArquivo: (arquivoId: string) => Promise<string | null>;
   enviarLead: (d: DadosLead) => Promise<{ ok: true } | { ok: false; erro: string }>;
 }) {
@@ -89,14 +92,17 @@ export function PortalVitrine({
         estiloDecorado={portal.projeto.estiloDecorado}
         fotos={portal.fotos}
         salaUrl={portal.aoVivoUrl ? portal.aoVivoUrl.replace(/\/ao-vivo$/, '/sala') : null}
+        corretor={portal.consultora.whatsapp ? { nome: portal.consultora.nome, whatsapp: portal.consultora.whatsapp, empreendimento: portal.projeto.nome } : null}
         lat={portal.projeto.lat}
         lon={portal.projeto.lon}
         interiores={portal.interiores}
         lazer={portal.lazer}
+        lotes={portal.lotes}
         giroRenderizado={portal.giro}
         assistenteUrl={portal.assistenteUrl}
         aoPedirContato={(motivo, unidadeId) => setPedidoContato((p) => ({ motivo, unidadeId, vez: (p?.vez ?? 0) + 1 }))}
         carregarEntorno={carregarEntorno}
+        proximidades={proximidades}
         linkDoArquivo={linkDoArquivo}
         telemetria={false}
         aoEvento={aoEvento}

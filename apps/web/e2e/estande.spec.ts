@@ -68,6 +68,16 @@ test('estande: painel cria → PC em tela cheia apresenta sozinho → visitante 
   await expect(estande).toHaveAttribute('data-apresentacao', 'desligada');
   await expect(tela.getByTestId('apresentacao-unidade')).toHaveCount(0);
   await expect(tela.getByRole('heading', { name: 'Unidade 102' })).toBeVisible();
+  // modo corretor escondido (3 dedos por 3 s; no teclado Ctrl+Alt+C): esconde os preços sem sair do estande
+  await expect(tela.getByTestId('unidade-selecionada')).toContainText('R$');
+  await tela.keyboard.press('Control+Alt+c');
+  await tela.getByTestId('modo-corretor').getByRole('button', { name: 'Esconder os preços' }).click();
+  await expect(tela.locator('main[data-precos]')).toHaveAttribute('data-precos', 'ocultos');
+  await expect(tela.getByTestId('unidade-selecionada')).not.toContainText('R$');
+  await tela.getByTestId('modo-corretor').getByRole('button', { name: 'Mostrar os preços' }).click();
+  await tela.getByTestId('modo-corretor').getByRole('button', { name: 'Fechar' }).click();
+  await expect(tela.getByTestId('modo-corretor')).toHaveCount(0);
+  await expect(tela.getByTestId('unidade-selecionada')).toContainText('R$');
   await tela.getByRole('button', { name: 'Nublado' }).tap();
   await expect(vitrine).toHaveAttribute('data-clima', 'nublado');
   await tela.screenshot({ path: test.info().outputPath('estande-visitante.png') });

@@ -41,6 +41,8 @@ export class QualidadeAdaptativa {
   private acimaMs = 0;
   /** Quadros longos seguidos (aparelho que não dá conta, não aba em segundo plano). */
   private longos = 0;
+  /** Quadros longos a perdoar (carga pontual conhecida: cidade montando, materiais compilando). */
+  private perdoar = 0;
 
   constructor(opcoes: OpcoesQualidade = {}) {
     this.indice = Math.min(Math.max(opcoes.inicial ?? 0, 0), NIVEIS.length - 1);
@@ -68,6 +70,16 @@ export class QualidadeAdaptativa {
     return Math.min(dispositivo, this.nivel.pixelRatioMax);
   }
 
+  /**
+   * Perdoa os próximos 2 quadros longos: a travada pontual (a cidade de mil prédios montando, os materiais
+   * compilando) não é o aparelho sem força. Só 2: no aparelho que é lento de verdade (desenho por software), todo
+   * quadro é longo, e esperar mais deixava a página presa na qualidade alta com quadros de segundos.
+   */
+  ignorarCarga(): void {
+    this.perdoar = 2;
+    this.longos = 0;
+  }
+
   /** Registra a duração de um quadro. Devolve o novo nível quando troca; senão `null`. */
   registrar(dtMs: number): NivelQualidade | null {
     if (!(dtMs > 0)) return null;
@@ -76,6 +88,10 @@ export class QualidadeAdaptativa {
       // vários seguidos, de qualquer tamanho, é o aparelho que não dá conta: desce um nível na hora. Sem teto: no
       // desenho por software, com o acabamento de imagem, um quadro passa de 5 s e travava a página inteira
       if (this.o.fixo) return null;
+      if (this.perdoar > 0) {
+        this.perdoar--;
+        return null;
+      }
       this.longos++;
       if (this.longos >= 3 && this.indice < NIVEIS.length - 1) return this.trocar(this.indice + 1);
       return null;

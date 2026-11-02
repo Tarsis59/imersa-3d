@@ -205,13 +205,11 @@ export function recuoDaRua(rua: { ponto: Xz; distanciaM: number; direcao: Xz; vi
 
 const A_PE = new Set<TipoVia>(['principal', 'secundaria', 'local', 'servico', 'pedestre']);
 
-/**
- * Distâncias a pé pelo desenho das ruas (Dijkstra no grafo do OSM): do centro até cada destino. Entra e sai do grafo
- * pelo nó mais perto (a pé em linha reta até ele). `null` quando o destino está fora da malha baixada.
- */
-export function distanciasAPe(vias: readonly Via[], centro: { lat: number; lon: number }, destinos: ReadonlyArray<{ lat: number; lon: number }>, folgaM = 150): Array<number | null> {
+/** Grafo das ruas a pé com o Dijkstra a partir do centro (o nó mais perto dele). `null` sem malha perto. */
+function grafoAPe(vias: readonly Via[], centro: { lat: number; lon: number }, folgaM: number) {
   const ids = new Map<string, number>();
   const pos: Xz[] = [];
+  const ll: Array<[number, number]> = [];
   const adj: Array<Array<[number, number]>> = [];
   const no = (p: [number, number]) => {
     const k = `${p[0]},${p[1]}`;
@@ -220,6 +218,7 @@ export function distanciasAPe(vias: readonly Via[], centro: { lat: number; lon: 
       i = pos.length;
       ids.set(k, i);
       pos.push(paraLocal(p, centro));
+      ll.push([p[0], p[1]]);
       adj.push([]);
     }
     return i;
@@ -234,7 +233,7 @@ export function distanciasAPe(vias: readonly Via[], centro: { lat: number; lon: 
       adj[b]!.push([a, d]);
     }
   }
-  if (!pos.length) return destinos.map(() => null);
+  if (!pos.length) return null;
   const maisPerto = (p: Xz) => {
     let m = 0;
     let dm = Infinity;
@@ -248,9 +247,10 @@ export function distanciasAPe(vias: readonly Via[], centro: { lat: number; lon: 
     return { i: m, d: dm };
   };
   const inicio = maisPerto({ x: 0, z: 0 });
-  if (inicio.d > folgaM) return destinos.map(() => null);
-  // Dijkstra com fila de prioridade simples (heap binário)
+  if (inicio.d > folgaM) return null;
+  // Dijkstra com fila de prioridade simples (heap binário); `ant` guarda de onde se chegou (para desenhar a rota)
   const dist = new Float64Array(pos.length).fill(Infinity);
+  const ant = new Int32Array(pos.length).fill(-1);
   dist[inicio.i] = inicio.d;
   const heap: Array<[number, number]> = [[inicio.d, inicio.i]];
   const subir = (k: number) => {
@@ -284,15 +284,43 @@ export function distanciasAPe(vias: readonly Via[], centro: { lat: number; lon: 
     for (const [v, w] of adj[u]!) {
       if (d + w < dist[v]!) {
         dist[v] = d + w;
+        ant[v] = u;
         heap.push([d + w, v]);
         subir(heap.length - 1);
       }
     }
   }
+  /** Nó de chegada do destino (ou null se fora da malha). */
+  const chegada = (t: { lat: number; lon: number }) => {
+    const fim = maisPerto(paraLocal([t.lon, t.lat], centro));
+    return fim.d > folgaM || !Number.isFinite(dist[fim.i]!) ? null : fim;
+  };
+  return { ll, dist, ant, chegada };
+}
+
+/**
+ * Distâncias a pé pelo desenho das ruas (Dijkstra no grafo do OSM): do centro até cada destino. Entra e sai do grafo
+ * pelo nó mais perto (a pé em linha reta até ele). `null` quando o destino está fora da malha baixada.
+ */
+export function distanciasAPe(vias: readonly Via[], centro: { lat: number; lon: number }, destinos: ReadonlyArray<{ lat: number; lon: number }>, folgaM = 150): Array<number | null> {
+  const g = grafoAPe(vias, centro, folgaM);
+  if (!g) return destinos.map(() => null);
   return destinos.map((t) => {
-    const p = paraLocal([t.lon, t.lat], centro);
-    const fim = maisPerto(p);
-    if (fim.d > folgaM || !Number.isFinite(dist[fim.i]!)) return null;
-    return Math.round(dist[fim.i]! + fim.d);
+    const fim = g.chegada(t);
+    return fim ? Math.round(g.dist[fim.i]! + fim.d) : null;
   });
+}
+
+/**
+ * A rota a pé desenhada (Plano 12a, item 11): os pontos [lon, lat] do centro até o destino pelas ruas, com os
+ * metros (os mesmos de `distanciasAPe`). `null` quando o destino está fora da malha baixada.
+ */
+export function rotaAPe(vias: readonly Via[], centro: { lat: number; lon: number }, destino: { lat: number; lon: number }, folgaM = 150): { metros: number; pontos: Array<[number, number]> } | null {
+  const g = grafoAPe(vias, centro, folgaM);
+  const fim = g?.chegada(destino);
+  if (!g || !fim) return null;
+  const caminho: Array<[number, number]> = [];
+  for (let i = fim.i; i !== -1; i = g.ant[i]!) caminho.push(g.ll[i]!);
+  caminho.reverse();
+  return { metros: Math.round(g.dist[fim.i]! + fim.d), pontos: [[centro.lon, centro.lat], ...caminho, [destino.lon, destino.lat]] };
 }

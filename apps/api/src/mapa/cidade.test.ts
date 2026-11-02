@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { deflateSync } from 'node:zlib';
 import { describe, expect, it } from 'vitest';
-import { distanciasAPe, giroParaOlhar, interpretarMalha, paraLocal, recuoDaRua, ruaMaisPerto, type Via } from './malha';
+import { distanciasAPe, rotaAPe, giroParaOlhar, interpretarMalha, paraLocal, recuoDaRua, ruaMaisPerto, type Via } from './malha';
 import { blocoDe, decodificarPng, lerRelevo, localParaLatLon } from './relevo';
 
 const PAULISTA = { lat: -23.56175, lon: -46.6545 };
@@ -135,6 +135,18 @@ describe('caminho a pé (grafo)', () => {
     const [d, longe] = distanciasAPe(vias, c, [localParaLatLon(c, 200, 200), localParaLatLon(c, 2000, 2000)]);
     expect(d).toBeCloseTo(400, -1);
     expect(longe).toBeNull();
+  });
+
+  it('a rota desenhada passa pela esquina (não corta o quarteirão) e tem os mesmos metros', () => {
+    const destino = localParaLatLon(c, 200, 200);
+    const r = rotaAPe(vias, c, destino)!;
+    expect(r.metros).toBe(distanciasAPe(vias, c, [destino])[0]);
+    // centro → início da Rua A → esquina → fim da Rua B → destino
+    const local = r.pontos.map(([lon, lat]) => paraLocal([lon, lat], c));
+    expect(Math.hypot(local[0]!.x, local[0]!.z)).toBeLessThan(0.01);
+    expect(local.some((q) => Math.abs(q.x - 200) < 1 && Math.abs(q.z) < 1)).toBe(true); // passou pela esquina
+    expect(local.at(-1)!.x).toBeCloseTo(200, 0);
+    expect(rotaAPe(vias, c, localParaLatLon(c, 2000, 2000))).toBeNull();
   });
 });
 

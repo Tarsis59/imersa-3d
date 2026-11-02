@@ -1,20 +1,22 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { CSM } from 'three/addons/csm/CSM.js';
-import { ORIGEM_PAULISTA } from './geo/project';
+import { lonLatToLocal, ORIGEM_PAULISTA } from './geo/project';
 import { sunDirection, horaSaoPauloParaUtc } from './sun/sun';
 import { criarCeu, type Clima } from './ambiente/ceu';
 import type { PosProcessamento } from './ambiente/pos';
 import { planejarPaisagismo } from './ambiente/paisagismo';
-import { criarPaisagismo, type Paisagismo } from './ambiente/vegetacao';
+import { criarPaisagismo, VENTO, type Paisagismo } from './ambiente/vegetacao';
 import { rumoDaCamera, paraReferenciaDoProjeto } from './sun/bussola';
 import { massaDoPredio } from './units/massa';
 import { ladoExterno, planejarFachada } from './units/fachada';
 import { estudoSolar, type EstudoSolar, type FaceSolar } from './sun/insolacao';
 import { malhasDaFachada, materiaisDaFachada, texturaDeJanelas } from './units/janelas';
 import { buildCityMesh } from './city/cityMesh';
+import { injetarFachada } from './city/fachadaCidade';
 import { entornoParaLocal, type Entorno } from './city/entorno';
-import { criarCidade, terrenoDoRelevo, type CidadeCompleta } from './city/cidade';
+import { criarCidade, fita, paraModelo, terrenoDoRelevo, type CidadeCompleta } from './city/cidade';
+import { criarLotes, type LoteViewer, type LotesNoChao } from './city/lotes';
 import { montarDecorado, planejarDecorado, type Decorado, type EstiloDecorado } from './interior/decorado';
 import { criarQuadros, planejarQuadros, type FotoNoLugar, type QuadrosDeFoto } from './ambiente/fotos';
 import { cameraAtrasDoOmbro, CORRETORA, criarBoneco, presetBoneco, type Boneco } from './cameras/boneco';
@@ -33,7 +35,7 @@ import { exportarUsdz, montarMaquete } from './xr/maquete';
 import type { LuzDaFoto } from './captura/fotorrealista';
 import { caminhoRetangular, criarPessoas, MORADORES_POR_NIVEL, planejarMoradores, type Pessoas } from './ambiente/pessoas';
 import { criarAmbienteSonoro } from './ambiente/som';
-import { criarMarcadoresLazer, poseParaLazer, type MarcadoresLazer, type PontoLazer } from './ambiente/lazer';
+import { criarMarcadoresLazer, placa, poseParaLazer, type MarcadoresLazer, type PontoLazer } from './ambiente/lazer';
 import { iniciarAr, iniciarVr, type ContextoXr, type SessaoXr, type TipoXr } from './xr/sessao';
 
 export type ModoCamera = 'orbita' | 'primeira-pessoa';
@@ -78,6 +80,14 @@ export interface EstadoViewer {
   decorado: number;
   /** Pessoas da visita em grupo desenhadas no 3D. */
   outros: number;
+  /** Lotes do loteamento no chão (0 = não é loteamento). */
+  lotes: number;
+  /** Rota a pé desenhada no chão (número de pontos; 0 = nenhuma). */
+  rota: number;
+  /** Etiquetas "Apto 1201" à vista (unidades filtradas). */
+  etiquetas: number;
+  /** Vista explodida: 0 = andares juntos, 1 = separados (no meio da animação, entre os dois). */
+  explosao: number;
   /** Corretora virtual na tela (e se está falando). */
   corretora: 'fora' | 'parada' | 'falando';
   /** Modo jogo: câmera atrás do boneco (terceira pessoa). */
@@ -119,6 +129,27 @@ export interface Viewer {
   /** Esconde o que está acima do andar. Devolve `false` se o andar não tem unidade no 3D. */
   cortarNoAndar(andar: number | null): boolean;
   andaresComCorte(): number[];
+  /**
+   * Vista explodida (Plano 12c): separa os andares no alto, com animação; a casca do prédio sai e ficam as fatias
+   * com as unidades pintadas pela situação. `false` junta de novo.
+   */
+  separarAndares(ligado: boolean): void;
+  /**
+   * Rota a pé desenhada no chão, do empreendimento até um ponto próximo (Plano 12a, item 11): pontos [lon, lat] pelas
+   * ruas; a câmera voa para enquadrar o caminho todo. `null` apaga. `false` sem o entorno carregado.
+   */
+  desenharRota(pontos: ReadonlyArray<readonly [number, number]> | null): boolean;
+  /**
+   * Loteamento (Plano 12d): os lotes no chão, pintados pela situação, com o número de cada quadra; a câmera enquadra
+   * o loteamento inteiro. Devolve quantos lotes entraram. `centro` = o ponto do empreendimento (lon/lat).
+   */
+  definirLotes(lotes: readonly LoteViewer[], centro: { lon: number; lat: number }): number;
+  /** Filtro do buscador de lotes: quem não passou fica apagado; até 40 lotes ganham o número em cima. */
+  destacarLotes(passam: ReadonlySet<string> | null): void;
+  definirStatusLote(loteId: string, status: StatusUnidade): void;
+  /** Voa até o lote (lote escolhido na lista). */
+  voarParaLote(loteId: string): boolean;
+  aoSelecionarLote(cb: (loteId: string | null) => void): void;
   voarPara(unidadeId: string): boolean;
   selecionar(unidadeId: string | null): void;
   definirModo(modo: ModoCamera): void;
@@ -257,7 +288,13 @@ const GRAVIDADE = 9.8;
 /** Distância da câmera atrás do boneco (na rua; dentro do apartamento, mais perto). */
 const DISTANCIA_3A_M = 3.2;
 const DISTANCIA_3A_DENTRO_M = 1.5;
+/** Com a câmera mais perto que isso da cabeça (parede atrás), o boneco tapa a vista: some até ter espaço. */
+const DISTANCIA_MIN_VER_BONECO_M = 0.75;
 const DURACAO_VOO_MS = 1200;
+/** Distância a mais entre um andar e o de cima na vista explodida. */
+const ESPACO_EXPLOSAO_M = 3.5;
+/** Até quantas unidades filtradas ganham etiqueta "Apto 1201" (mais que isso polui a fachada). */
+const MAX_ETIQUETAS = 24;
 const OPACIDADE_ESMAECIDA = 0.12;
 const OPACIDADE_AMBIENTE = 0.45;
 /** Tipo IFC que o conversor BIM grava em cada peça (extras do glTF → userData). */
@@ -323,7 +360,7 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
   };
 
   // chão até além da neblina: no horizonte ele some na cor do céu, sem borda
-  const chao = new THREE.Mesh(new THREE.PlaneGeometry(8000, 8000), new THREE.MeshStandardMaterial({ color: 0xd6d3cc }));
+  const chao = new THREE.Mesh(new THREE.PlaneGeometry(8000, 8000), new THREE.MeshStandardMaterial({ color: 0xbebab1 }));
   chao.rotation.x = -Math.PI / 2;
   chao.receiveShadow = true;
   prepararMaterial(chao.material);
@@ -344,7 +381,9 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
   /** Chão com relevo, ruas, verde, água e árvores de rua (Plano 11b). */
   let cidadeCompleta: CidadeCompleta | null = null;
   let atribuicaoEntorno: string | null = null;
-  const materialCidade = new THREE.MeshStandardMaterial({ color: 0xd8d5ce, roughness: 0.9 });
+  // cor de cada prédio vem do vértice (acabamento real); janelas e laje no shader (ver city/fachadaCidade)
+  const materialCidade = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.88, vertexColors: true });
+  const fachadaCidade = { noite: { value: 0 }, detalhe: { value: 1 } };
   prepararMaterial(materialCidade);
 
   /**
@@ -359,6 +398,7 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
     shader.uniforms.uRaioXCamera = raioX.camera;
     shader.uniforms.uRaioXAlvo = raioX.alvo;
     shader.uniforms.uRaioXRaio = raioX.raio;
+    injetarFachada(shader, fachadaCidade);
     shader.vertexShader = shader.vertexShader
       .replace('#include <common>', '#include <common>\nvarying vec3 vRaioXMundo;')
       .replace('#include <begin_vertex>', '#include <begin_vertex>\nvRaioXMundo = (modelMatrix * vec4(transformed, 1.0)).xyz;');
@@ -374,7 +414,7 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
         }`,
       );
   };
-  materialCidade.customProgramCacheKey = () => 'imersa-cidade-raiox';
+  materialCidade.customProgramCacheKey = () => 'imersa-cidade-raiox-fachada';
 
   /** Bloqueio por raio horizontal na altura da cintura contra malhas reais (paredes com portas, prédios da cidade). */
   function bloqueioPorRaio(objetos: THREE.Object3D[]): OpcoesPasso['bloqueado'] {
@@ -530,6 +570,7 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
     const plano = planejarPaisagismo(caixaDoPredio(), obstaculos);
     paisagismo = criarPaisagismo(plano, (m) => prepararMaterial(m));
     paisagismo.definirNoite(luzNoturna);
+    paisagismo.objeto.visible = !loteamento; // no loteamento, o jardim do "prédio" vazio não aparece
     cena.add(paisagismo.objeto);
     arvoresDoLote = plano.arvores;
     som.definirFontes({ arvores: arvoresDoLote, agua: aguaDoLazer() });
@@ -669,12 +710,126 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
     raioCamera.far = dist;
     const barreiras = [...solidos, ...(cidade ? [cidade] : []), ...(decorado ? decorado.paredes : []), ...(interior ? [pecas.get(interior)?.malha].filter((x): x is THREE.Mesh => !!x) : [])];
     const bate = raioCamera.intersectObjects(barreiras, false)[0];
-    if (bate) c.posicao.copy(c.cabeca).addScaledVector(dir, Math.max(0.3, bate.distance - 0.2));
+    const livre = bate ? Math.max(0.3, bate.distance - 0.2) : dist;
+    if (bate) c.posicao.copy(c.cabeca).addScaledVector(dir, livre);
+    // sem espaço para a câmera (cômodo pequeno): o boneco sai da frente, como nos jogos, e volta quando há espaço
+    b.objeto.visible = livre >= DISTANCIA_MIN_VER_BONECO_M;
     camera.position.copy(c.posicao);
     camera.lookAt(c.alvo);
   }
 
+  /**
+   * Etiquetas "Apto 1201" em cima das unidades que passaram no filtro (Plano 12b, como no buscador do vídeo de Milão).
+   * Presas à malha da unidade: acompanham a vista explodida. Com muitas unidades no filtro, nenhuma (viraria ruído).
+   */
+  const rotulos = new Map<string, THREE.Sprite>();
+  function rotularUnidades(passam: ReadonlySet<string> | null): void {
+    for (const s of rotulos.values()) {
+      s.removeFromParent();
+      (s.material as THREE.SpriteMaterial).map?.dispose();
+      s.material.dispose();
+    }
+    rotulos.clear();
+    if (!passam || passam.size === 0 || passam.size > MAX_ETIQUETAS) return;
+    for (const id of passam) {
+      const p = pecas.get(id);
+      if (!p) continue;
+      const s = placa(`Apto ${p.unidade.codigo}`);
+      s.scale.multiplyScalar(0.8);
+      p.malha.updateMatrixWorld();
+      s.position.copy(p.malha.worldToLocal(new THREE.Vector3((p.caixa.minX + p.caixa.maxX) / 2, p.caixa.maxY + 0.6, (p.caixa.minZ + p.caixa.maxZ) / 2)));
+      p.malha.add(s);
+      rotulos.set(id, s);
+    }
+    ultimoAviso = 0;
+  }
+
+  // loteamento (Plano 12d)
+  let loteamento: LotesNoChao | null = null;
+  const statusLotes = new Map<string, StatusUnidade>();
+  let passamLotes: ReadonlySet<string> | null = null;
+  let cbLote: ((id: string | null) => void) | null = null;
+  const placasLotes = new THREE.Group();
+  placasLotes.name = 'numeros-dos-lotes';
+  cena.add(placasLotes);
+  const nomesLotes = new Map<string, string>();
+  function limparPlacas(grupo: THREE.Group): void {
+    for (const s of [...grupo.children] as THREE.Sprite[]) {
+      s.removeFromParent();
+      s.material.map?.dispose();
+      s.material.dispose();
+    }
+  }
+  function numerarLotes(): void {
+    limparPlacas(placasLotes);
+    if (!loteamento) return;
+    // número da quadra sempre; o de cada lote só com o filtro ligado e poucos lotes (senão vira ruído)
+    for (const [q, c] of loteamento.quadras) {
+      const s = placa(`Quadra ${q}`);
+      s.position.copy(c).add(new THREE.Vector3(0, 6, 0));
+      s.scale.multiplyScalar(2.2);
+      placasLotes.add(s);
+    }
+    if (passamLotes && passamLotes.size <= 40) {
+      for (const id of passamLotes) {
+        const c = loteamento.centros.get(id);
+        if (!c) continue;
+        const s = placa(nomesLotes.get(id) ?? '');
+        s.position.copy(c).add(new THREE.Vector3(0, 2.2, 0));
+        s.scale.multiplyScalar(1.2);
+        placasLotes.add(s);
+      }
+    }
+    ultimoAviso = 0;
+  }
+
+  /** Centro do entorno carregado (a rota a pé chega em lon/lat e vira chão do 3D por ele). */
+  let centroEntorno: { lon: number; lat: number } | null = null;
+  let rotaDesenhada: THREE.Group | null = null;
+  function apagarRota(): void {
+    if (!rotaDesenhada) return;
+    rotaDesenhada.removeFromParent();
+    rotaDesenhada.traverse((o) => {
+      if (o instanceof THREE.Mesh) {
+        o.geometry.dispose();
+        (o.material as THREE.Material).dispose();
+      }
+    });
+    rotaDesenhada = null;
+    ultimoAviso = 0;
+  }
+
+  /** Vista explodida: `atual` anda até `alvo` a cada quadro. */
+  const explosao = { atual: 0, alvo: 0 };
+  function aplicarExplosao(f: number): void {
+    const andares = [...new Set([...pecas.values()].map((p) => p.unidade.andar))].sort((a, b) => a - b);
+    const ordem = new Map(andares.map((a, i) => [a, i]));
+    const unidades = new Set<THREE.Object3D>();
+    for (const p of pecas.values()) {
+      unidades.add(p.malha);
+      const base = (p.malha.userData.ySemExplosao ??= p.malha.position.y) as number;
+      p.malha.position.y = base + (ordem.get(p.unidade.andar) ?? 0) * ESPACO_EXPLOSAO_M * f;
+    }
+    // a casca (lajes, pilares, varandas, paredes do modelo) sai enquanto os andares estão separados
+    raizPredio?.traverse((o) => {
+      if (!(o instanceof THREE.Mesh) || unidades.has(o)) return;
+      if (f > 0.001) {
+        o.userData.visivelSemExplosao ??= o.visible;
+        o.visible = false;
+      } else if (o.userData.visivelSemExplosao !== undefined) {
+        o.visible = o.userData.visivelSemExplosao as boolean;
+        delete o.userData.visivelSemExplosao;
+      }
+    });
+    ultimoAviso = 0;
+  }
+
   function definirModo(novo: ModoCamera): void {
+    if (novo !== 'orbita' && explosao.atual > 0) {
+      // andar a pé ou entrar no apartamento pede o prédio inteiro
+      explosao.alvo = explosao.atual = 0;
+      aplicarExplosao(0);
+    }
     sairDaVista();
     modo = novo;
     voo = null;
@@ -821,6 +976,14 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
       if (chaoTocado && chaoTocado.distance < 60 && (!unidadeTocada || chaoTocado.distance < unidadeTocada.distance || interior !== null)) {
         alvoCaminhada = { x: chaoTocado.point.x, z: chaoTocado.point.z };
         paradoMs = 0;
+        return;
+      }
+    }
+    if (loteamento && modo === 'orbita') {
+      const tocado = raycaster.intersectObject(loteamento.preenchimento, false)[0];
+      const loteId = typeof tocado?.faceIndex === 'number' ? loteamento.idDoTriangulo(tocado.faceIndex) : null;
+      if (loteId && (!passamLotes || passamLotes.has(loteId))) {
+        cbLote?.(loteId);
         return;
       }
     }
@@ -977,6 +1140,7 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
     atmosfera.atualizar(sol, clima);
     const antes = luzNoturna;
     luzNoturna = Math.round(noite * 20) / 20;
+    fachadaCidade.noite.value = luzNoturna;
     if (luzNoturna !== antes && pecas.size) pintar();
     pos?.definirBrilho(luzNoturna);
     paisagismo?.definirNoite(luzNoturna);
@@ -997,6 +1161,7 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
 
   function aplicarQualidade(n: NivelQualidade): void {
     renderer.setPixelRatio(qualidade.pixelRatio(window.devicePixelRatio));
+    fachadaCidade.detalhe.value = n.nome === 'baixo' ? 0 : 1; // apartamento falso nas janelas só onde a placa aguenta
     renderer.shadowMap.enabled = n.sombras;
     for (const l of csm.lights) {
       l.castShadow = n.sombras;
@@ -1203,6 +1368,10 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
       som: som.ligado(),
       decorado: decorado?.moveis ?? 0,
       outros: outros.size,
+      explosao: Math.round(explosao.atual * 100) / 100,
+      etiquetas: rotulos.size,
+      rota: rotaDesenhada?.userData.pontos ?? 0,
+      lotes: loteamento?.centros.size ?? 0,
       corretora: !corretora || !corretora.objeto.visible ? 'fora' : corretoraFalando ? 'falando' : 'parada',
       terceiraPessoa,
       boneco: presetId,
@@ -1324,11 +1493,18 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
       const d = Math.hypot(o.atual.x - antes.x, o.atual.z - antes.z);
       o.b.atualizar(o.atual, { distancia: d, velocidade: dtMs > 0 ? (d * 1000) / dtMs : 0, noAr: false, acenando: 0 }, agora / 1000, menosMovimento);
     }
+    if (explosao.atual !== explosao.alvo) {
+      const passo = menosMovimento ? 1 : Math.min(1, dtMs / 350);
+      explosao.atual += (explosao.alvo - explosao.atual) * passo;
+      if (Math.abs(explosao.alvo - explosao.atual) < 0.005) explosao.atual = explosao.alvo;
+      aplicarExplosao(explosao.atual);
+    }
     if (corretora?.objeto.visible) {
       const yaw = Math.atan2(-(camera.position.x - corretoraPos.x), -(camera.position.z - corretoraPos.z));
       corretora.atualizar({ x: corretoraPos.x, y: 0, z: corretoraPos.z, yaw }, { distancia: 0, velocidade: 0, noAr: false, acenando: corretoraFalando ? 1 : 0 }, agora / 1000, menosMovimento);
     }
     atmosfera.quadro(camera, config.qualidadeFixa || menosMovimento ? 0 : agora / 1000); // qualidade fixa = cena determinística (nuvens paradas)
+    VENTO.tempo.value = config.qualidadeFixa || menosMovimento ? 0 : agora / 1000; // copas com vento (paradas na cena de teste)
     pessoas?.quadro(agora / 1000);
     som.quadro(camera, agora / 1000, luzNoturna < 0.5);
     csm.update();
@@ -1338,11 +1514,27 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
     avisar(agora);
   });
 
+  /**
+   * Compila os materiais da cena antes de eles aparecerem (Plano 12a, item 14): sem isso, o 1º giro que mostra a
+   * cidade ou o paisagismo engasga compilando shader. Em paralelo quando a placa permite; nunca atrasa a 1ª imagem.
+   */
+  function aquecerMateriais(): void {
+    // sem compilação paralela na placa (desenho por software, aparelho antigo), compilar tudo de uma vez trava a
+    // página por segundos: aí é melhor compilar aos poucos, no 1º quadro de cada material, como antes
+    if (!renderer.extensions.has('KHR_parallel_shader_compile')) return;
+    try {
+      void renderer.compileAsync(cena, camera).catch(() => undefined);
+    } catch {
+      // sem compilação antecipada: compila no 1º quadro, como antes
+    }
+  }
+
   const pronto = (config.modeloUrl ? montarModelo(config.modeloUrl) : Promise.resolve(montarVolumes())).then(() => {
     pintar();
     enquadrarPredio();
     montarPaisagismo();
     ajustarPos(qualidade.nivel);
+    aquecerMateriais();
   });
   pronto.then(
     () => (cargaMs = Math.round(performance.now() - criadoEm)),
@@ -1356,6 +1548,7 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
       destaque = passam;
       favoritos = favs;
       pintar();
+      rotularUnidades(passam);
     },
     definirStatus(id, status) {
       const p = pecas.get(id);
@@ -1374,6 +1567,93 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
         m.needsUpdate = true;
       }
       return andar === null || y !== null;
+    },
+    definirLotes(lotes, centro) {
+      if (loteamento) {
+        loteamento.objeto.removeFromParent();
+        loteamento.destruir();
+        loteamento = null;
+      }
+      statusLotes.clear();
+      nomesLotes.clear();
+      if (!lotes.length) return 0;
+      for (const l of lotes) {
+        statusLotes.set(l.id, l.status);
+        nomesLotes.set(l.id, `Lote ${l.numero}`);
+      }
+      loteamento = criarLotes(lotes, centro, rotacao, cidadeCompleta?.terreno.altura);
+      cena.add(loteamento.objeto);
+      // loteamento não tem torre: o jardim e a fachada do "prédio" vazio sairiam por cima dos lotes
+      if (paisagismo) paisagismo.objeto.visible = false;
+      if (raizPredio) raizPredio.visible = false;
+      loteamento.pintar(statusLotes, passamLotes);
+      numerarLotes();
+      const c = loteamento.caixa;
+      if (modo !== 'orbita') definirModo('orbita');
+      orbita.enabled = false;
+      voo = { trajeto: planejarVoo({ posicao: camera.position.clone(), alvo: orbita.target.clone() }, enquadrar({ ...c, minY: 0, maxY: 10 }, camera.fov, camera.aspect || 1, 50, 1.1)), inicio: performance.now() };
+      ultimoAviso = 0;
+      return loteamento.centros.size;
+    },
+    destacarLotes(passam) {
+      passamLotes = passam;
+      loteamento?.pintar(statusLotes, passam);
+      numerarLotes();
+    },
+    definirStatusLote(id, status) {
+      statusLotes.set(id, status);
+      loteamento?.pintar(statusLotes, passamLotes);
+    },
+    voarParaLote(id) {
+      const c = loteamento?.centros.get(id);
+      if (!c) return false;
+      if (modo !== 'orbita') definirModo('orbita');
+      orbita.enabled = false;
+      voo = { trajeto: planejarVoo({ posicao: camera.position.clone(), alvo: orbita.target.clone() }, enquadrar({ minX: c.x - 25, maxX: c.x + 25, minY: c.y, maxY: c.y + 4, minZ: c.z - 25, maxZ: c.z + 25 }, camera.fov, camera.aspect || 1, 45, 1.2)), inicio: performance.now() };
+      return true;
+    },
+    aoSelecionarLote(cb) {
+      cbLote = cb;
+    },
+    desenharRota(pontos) {
+      apagarRota();
+      if (!pontos || pontos.length < 2 || !centroEntorno) return false;
+      const centro = centroEntorno;
+      const xz = pontos.map(([lon, lat]) => paraModelo(lonLatToLocal({ lon, lat }, centro), rotacao));
+      const altura = cidadeCompleta?.terreno.altura ?? (() => 0);
+      const geo = fita({ pontos: xz, largura: 2.4 }, altura, 0.35);
+      if (!geo) return false;
+      const grupo = new THREE.Group();
+      grupo.name = 'rota-a-pe';
+      // ciano por cima de tudo no chão (sem sombra, sem esconder atrás do meio-fio)
+      const linha = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ color: 0x22d3ee, transparent: true, opacity: 0.92, depthWrite: false }));
+      linha.renderOrder = 6;
+      const fim = xz.at(-1)!;
+      const alvo = new THREE.Mesh(new THREE.RingGeometry(2.2, 3.2, 40).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: 0x22d3ee, transparent: true, opacity: 0.9, side: THREE.DoubleSide, depthWrite: false }));
+      alvo.position.set(fim.x, altura(fim.x, fim.z) + 0.4, fim.z);
+      alvo.renderOrder = 6;
+      grupo.add(linha, alvo);
+      grupo.userData.pontos = pontos.length;
+      cena.add(grupo);
+      rotaDesenhada = grupo;
+      // enquadra o caminho inteiro (do prédio ao destino), de cima
+      if (modo !== 'orbita') definirModo('orbita');
+      const caixa = {
+        minX: Math.min(...xz.map((q) => q.x)),
+        maxX: Math.max(...xz.map((q) => q.x)),
+        minY: 0,
+        maxY: 20,
+        minZ: Math.min(...xz.map((q) => q.z)),
+        maxZ: Math.max(...xz.map((q) => q.z)),
+      };
+      orbita.enabled = false;
+      voo = { trajeto: planejarVoo({ posicao: camera.position.clone(), alvo: orbita.target.clone() }, enquadrar(caixa, camera.fov, camera.aspect || 1, 55, 1.3)), inicio: performance.now() };
+      ultimoAviso = 0;
+      return true;
+    },
+    separarAndares(ligado) {
+      if (ligado && modo !== 'orbita') definirModo('orbita');
+      explosao.alvo = ligado ? 1 : 0;
     },
     andaresComCorte() {
       return [...new Set([...pecas.values()].map((p) => p.unidade.andar))].sort((a, b) => a - b);
@@ -1615,6 +1895,10 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
     },
     async definirEntorno(entorno) {
       await pronto;
+      apagarRota();
+      centroEntorno = entorno ? { lon: entorno.centro.lon, lat: entorno.centro.lat } : null;
+      // montar a cidade e compilar os materiais dela travam alguns quadros: não é o aparelho, não baixa a qualidade
+      qualidade.ignorarCarga();
       if (cidade) {
         cena.remove(cidade);
         cidade.geometry.dispose();
@@ -1672,6 +1956,8 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
       cena.add(cidade);
       bloqueadoCidade = bloqueioPorRaio([cidade]);
       atribuicaoEntorno = entorno.atribuicao;
+      qualidade.ignorarCarga(); // o 1º quadro com a cidade compila o material dela
+      aquecerMateriais(); // e compila já, em paralelo, para o 1º giro não engasgar
       return predios.length;
     },
     gerarGiro,

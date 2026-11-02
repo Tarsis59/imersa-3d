@@ -40,9 +40,9 @@ export function Selecao({ rotulo, id, children, ...p }: SelectHTMLAttributes<HTM
   );
 }
 
-export function Cartao({ titulo, children }: { titulo?: string; children: ReactNode }) {
+export function Cartao({ titulo, id, children }: { titulo?: string; id?: string; children: ReactNode }) {
   return (
-    <section className="rounded-2xl border border-borda bg-superficie p-6 shadow-sm">
+    <section id={id} className="scroll-mt-4 rounded-2xl border border-borda bg-superficie p-6 shadow-sm">
       {titulo && <h2 className="mb-4 text-lg font-semibold">{titulo}</h2>}
       {children}
     </section>

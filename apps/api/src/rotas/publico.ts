@@ -3,12 +3,13 @@ import type { FastifyInstance, FastifyRequest } from 'fastify';
 import type pg from 'pg';
 import { z } from 'zod';
 import { fotosNoLugar, lazerDoPredio } from './lazer';
+import { lotesDoPredio } from './lotes';
 import { transmitirSala, type CanalSala } from '../tempo-real/sala';
 import { withTenant } from '@imersa/db';
 import { ErroHttp } from '../erros';
 import { hashToken } from '../auth/hash';
 import type { Armazenamento } from '../arquivos/armazenamento';
-import type { criarEntorno } from './mapa';
+import { poisDoProjeto, rotaDoPoi, type criarEntorno } from './mapa';
 import { transmitirPredio, type CanalUnidades } from '../tempo-real/canal';
 import { giroDaVitrine } from './giros';
 import { responderAssistente, type ConfigIA } from './assistente';
@@ -42,6 +43,7 @@ const Eventos = z.object({
     .min(1)
     .max(50),
 });
+const PoiPublico = z.object({ poiId: z.uuid() });
 const NomeNaSala = z.object({ nome: z.string().trim().min(1).max(40).default('Visitante') });
 const SinalSala = z.object({
   de: z.uuid(),
@@ -103,14 +105,15 @@ export function rotasPublicas(app: FastifyInstance, { pool, armazenamento, entor
           projeto: { id: string; nome: string; descricao: string | null; cidade: string | null; uf: string | null; lat: number | null; lon: number | null; rotacaoGraus: number; estiloDecorado: string };
           empresa: string;
           consultora: string;
+          whatsapp: string | null;
         }>(
           `SELECT json_build_object('id', b.id, 'nome', b.nome) AS predio, b.modelo_asset_id AS "modeloId",
                   json_build_object('id', p.id, 'nome', p.nome, 'descricao', p.descricao, 'cidade', p.cidade, 'uf', p.uf,
                                     'lat', ST_Y(p.geom), 'lon', ST_X(p.geom), 'rotacaoGraus', p.rotacao_graus::float8, 'estiloDecorado', p.estilo_decorado) AS projeto,
-                  t.nome AS empresa, u.nome AS consultora
+                  t.nome AS empresa, u.nome AS consultora, (SELECT whatsapp FROM share_links WHERE id = $3) AS whatsapp
              FROM buildings b JOIN projects p ON p.id = b.project_id JOIN tenants t ON t.id = b.tenant_id, users u
             WHERE b.id = $1 AND u.id = $2`,
-          [l.predioId, l.consultoraId],
+          [l.predioId, l.consultoraId, l.linkId],
         )
       ).rows[0]!;
       const andares = (await c.query<{ numero: number; nome: string }>('SELECT numero, nome FROM floors WHERE building_id = $1 ORDER BY numero DESC', [l.predioId])).rows;
@@ -129,13 +132,13 @@ export function rotasPublicas(app: FastifyInstance, { pool, armazenamento, entor
           [base.projeto.id, base.modeloId],
         )
       ).rows;
-      return { base, andares, unidades, arquivos, giro: await giroDaVitrine(c, l.predioId), lazer: await lazerDoPredio(c, l.predioId), fotos: await fotosNoLugar(c, base.projeto.id) };
+      return { base, andares, unidades, arquivos, giro: await giroDaVitrine(c, l.predioId), lazer: await lazerDoPredio(c, l.predioId), fotos: await fotosNoLugar(c, base.projeto.id), lotes: await lotesDoPredio(c, l.predioId) };
     });
-    const { base, andares, unidades, arquivos, giro, lazer, fotos } = dados;
+    const { base, andares, unidades, arquivos, giro, lazer, fotos, lotes } = dados;
     const modelo = arquivos.find((a) => a.id === base.modeloId && a.tipo === 'modelo_3d');
     return {
       empresa: { nome: base.empresa },
-      consultora: { nome: base.consultora },
+      consultora: { nome: base.consultora, whatsapp: base.whatsapp },
       projeto: base.projeto,
       predio: base.predio,
       andares,
@@ -147,6 +150,7 @@ export function rotasPublicas(app: FastifyInstance, { pool, armazenamento, entor
       giro,
       lazer,
       fotos,
+      lotes,
       // o portal chama o assistente direto na API (resposta em fluxo)
       assistenteUrl: ia.chamar ? `${apiPublica}/publico/links/${(req.params as { token: string }).token}/assistente` : null,
       aoVivoUrl: `${apiPublica}/publico/links/${(req.params as { token: string }).token}/ao-vivo`,
@@ -182,6 +186,19 @@ export function rotasPublicas(app: FastifyInstance, { pool, armazenamento, entor
     const l = await resolver(req);
     const projetoId = await withTenant(pool, daEmpresa(l), async (c) => (await c.query<{ project_id: string }>('SELECT project_id FROM buildings WHERE id = $1', [l.predioId])).rows[0]!.project_id);
     return entorno.obter(daEmpresa(l), projetoId);
+  });
+
+  // o que há perto (escolas, mercados, metrô) e a rota a pé desenhada até cada um (Plano 12a, item 11)
+  app.get('/publico/links/:token/pois', limite(60, '1 minute'), async (req) => {
+    const l = await resolver(req);
+    return withTenant(pool, daEmpresa(l), async (c) => poisDoProjeto(c, (await c.query<{ project_id: string }>('SELECT project_id FROM buildings WHERE id = $1', [l.predioId])).rows[0]!.project_id));
+  });
+  app.get('/publico/links/:token/pois/:poiId/rota', limite(60, '1 minute'), async (req) => {
+    const l = await resolver(req);
+    const { poiId } = PoiPublico.parse(req.params);
+    const r = await withTenant(pool, daEmpresa(l), async (c) => rotaDoPoi(c, (await c.query<{ project_id: string }>('SELECT project_id FROM buildings WHERE id = $1', [l.predioId])).rows[0]!.project_id, poiId));
+    if (r === undefined) throw new ErroHttp(404, 'nao_encontrado');
+    return { rota: r };
   });
 
   /** Link de um arquivo 3D do empreendimento do link (interior real, modelo do prédio ou o giro 360° do prédio). */

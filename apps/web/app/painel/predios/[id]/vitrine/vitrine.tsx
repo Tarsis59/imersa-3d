@@ -13,6 +13,11 @@ import { Giro360 } from './giro';
 import { Assistente, type AcaoAssistente } from './assistente';
 import { ComandoVitrine } from './comando';
 import { VisitaEmGrupo } from './visita-grupo';
+import { FalarComCorretor } from './falar-corretor';
+import { CartaoProximidades, type FonteProximidades } from './proximidades';
+import { CartaoLotes, FILTRO_LOTES_VAZIO, filtrarLotes, type FiltroLotes, type LoteVitrine } from './lotes';
+
+const SEM_LOTES: LoteVitrine[] = [];
 import type { AcaoComando } from '@/lib/comandos';
 import { ehPorDoSol, MISSOES, PASSEIO_M, progressoTipologias, somarCaminhada, type IdMissao } from '@/lib/missoes';
 import { SimuladorFinanciamento } from './simulador';
@@ -76,6 +81,9 @@ export function Vitrine({
   fotos = SEM_FOTOS,
   inicio,
   salaUrl = null,
+  corretor = null,
+  proximidades = null,
+  lotes = SEM_LOTES,
   lat,
   lon,
   interiores,
@@ -111,6 +119,12 @@ export function Vitrine({
   estiloDecorado?: 'moderno' | 'classico' | 'jovem';
   /** Visita em grupo (só no link do cliente): endereço da sala na API. */
   salaUrl?: string | null;
+  /** Link do cliente com o WhatsApp do corretor: o card da unidade ganha "Falar com o corretor" e o QR (Plano 12b). */
+  corretor?: { nome: string; whatsapp: string; empreendimento: string } | null;
+  /** O que há perto e a rota a pé desenhada no chão (painel, link do cliente e estande). */
+  proximidades?: FonteProximidades | null;
+  /** Loteamento (Plano 12d): os lotes no chão do 3D com o buscador de lotes. */
+  lotes?: LoteVitrine[];
   /** Abrir já na vista de uma unidade e numa hora (foto pedida por texto). */
   inicio?: { unidadeId: string | null; hora: number | null };
   /** Fotos do imóvel com GPS: quadros no 3D onde foram tiradas (Plano 11c). */
@@ -174,8 +188,30 @@ export function Vitrine({
   const [selecionada, setSelecionada] = useState<string | null>(null);
   const [andarCorte, setAndarCorte] = useState('');
   const [comCorte, setComCorte] = useState<number[]>([]);
+  const [separados, setSeparados] = useState(false);
+  // loteamento: lotes no 3D, buscador e o lote escolhido (no 3D ou na lista)
+  const [filtroLotes, setFiltroLotes] = useState<FiltroLotes>(FILTRO_LOTES_VAZIO);
+  const [loteSelecionado, setLoteSelecionado] = useState<string | null>(null);
+  useEffect(() => {
+    if (estado !== 'pronto' || !lotes.length || lat == null || lon == null) return;
+    viewer.current?.definirLotes(lotes, { lon, lat });
+    viewer.current?.aoSelecionarLote((id) => setLoteSelecionado(id));
+  }, [estado, lotes, lat, lon]);
+  useEffect(() => {
+    if (estado !== 'pronto' || !lotes.length) return;
+    const vazio = filtroLotes.precoMax === null && filtroLotes.areaMin === null && !filtroLotes.quadras.size && !filtroLotes.status.size;
+    viewer.current?.destacarLotes(vazio ? null : filtrarLotes(lotes, filtroLotes));
+  }, [estado, lotes, filtroLotes]);
+  useEffect(() => {
+    if (loteSelecionado) viewer.current?.voarParaLote(loteSelecionado);
+  }, [loteSelecionado]);
+  // andar a pé ou entrar no apartamento junta os andares no 3D: o botão acompanha
+  useEffect(() => {
+    if (separados && telemetria && telemetria.modo !== 'orbita') setSeparados(false);
+  }, [separados, telemetria]);
   const [dataSol, setDataSol] = useState(hoje);
-  const [horaSol, setHoraSol] = useState(10);
+  // abre no fim de tarde: sol baixo e sombras longas são a imagem mais bonita do dia (Plano 12a, item 7)
+  const [horaSol, setHoraSol] = useState(16.5);
   const [clima, setClima] = useState<Clima>('limpo');
   const [entorno, setEntorno] = useState<EstadoEntorno>({ tipo: 'carregando' });
   const [interiorAberto, setInteriorAberto] = useState<{ id: string; nome: string } | null>(null);
@@ -593,7 +629,10 @@ export function Vitrine({
 
   const nomeAndar = new Map(andares.map((a) => [a.numero, a.nome]));
   const quartosDisponiveis = [...new Set(unidades.map((u) => u.quartos).filter((q): q is number => q !== null))].sort((a, b) => a - b);
-  const lista = unidadesAtuais.filter((u) => passam.has(u.id));
+  // busca pelo código na lista ("1201", "12"), como no painel de unidades do vídeo 3; não mexe no 3D
+  const [buscaUnidade, setBuscaUnidade] = useState('');
+  const termoBusca = buscaUnidade.trim().toLowerCase();
+  const lista = unidadesAtuais.filter((u) => passam.has(u.id) && (!termoBusca || u.codigo.toLowerCase().includes(termoBusca)));
   const unidade = selecionada ? unidadesAtuais.find((u) => u.id === selecionada) : undefined;
   const modo = telemetria?.modo ?? 'orbita';
 
@@ -836,10 +875,12 @@ export function Vitrine({
         case 'modo':
           viewer.current?.definirModo(a.modo);
           break;
+        case 'separar_andares':
+          viewer.current?.separarAndares(a.ligado);
+          setSeparados(a.ligado);
+          break;
         case 'visao_geral':
-          setVista(null);
-          setInterior(null);
-          viewer.current?.visaoGeral();
+          visaoGeral();
           break;
         case 'som':
           void viewer.current?.definirSom(a.ligado);
@@ -855,6 +896,14 @@ export function Vitrine({
     if (a.focar) voar(a.focar);
   };
 
+  // volta ao prédio inteiro de cima (botão, duplo toque no 3D e comando "visão geral")
+  function visaoGeral() {
+    setVista(null);
+    setInterior(null);
+    viewer.current?.visaoGeral();
+  }
+  const irPara = (id: string) => document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+
   return (
     <div className="grid gap-6 lg:grid-cols-[1fr_340px] lg:items-start">
       {/* camada por cima da câmera no AR (o navegador a mostra em tela cheia durante a sessão) */}
@@ -866,6 +915,7 @@ export function Vitrine({
       </div>
       <div
         data-testid="vitrine-3d"
+        onDoubleClick={() => modo === 'orbita' && visaoGeral()}
         data-estado={estado}
         data-modo={modo}
         data-corte={andarCorte || 'nenhum'}
@@ -888,6 +938,10 @@ export function Vitrine({
         data-missoes={missoes.size}
         data-corretora={telemetria?.corretora ?? 'fora'}
         data-outros={telemetria?.outros ?? 0}
+        data-explosao={telemetria?.explosao ?? 0}
+        data-etiquetas={telemetria?.etiquetas ?? 0}
+        data-rota={telemetria?.rota ?? 0}
+        data-lotes={telemetria?.lotes ?? 0}
         data-terceira={telemetria?.terceiraPessoa ? 'sim' : 'nao'}
         data-boneco={telemetria?.boneco ?? ''}
         data-no-ar={telemetria?.noAr ? 'sim' : 'nao'}
@@ -941,6 +995,26 @@ export function Vitrine({
               </button>
             </div>
           </div>
+        )}
+        {estado === 'pronto' && !mostrarGiro && (
+          // barra de horário em cima do 3D, como nos estandes interativos: arrastar muda sol, sombras e luzes
+          <div className="pointer-events-none absolute inset-x-0 top-14 flex justify-center px-3 md:top-3 md:px-44">
+            <label className="pointer-events-auto flex items-center gap-2 rounded-full bg-black/55 px-3 py-1.5 text-xs text-white">
+              <span className="font-semibold tabular-nums" data-testid="hora-topo">
+                {horaLegivel(horaSol)}
+              </span>
+              <input aria-label="Horário do dia" type="range" min={5} max={22} step={0.25} value={horaSol} onChange={(e) => setHoraSol(Number(e.target.value))} className="w-20 accent-white sm:w-36" />
+            </label>
+          </div>
+        )}
+        {estado === 'pronto' && modo !== 'primeira-pessoa' && !mostrarGiro && (
+          <>
+            {/* embaixo da bússola: o canto de baixo fica livre para tocar no chão (andar, marcar o lazer) */}
+            <button type="button" onClick={visaoGeral} className="absolute right-3 top-16 min-h-9 rounded-full bg-white/90 px-3 text-xs font-semibold text-slate-900 shadow hover:bg-white">
+              Visão geral
+            </button>
+            <span className="pointer-events-none absolute bottom-2 left-2 rounded bg-black/45 px-1.5 py-0.5 text-[10px] text-white/90">Imagens meramente ilustrativas</span>
+          </>
         )}
         {apresentando && <Apresentacao unidade={unidadesAtuais.find((u) => u.id === vitrineDaVez) ?? null} nomeAndar={(n) => nomeAndar.get(n) ?? `${n}º andar`} />}
         {estado === 'erro' && <p className="absolute inset-0 grid place-items-center text-perigo">Não foi possível carregar o modelo 3D.</p>}
@@ -1004,6 +1078,7 @@ export function Vitrine({
           <Cartao titulo={`Unidade ${unidade.codigo}`}>
             <div data-testid="unidade-selecionada" className="grid gap-3 text-sm">
               <span className={`w-fit rounded px-2 py-0.5 text-xs font-semibold ${COR_STATUS[unidade.status]}`}>{ROTULO_STATUS[unidade.status]}</span>
+              {corretor && <FalarComCorretor numero={corretor.whatsapp} nomeCorretor={corretor.nome} empreendimento={corretor.empreendimento} unidade={unidade.codigo} />}
               <dl className="grid grid-cols-2 gap-x-3 gap-y-1">
                 <dt className="text-suave">Andar</dt>
                 <dd>{nomeAndar.get(unidade.andar) ?? unidade.andar}</dd>
@@ -1154,6 +1229,20 @@ export function Vitrine({
             <VisitaEmGrupo url={salaUrl} viewer={viewer} pronto={estado === 'pronto'} />
           </Cartao>
         )}
+        {lotes.length > 0 && <CartaoLotes lotes={lotes} filtro={filtroLotes} aoFiltrar={setFiltroLotes} selecionado={loteSelecionado} aoSelecionar={setLoteSelecionado} corretor={corretor} />}
+        <nav aria-label="Seções da Vitrine" data-testid="secoes" className="flex flex-wrap gap-2">
+          {[
+            ...(lotes.length ? [['secao-lotes', 'Lotes']] : []),
+            ['secao-unidades', 'Unidades'],
+            ...(itensLazer.length ? [['secao-lazer', 'Áreas comuns']] : []),
+            ...(proximidades ? [['secao-entorno', 'O que há perto']] : []),
+            ['secao-vista', 'Vista e horário'],
+          ].map(([id, rotulo]) => (
+            <button key={id} type="button" onClick={() => irPara(id!)} className="min-h-10 rounded-full border border-borda bg-superficie px-4 text-sm font-medium hover:bg-fundo">
+              {rotulo}
+            </button>
+          ))}
+        </nav>
         <Cartao titulo={`Missões · ${missoes.size} de ${MISSOES.length}`}>
           <ul className="grid gap-2 text-sm" data-testid="missoes" data-feitas={missoes.size}>
             {MISSOES.map((m) => (
@@ -1248,7 +1337,19 @@ export function Vitrine({
           </div>
         </Cartao>
 
-        <Cartao titulo="Unidades">
+        <Cartao titulo="Unidades" id="secao-unidades">
+          <label htmlFor="busca-unidade" className="mb-2 grid gap-1 text-sm">
+            <span className="sr-only">Buscar unidade pelo número</span>
+            <input
+              id="busca-unidade"
+              type="search"
+              inputMode="numeric"
+              value={buscaUnidade}
+              onChange={(e) => setBuscaUnidade(e.target.value)}
+              placeholder="Buscar pelo número (ex.: 1201)"
+              className="rounded-lg border border-borda bg-superficie px-3 py-2"
+            />
+          </label>
           <p data-testid="contagem-filtro" className="mb-3 text-sm text-suave">
             {lista.length} de {unidades.length} unidades
           </p>
@@ -1300,6 +1401,8 @@ export function Vitrine({
           </Cartao>
         )}
 
+        {proximidades && <CartaoProximidades fonte={proximidades} pronto={estado === 'pronto'} desenhar={(p) => viewer.current?.desenharRota(p) ?? false} />}
+        <div id="secao-lazer" className="scroll-mt-4" />
         <CartaoLazer
           itens={itensLazer}
           pronto={estado === 'pronto'}
@@ -1319,7 +1422,7 @@ export function Vitrine({
           aoRemover={(id) => void removerPontoLazer(id)}
           erro={erroLazer}
         />
-        <Cartao titulo="Vista">
+        <Cartao titulo="Vista" id="secao-vista">
           <div className="grid gap-4 text-sm">
             <p data-testid="aviso-entorno" className="text-suave">
               {entorno.tipo === 'carregando' && 'Carregando os prédios reais em volta…'}
@@ -1335,6 +1438,18 @@ export function Vitrine({
                 </option>
               ))}
             </Selecao>
+            <Botao
+              type="button"
+              variante="secundario"
+              aria-pressed={separados}
+              disabled={estado !== 'pronto' || comCorte.length < 2}
+              onClick={() => {
+                viewer.current?.separarAndares(!separados);
+                setSeparados(!separados);
+              }}
+            >
+              {separados ? 'Juntar os andares' : 'Separar os andares'}
+            </Botao>
             <div className="grid grid-cols-2 gap-3">
               <Campo id="data-sol" rotulo="Dia do sol" type="date" value={dataSol} onChange={(e) => e.target.value && setDataSol(e.target.value)} />
               <label htmlFor="hora-sol" className="grid gap-1">

@@ -51,7 +51,8 @@ const COR = 0x0ea5e9;
 const COR_DESTAQUE = 0xf59e0b;
 
 /** Placa com o nome desenhada num canvas (sem fonte nem imagem para baixar). */
-function placa(texto: string): THREE.Sprite {
+/** Placa de texto sempre de frente para a câmera (lazer, etiquetas das unidades). */
+export function placa(texto: string): THREE.Sprite {
   const escala = 2;
   const tela = document.createElement('canvas');
   const ctx = tela.getContext('2d')!;

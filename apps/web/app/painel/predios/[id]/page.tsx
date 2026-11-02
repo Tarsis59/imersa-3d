@@ -3,7 +3,8 @@ import { notFound } from 'next/navigation';
 import { Cartao } from '@/components/ui';
 import { apiNaPagina } from '@/lib/sessao';
 import { ehGestao, type Arquivo, type Espelho, type Estande, type GirosDoPredio, type LinkCliente, type Me, type VideosDoPredio } from '@/lib/tipos';
-import { comandarEstande, criarEstande, criarLink, mudarStatus, pedirGiro, comandoGestao, pedirVideo, revogarLink, vincularModelo } from './actions';
+import { ImportarLotes } from './importar-lotes';
+import { comandarEstande, criarEstande, criarLink, importarLotes, mudarStatus, pedirGiro, comandoGestao, pedirVideo, revogarLink, vincularModelo } from './actions';
 import { linkDoArquivo } from './vitrine/actions';
 import { Estudio } from './estudio';
 import { Estandes } from './estandes';
@@ -61,6 +62,11 @@ export default async function PaginaPredio({ params }: { params: Promise<{ id: s
         </div>
       </div>
       <EspelhoVendas espelho={espelho} mudarStatus={mudarStatus.bind(null, espelho.predio.id)} />
+      {ehGestao(me.papel) && me.mfa && (
+        <Cartao titulo="Loteamento: importar os lotes">
+          <ImportarLotes importar={importarLotes.bind(null, espelho.predio.id)} />
+        </Cartao>
+      )}
       {podeLinks && (
         <Cartao titulo="Links para clientes">
           <LinksClientes

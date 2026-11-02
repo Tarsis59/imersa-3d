@@ -3,6 +3,7 @@ import type { Entorno } from '@imersa/viewer';
 import { api } from '@/lib/api';
 import { TOKEN_LINK } from '@/lib/portal';
 import type { ResultadoEntorno } from '@/app/painel/predios/[id]/vitrine/actions';
+import type { PontoProximo, RotaAPe } from '@/app/painel/predios/[id]/vitrine/proximidades';
 
 const caminho = (token: string, resto = '') => {
   if (!TOKEN_LINK.test(token)) throw new Error('link inválido');
@@ -55,4 +56,15 @@ export async function enviarLead(token: string, d: DadosLead): Promise<{ ok: tru
   if (r.status === 410) return { ok: false, erro: 'Este link não está mais disponível. Peça um novo à sua consultora.' };
   if (r.status === 429) return { ok: false, erro: 'Muitos envios seguidos. Tente de novo em alguns minutos.' };
   return { ok: false, erro: 'Confira os dados: nome, e-mail ou telefone (com DDD).' };
+}
+
+export async function listarPontosPublico(token: string): Promise<PontoProximo[] | null> {
+  const r = await api<{ pois: PontoProximo[] }>(caminho(token, '/pois'));
+  return r.status === 200 ? r.dados.pois : null;
+}
+
+export async function rotaAtePublico(token: string, poiId: string): Promise<RotaAPe | null> {
+  if (!/^[0-9a-f-]{36}$/i.test(poiId)) return null;
+  const r = await api<{ rota: RotaAPe | null }>(caminho(token, `/pois/${poiId}/rota`));
+  return r.status === 200 ? r.dados.rota : null;
 }

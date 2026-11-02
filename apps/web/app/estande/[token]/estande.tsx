@@ -1,8 +1,10 @@
 'use client';
 import { useEffect, useRef, useState } from 'react';
+import { PainelCorretor, useModoCorretor } from './modo-corretor';
 import type { UnidadeViewer } from '@imersa/viewer';
 import { Vitrine, type EventoVitrine } from '@/app/painel/predios/[id]/vitrine/vitrine';
 import type { ResultadoEntorno } from '@/app/painel/predios/[id]/vitrine/actions';
+import type { FonteProximidades } from '@/app/painel/predios/[id]/vitrine/proximidades';
 import { conferir, inicial, tocar, type EstadoEstande } from '@/lib/estande';
 import type { Portal } from '@/lib/tipos';
 import type { DadosSinal, enviarSinal } from './actions';
@@ -132,6 +134,7 @@ export function TelaEstande({
   ociosoS,
   sinalS,
   carregarEntorno,
+  proximidades,
   linkDoArquivo,
   sinal,
 }: {
@@ -144,10 +147,12 @@ export function TelaEstande({
   /** Segundos entre os sinais de vida. */
   sinalS: number;
   carregarEntorno: () => Promise<ResultadoEntorno>;
+  proximidades: FonteProximidades;
   linkDoArquivo: (arquivoId: string) => Promise<string | null>;
   sinal: (d: DadosSinal) => ReturnType<typeof enviarSinal>;
 }) {
   const [estado, setEstado] = useState<EstadoEstande>(() => inicial(Date.now()));
+  const corretor = useModoCorretor(token);
   const estadoRef = useRef(estado);
   estadoRef.current = estado;
   const [desativado, setDesativado] = useState(false);
@@ -238,7 +243,8 @@ export function TelaEstande({
     );
   }
 
-  const unidades: UnidadeViewer[] = portal.unidades.map((u) => ({ id: u.id, codigo: u.codigo, andar: u.andar, status: u.status, areaM2: u.areaM2, quartos: u.quartos, preco: u.preco, meshNodeId: u.meshNodeId }));
+  // modo corretor com os preços escondidos: as unidades chegam sem preço (nenhum canto da tela deixa vazar)
+  const unidades: UnidadeViewer[] = portal.unidades.map((u) => ({ id: u.id, codigo: u.codigo, andar: u.andar, status: u.status, areaM2: u.areaM2, quartos: u.quartos, preco: corretor.precosOcultos ? null : u.preco, meshNodeId: u.meshNodeId }));
   return (
     <div data-testid="estande" data-apresentacao={estado.apresentando ? 'ligada' : 'desligada'} data-reinicio={estado.reinicio} data-offline={offline ? 'pronto' : ''} className="min-h-dvh select-none overscroll-none bg-fundo">
       <header className="flex h-24 items-center justify-between gap-6 px-6">
@@ -273,7 +279,8 @@ export function TelaEstande({
           </div>
         </div>
       </header>
-      <main className="px-4 pb-4">
+      {corretor.aberto && <PainelCorretor precosOcultos={corretor.precosOcultos} alternarPrecos={corretor.alternarPrecos} fechar={corretor.fechar} />}
+      <main className="px-4 pb-4" data-precos={corretor.precosOcultos ? 'ocultos' : 'visiveis'}>
         <Vitrine
           predioId={portal.predio.id}
           projetoId={portal.projeto.id}
@@ -290,9 +297,11 @@ export function TelaEstande({
           lon={portal.projeto.lon}
           interiores={portal.interiores}
           lazer={portal.lazer}
+          lotes={portal.lotes}
           giroRenderizado={portal.giro}
           assistenteUrl={portal.assistenteUrl}
           carregarEntorno={carregarEntorno}
+          proximidades={proximidades}
           linkDoArquivo={linkDoArquivo}
           telemetria={false}
           aoEvento={(e) => visitas.registrar(e)}

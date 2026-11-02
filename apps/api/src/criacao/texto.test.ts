@@ -78,6 +78,16 @@ describe('interpretarDescricao (30 descrições reais)', () => {
     expect(interpretarDescricao('com jardim e piscina').lazer.map((l) => l.categoria)).toEqual(['jardim', 'piscina']);
   });
 
+  it('"São Paulo" e "Rio de Janeiro" sozinhos são a capital (cidade e estado ao mesmo tempo)', () => {
+    const sp = interpretarDescricao('Residencial Vista, 8 andares, na Avenida Paulista 1000, São Paulo.');
+    expect([sp.endereco, sp.cidade, sp.uf]).toEqual(['Avenida Paulista 1000', 'São Paulo', 'SP']);
+    const rj = interpretarDescricao('Prédio em Rio de Janeiro, perto da praia');
+    expect([rj.cidade, rj.uf]).toEqual(['Rio de Janeiro', 'RJ']);
+    // outro estado sozinho continua sendo só o estado
+    const pr = interpretarDescricao('Edifício na Rua X 10, no Paraná');
+    expect([pr.cidade, pr.uf]).toEqual([null, 'PR']);
+  });
+
   it('nunca lança, nem com texto vazio ou enorme', () => {
     expect(interpretarDescricao('').andares).toBeNull();
     expect(() => interpretarDescricao('9'.repeat(100_000))).not.toThrow();
