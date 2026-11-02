@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+import { corDoPredio } from './fachadaCidade';
 import type { Building } from './osm';
 
 /**
@@ -15,10 +16,22 @@ export function buildingGeometry(b: Building): THREE.BufferGeometry {
   return g;
 }
 
-/** Uma malha única = 1 draw call para a cidade inteira. */
+/** Cor do acabamento (`color`) e altura do chão sob o prédio (`aBase`, para contar os andares) em cada vértice. */
+function comAcabamento(b: Building): THREE.BufferGeometry {
+  const g = buildingGeometry(b);
+  const n = g.getAttribute('position').count;
+  const c = corDoPredio(b);
+  const cores = new Float32Array(n * 3);
+  for (let i = 0; i < n; i++) cores.set([c.r, c.g, c.b], i * 3);
+  g.setAttribute('color', new THREE.BufferAttribute(cores, 3));
+  g.setAttribute('aBase', new THREE.BufferAttribute(new Float32Array(n).fill(b.base ?? 0), 1));
+  return g;
+}
+
+/** Uma malha única = 1 draw call para a cidade inteira (cada prédio com a sua cor; ver `fachadaCidade`). */
 export function buildCityMesh(predios: Building[], material: THREE.Material): THREE.Mesh {
   if (predios.length === 0) return new THREE.Mesh(new THREE.BufferGeometry(), material);
-  const partes = predios.map(buildingGeometry);
+  const partes = predios.map(comAcabamento);
   const unida = mergeGeometries(partes, false);
   partes.forEach((g) => g.dispose());
   if (!unida) throw new Error('Falha ao unir geometrias da cidade');

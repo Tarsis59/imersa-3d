@@ -302,7 +302,7 @@ export function criarCidade(
     for (let i = 0; i < p.count; i++) p.setY(i, h(p.getX(i), p.getZ(i)) - 0.02);
     g.computeVertexNormals();
     geos.push(g);
-    const chao = new THREE.Mesh(g, material(0xd2cec4, 1, { polygonOffset: false }));
+    const chao = new THREE.Mesh(g, material(0xb9b4a9, 1, { polygonOffset: false }));
     chao.name = 'terreno';
     chao.receiveShadow = true;
     objeto.add(chao);
@@ -372,8 +372,8 @@ export function criarCidade(
   }
   // cada camada um pouco mais "na frente" que a de baixo: sem piscar de longe (calçada < pedestre < asfalto)
   const camada = (n: number) => ({ polygonOffsetFactor: -n, polygonOffsetUnits: -n * 2 });
-  const mAsfalto = material(0x55565a, 0.92, camada(4));
-  const mCalcada = material(0xc4bfb4, 0.9, camada(2));
+  const mAsfalto = material(0x47484c, 0.92, camada(4));
+  const mCalcada = material(0xcdc8bd, 0.9, camada(2));
   const mPedestre = material(0xcdc4b2, 0.92, camada(3));
   const mVerde = material(0x6b8f45, 1, camada(1));
   const mAgua = material(0x2f6b8c, 0.08, { metalness: 0.1, ...camada(1) });

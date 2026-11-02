@@ -145,7 +145,7 @@ export function rotasCriacao(app: FastifyInstance, { pool, exigir, mapa }: Depen
       return true;
     });
     if (!ok) throw new ErroHttp(409, 'montagem_em_andamento');
-    const rodando = executarMontagem({ pool, mapa }, s, id)
+    const rodando = executarMontagem({ pool, mapa, avisar: (erro, etapa) => req.log.warn({ err: erro, etapa, montagem: id }, 'montagem com aviso') }, s, id)
       .catch(async (e) => {
         req.log.error(e);
         await withTenant(pool, ctx(s), (c) => c.query("UPDATE montagens SET estado = 'falhou', concluida_em = now() WHERE id = $1", [id])).catch(() => undefined);

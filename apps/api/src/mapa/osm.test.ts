@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { fileURLToPath } from 'node:url';
-import { categorizar, comPrediosDeArquivo, consultaOverpass, consultaPredios, espacar, interpretarNominatim, interpretarOverpass, interpretarPredios, type ServicosMapa } from './osm';
+import { categorizar, comPrediosDeArquivo, consultaOverpass, consultaPredios, espacar, filaOverpass, interpretarNominatim, interpretarOverpass, interpretarPredios, type ServicosMapa } from './osm';
 
 describe('categorias de pontos de interesse', () => {
   it.each([
@@ -161,5 +161,42 @@ describe('prédios de arquivo (dados reais da Av. Paulista, sem internet)', () =
       const lon = p.contorno.reduce((a, c) => a + c[0], 0) / p.contorno.length;
       expect(Math.hypot((lat + 23.56175) * 110_540, (lon + 46.6545) * 111_320 * cos)).toBeLessThanOrEqual(300);
     }
+  });
+});
+
+describe('filaOverpass (o mapa público cheio não derruba a criação)', () => {
+  const resposta = (status: number, corpo: unknown = {}) => new Response(JSON.stringify(corpo), { status });
+
+  it('tenta de novo quando o Overpass recusa (429) ou cai (504) e devolve o que veio', async () => {
+    const status = [429, 504, 200];
+    const fila = filaOverpass(async () => resposta(status.shift()!, { elements: [1] }), [1, 1]);
+    await expect(fila('q', 1000, (j) => (j as { elements: number[] }).elements.length)).resolves.toBe(1);
+    expect(status).toEqual([]);
+  });
+
+  it('desiste depois das esperas, com o motivo; e consulta errada (400) não repete', async () => {
+    let chamadas = 0;
+    const cheia = filaOverpass(async () => (chamadas++, resposta(429)), [1, 1]);
+    await expect(cheia('q', 1000, () => 0)).rejects.toThrow('Overpass respondeu 429');
+    expect(chamadas).toBe(3);
+    chamadas = 0;
+    const errada = filaOverpass(async () => (chamadas++, resposta(400)), [1, 1]);
+    await expect(errada('q', 1000, () => 0)).rejects.toThrow('Overpass respondeu 400');
+    expect(chamadas).toBe(1);
+  });
+
+  it('uma consulta de cada vez, mesmo pedidas juntas (e a falha de uma não trava a próxima)', async () => {
+    let abertas = 0;
+    let maximo = 0;
+    const fila = filaOverpass(async (q) => {
+      abertas++;
+      maximo = Math.max(maximo, abertas);
+      await new Promise((ok) => setTimeout(ok, 5));
+      abertas--;
+      return resposta(q === 'ruim' ? 400 : 200, { q });
+    }, []);
+    const r = await Promise.allSettled(['a', 'ruim', 'b'].map((q) => fila(q, 1000, (j) => (j as { q: string }).q)));
+    expect(r.map((x) => x.status)).toEqual(['fulfilled', 'rejected', 'fulfilled']);
+    expect(maximo).toBe(1);
   });
 });

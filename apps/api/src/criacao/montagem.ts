@@ -37,6 +37,8 @@ export interface Pistas {
 export interface DepsMontagem {
   pool: pg.Pool;
   mapa: ServicosMapa;
+  /** Onde registrar o motivo de um aviso (o mapa público que não respondeu etc.); a tela mostra só o resumo. */
+  avisar?: (motivo: unknown, etapa: string) => void;
 }
 
 /** Montagens rodando nesta instância (a rota não espera; os testes esperam por aqui). */
@@ -255,7 +257,8 @@ export async function executarMontagem(d: DepsMontagem, s: Sessao, montagemId: s
     let e;
     try {
       e = await criarEntorno(d.pool, d.mapa).obter(ctx(s), projetoId);
-    } catch {
+    } catch (erro) {
+      d.avisar?.(erro, 'cidade');
       throw new Aviso('O mapa da cidade não respondeu agora: abra o 3D mais tarde que ele busca de novo.');
     }
     const partes = [`${e.predios.length} prédios reais`];
@@ -271,7 +274,8 @@ export async function executarMontagem(d: DepsMontagem, s: Sessao, montagemId: s
     try {
       const r = await importarPoisOsm(d.pool, d.mapa, ctx(s), projetoId, RAIO_POIS_M);
       return { detalhe: `${r.encontrados} escolas, mercados, farmácias, transporte e parques em até 1 km.` };
-    } catch {
+    } catch (erro) {
+      d.avisar?.(erro, 'pontos');
       throw new Aviso('O mapa não respondeu para os pontos próximos: importe depois no empreendimento.');
     }
   });

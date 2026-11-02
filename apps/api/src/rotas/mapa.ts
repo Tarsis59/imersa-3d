@@ -43,6 +43,8 @@ const ATRIBUICAO_COMPLETA = `${ATRIBUICAO_OSM} · relevo: Terrain Tiles (AWS Ope
 /** Ruas, verde e relevo vão um pouco além dos prédios (o chão chega ao horizonte da neblina). */
 const RAIO_CIDADE_M = 600;
 const REPETIR_RELEVO_H = 6;
+/** Ruas e verde que não vieram (o mapa público cheio): tenta de novo depois disso, sem travar cada visita. */
+const REPETIR_MALHA_MIN = 10;
 
 type Contexto = { tenantId: string; userId: string | null };
 
@@ -57,17 +59,17 @@ export function criarEntorno(pool: pg.Pool, mapa: ServicosMapa) {
   }
   /**
    * Ruas, verde, água e relevo: nunca derrubam o entorno (sem eles, a cidade fica só com os prédios num chão plano).
-   * Falha da malha grava lista vazia (não tenta de novo a cada visita; "Atualizar entorno" busca de novo); falha do
-   * relevo fica null e é tentada de novo depois de `REPETIR_RELEVO_H`.
+   * Falha da malha fica null ("não sei ainda", diferente de lista vazia = "não há ruas aqui") e é tentada de novo
+   * depois de `REPETIR_MALHA_MIN`; falha do relevo fica null e é tentada de novo depois de `REPETIR_RELEVO_H`.
    */
-  async function buscarCidade(centro: { lat: number; lon: number }): Promise<{ vias: Via[]; areas: Area[]; relevo: Relevo | null }> {
+  async function buscarCidade(centro: { lat: number; lon: number }): Promise<{ vias: Via[] | null; areas: Area[] | null; relevo: Relevo | null }> {
     const [malha, relevo] = await Promise.all([
       mapa.buscarMalha ? mapa.buscarMalha(centro.lat, centro.lon, RAIO_CIDADE_M).catch(() => null) : Promise.resolve(null),
       mapa.buscarRelevo ? mapa.buscarRelevo(centro.lat, centro.lon, RAIO_CIDADE_M).catch(() => null) : Promise.resolve(null),
     ]);
-    return { vias: malha?.vias ?? [], areas: malha?.areas ?? [], relevo };
+    return { vias: malha?.vias ?? null, areas: malha?.areas ?? null, relevo };
   }
-  const gravar = (c: pg.PoolClient, id: string, centro: { lat: number; lon: number }, predios: PredioOsm[], cidade?: { vias: Via[]; areas: Area[]; relevo: Relevo | null }) =>
+  const gravar = (c: pg.PoolClient, id: string, centro: { lat: number; lon: number }, predios: PredioOsm[], cidade?: { vias: Via[] | null; areas: Area[] | null; relevo: Relevo | null }) =>
     c.query(
       `INSERT INTO entornos (project_id, centro, raio_m, predios, vias, areas, relevo) VALUES ($1, ST_SetSRID(ST_MakePoint($3, $2), 4326), $4, $5::jsonb, $6::jsonb, $7::jsonb, $8::jsonb)
        ON CONFLICT (project_id) DO UPDATE SET centro = EXCLUDED.centro, raio_m = EXCLUDED.raio_m, predios = EXCLUDED.predios,
@@ -78,8 +80,8 @@ export function criarEntorno(pool: pg.Pool, mapa: ServicosMapa) {
         centro.lon,
         RAIO_ENTORNO_M,
         JSON.stringify(predios),
-        cidade ? JSON.stringify(cidade.vias) : null,
-        cidade ? JSON.stringify(cidade.areas) : null,
+        cidade?.vias ? JSON.stringify(cidade.vias) : null,
+        cidade?.areas ? JSON.stringify(cidade.areas) : null,
         cidade?.relevo ? JSON.stringify(cidade.relevo) : null,
       ],
     );
@@ -99,19 +101,19 @@ export function criarEntorno(pool: pg.Pool, mapa: ServicosMapa) {
     if (cache && cache.raio === RAIO_ENTORNO_M && cache.desvio <= DESVIO_MAX_CACHE_M) {
       let { vias, areas, relevo } = cache;
       // cache de antes da cidade completa (ou relevo que falhou há tempo): completa agora, sem refazer os prédios
-      const velho = Date.now() - new Date(cache.atualizadoEm).getTime() > REPETIR_RELEVO_H * 3_600_000;
-      if (vias === null || (relevo === null && velho)) {
+      const idadeMs = Date.now() - new Date(cache.atualizadoEm).getTime();
+      if ((vias === null && idadeMs > REPETIR_MALHA_MIN * 60_000) || (relevo === null && idadeMs > REPETIR_RELEVO_H * 3_600_000)) {
         const cidade = await buscarCidade(centro);
         vias = vias ?? cidade.vias;
         areas = areas ?? cidade.areas;
         relevo = relevo ?? cidade.relevo;
-        await withTenant(pool, contexto, (c) => gravar(c, id, centro, cache.predios, { vias: vias!, areas: areas ?? [], relevo }));
+        await withTenant(pool, contexto, (c) => gravar(c, id, centro, cache.predios, { vias, areas, relevo }));
       }
-      return { semLocalizacao: false, centro, predios: cache.predios, vias, areas: areas ?? [], relevo, atualizadoEm: cache.atualizadoEm, atribuicao: ATRIBUICAO_COMPLETA };
+      return { semLocalizacao: false, centro, predios: cache.predios, vias: vias ?? [], areas: areas ?? [], relevo, atualizadoEm: cache.atualizadoEm, atribuicao: ATRIBUICAO_COMPLETA };
     }
     const [predios, cidade] = await Promise.all([buscarPredios(centro), buscarCidade(centro)]);
     await withTenant(pool, contexto, (c) => gravar(c, id, centro, predios, cidade));
-    return { semLocalizacao: false, centro, predios, ...cidade, atualizadoEm: new Date(), atribuicao: ATRIBUICAO_COMPLETA };
+    return { semLocalizacao: false, centro, predios, vias: cidade.vias ?? [], areas: cidade.areas ?? [], relevo: cidade.relevo, atualizadoEm: new Date(), atribuicao: ATRIBUICAO_COMPLETA };
   }
 
   return { obter, buscarPredios, buscarCidade, gravar };

@@ -98,3 +98,15 @@ describe('qualidade adaptativa', () => {
     expect(q.fps).toBeCloseTo(120, 0);
   });
 });
+
+describe('carga pontual conhecida', () => {
+  it('a cidade montando (quadros longos) não derruba a qualidade; depois a medida volta ao normal', () => {
+    const q = new QualidadeAdaptativa();
+    q.ignorarCarga(2_700);
+    for (let i = 0; i < 3; i++) expect(q.registrar(900)).toBeNull();
+    expect(q.nivel.nome).toBe('alto');
+    // passada a carga, quadros longos seguidos voltam a valer (aparelho que não dá conta continua descendo)
+    for (let i = 0; i < 3; i++) q.registrar(900);
+    expect(q.nivel.nome).toBe('medio');
+  });
+});

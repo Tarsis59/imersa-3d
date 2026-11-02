@@ -156,6 +156,8 @@ const PALAVRAS_LAZER: Array<{ re: RegExp; categoria: CategoriaLazer; nome: strin
 const TIPOS_RUA = String.raw`(?:[Rr]ua|R\.|[Aa]venida|[Aa]v\.?|[Aa]lameda|Al\.|[Tt]ravessa|Tv\.|[Ee]strada|[Rr]odovia|Rod\.|[Pp]raça|[Ll]argo|[Ss]ervidão)`;
 const PALAVRA_NOME = String.raw`(?:d[aeo]s?|e|[A-ZÀ-Ý0-9][\wÀ-ÿ'’.-]*)`;
 
+const CAPITAIS_HOMONIMAS: Record<string, string> = { 'sao paulo': 'São Paulo', 'rio de janeiro': 'Rio de Janeiro' };
+
 function lerEndereco(texto: string): { endereco: string | null; bairro: string | null; cidade: string | null; uf: string | null } {
   let endereco: string | null = null;
   let resto = '';
@@ -177,7 +179,10 @@ function lerEndereco(texto: string): { endereco: string | null; bairro: string |
     const emCidade = alvo.match(/\b(?:em|na cidade de)\s+([A-ZÀ-Ý][\wÀ-ÿ'’]+(?:\s+(?:d[aeo]s?\s+)?[A-ZÀ-Ý][\wÀ-ÿ'’]+)*)/u);
     if (emCidade) cidade = emCidade[1]!;
     if (est) uf = ESTADOS[est[1]!]!;
-    if (cidade && uf && normalizar(cidade) === Object.entries(ESTADOS).find(([, v]) => v === uf)?.[0]) cidade = null;
+    // "São Paulo" e "Rio de Janeiro" são cidade e estado: o nome sozinho quer dizer a capital
+    const homonima = est ? CAPITAIS_HOMONIMAS[est[1]!] : undefined;
+    if (homonima && (!cidade || normalizar(cidade) === est![1])) cidade = homonima;
+    else if (cidade && uf && normalizar(cidade) === Object.entries(ESTADOS).find(([, v]) => v === uf)?.[0]) cidade = null;
   }
   // bairro: o pedaço entre o endereço e a cidade ("Rua X, 120, Batel, Curitiba/PR" ou "... - Batel, ...")
   let bairro: string | null = null;

@@ -61,8 +61,15 @@ const mapaFalso: ServicosMapa = {
     if (mapaFora) throw new Error('fora do ar');
     return [{ osmId: 'way/7', alturaM: 60, contorno: [[lon, lat], [lon + 0.0001, lat], [lon + 0.0001, lat + 0.0001]] }];
   },
+  async buscarMalha() {
+    chamadasMalha++;
+    if (malhaFora) throw new Error('Overpass respondeu 429');
+    return { vias: [{ tipo: 'primary', largura: 14, pontos: [[0, 0], [50, 0]] }] as never, areas: [] };
+  },
 };
 let chamadasPredios = 0;
+let chamadasMalha = 0;
+let malhaFora = false;
 
 let app: FastifyInstance;
 let pool: pg.Pool;
@@ -305,6 +312,30 @@ describe('entorno: prédios reais do OSM em volta (com cache)', () => {
     } finally {
       mapaFora = false;
     }
+  });
+
+  it('ruas que não vieram (mapa cheio) não ficam "sem ruas" para sempre: tenta de novo depois de 10 min', async () => {
+    const q = (await req('POST', '/projetos', { nome: 'Ruas depois' }, admin)).json.id;
+    await req('PATCH', `/projetos/${q}`, { lat: -23.57, lon: -46.64 }, admin);
+    malhaFora = true;
+    try {
+      const r1 = await req('GET', `/projetos/${q}/entorno`, undefined, admin);
+      expect(r1.status).toBe(200);
+      expect(r1.json.vias).toEqual([]);
+      // guardado como "não sei ainda", não como "não há ruas"
+      expect((await owner.query('SELECT vias FROM entornos WHERE project_id = $1', [q])).rows[0].vias).toBeNull();
+      // logo em seguida não insiste (cada visita não espera o mapa de novo)
+      const antes = chamadasMalha;
+      await req('GET', `/projetos/${q}/entorno`, undefined, admin);
+      expect(chamadasMalha).toBe(antes);
+    } finally {
+      malhaFora = false;
+    }
+    // passados 10 min, a próxima visita busca de novo e as ruas aparecem (e ficam guardadas)
+    await owner.query("UPDATE entornos SET atualizado_em = now() - interval '11 minutes' WHERE project_id = $1", [q]);
+    const r2 = await req('GET', `/projetos/${q}/entorno`, undefined, admin);
+    expect(r2.json.vias).toHaveLength(1);
+    expect((await owner.query('SELECT jsonb_array_length(vias) AS n FROM entornos WHERE project_id = $1', [q])).rows[0].n).toBe(1);
   });
 
   it('forçar atualização: só a gestão; outra empresa não vê', async () => {

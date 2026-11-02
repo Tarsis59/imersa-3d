@@ -13,6 +13,7 @@ import { ladoExterno, planejarFachada } from './units/fachada';
 import { estudoSolar, type EstudoSolar, type FaceSolar } from './sun/insolacao';
 import { malhasDaFachada, materiaisDaFachada, texturaDeJanelas } from './units/janelas';
 import { buildCityMesh } from './city/cityMesh';
+import { injetarFachada } from './city/fachadaCidade';
 import { entornoParaLocal, type Entorno } from './city/entorno';
 import { criarCidade, terrenoDoRelevo, type CidadeCompleta } from './city/cidade';
 import { montarDecorado, planejarDecorado, type Decorado, type EstiloDecorado } from './interior/decorado';
@@ -257,6 +258,8 @@ const GRAVIDADE = 9.8;
 /** Distância da câmera atrás do boneco (na rua; dentro do apartamento, mais perto). */
 const DISTANCIA_3A_M = 3.2;
 const DISTANCIA_3A_DENTRO_M = 1.5;
+/** Com a câmera mais perto que isso da cabeça (parede atrás), o boneco tapa a vista: some até ter espaço. */
+const DISTANCIA_MIN_VER_BONECO_M = 0.75;
 const DURACAO_VOO_MS = 1200;
 const OPACIDADE_ESMAECIDA = 0.12;
 const OPACIDADE_AMBIENTE = 0.45;
@@ -323,7 +326,7 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
   };
 
   // chão até além da neblina: no horizonte ele some na cor do céu, sem borda
-  const chao = new THREE.Mesh(new THREE.PlaneGeometry(8000, 8000), new THREE.MeshStandardMaterial({ color: 0xd6d3cc }));
+  const chao = new THREE.Mesh(new THREE.PlaneGeometry(8000, 8000), new THREE.MeshStandardMaterial({ color: 0xbebab1 }));
   chao.rotation.x = -Math.PI / 2;
   chao.receiveShadow = true;
   prepararMaterial(chao.material);
@@ -344,7 +347,9 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
   /** Chão com relevo, ruas, verde, água e árvores de rua (Plano 11b). */
   let cidadeCompleta: CidadeCompleta | null = null;
   let atribuicaoEntorno: string | null = null;
-  const materialCidade = new THREE.MeshStandardMaterial({ color: 0xd8d5ce, roughness: 0.9 });
+  // cor de cada prédio vem do vértice (acabamento real); janelas e laje no shader (ver city/fachadaCidade)
+  const materialCidade = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.88, vertexColors: true });
+  const fachadaCidade = { noite: { value: 0 } };
   prepararMaterial(materialCidade);
 
   /**
@@ -359,6 +364,7 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
     shader.uniforms.uRaioXCamera = raioX.camera;
     shader.uniforms.uRaioXAlvo = raioX.alvo;
     shader.uniforms.uRaioXRaio = raioX.raio;
+    injetarFachada(shader, fachadaCidade);
     shader.vertexShader = shader.vertexShader
       .replace('#include <common>', '#include <common>\nvarying vec3 vRaioXMundo;')
       .replace('#include <begin_vertex>', '#include <begin_vertex>\nvRaioXMundo = (modelMatrix * vec4(transformed, 1.0)).xyz;');
@@ -374,7 +380,7 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
         }`,
       );
   };
-  materialCidade.customProgramCacheKey = () => 'imersa-cidade-raiox';
+  materialCidade.customProgramCacheKey = () => 'imersa-cidade-raiox-fachada';
 
   /** Bloqueio por raio horizontal na altura da cintura contra malhas reais (paredes com portas, prédios da cidade). */
   function bloqueioPorRaio(objetos: THREE.Object3D[]): OpcoesPasso['bloqueado'] {
@@ -669,7 +675,10 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
     raioCamera.far = dist;
     const barreiras = [...solidos, ...(cidade ? [cidade] : []), ...(decorado ? decorado.paredes : []), ...(interior ? [pecas.get(interior)?.malha].filter((x): x is THREE.Mesh => !!x) : [])];
     const bate = raioCamera.intersectObjects(barreiras, false)[0];
-    if (bate) c.posicao.copy(c.cabeca).addScaledVector(dir, Math.max(0.3, bate.distance - 0.2));
+    const livre = bate ? Math.max(0.3, bate.distance - 0.2) : dist;
+    if (bate) c.posicao.copy(c.cabeca).addScaledVector(dir, livre);
+    // sem espaço para a câmera (cômodo pequeno): o boneco sai da frente, como nos jogos, e volta quando há espaço
+    b.objeto.visible = livre >= DISTANCIA_MIN_VER_BONECO_M;
     camera.position.copy(c.posicao);
     camera.lookAt(c.alvo);
   }
@@ -977,6 +986,7 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
     atmosfera.atualizar(sol, clima);
     const antes = luzNoturna;
     luzNoturna = Math.round(noite * 20) / 20;
+    fachadaCidade.noite.value = luzNoturna;
     if (luzNoturna !== antes && pecas.size) pintar();
     pos?.definirBrilho(luzNoturna);
     paisagismo?.definirNoite(luzNoturna);
@@ -1615,6 +1625,8 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
     },
     async definirEntorno(entorno) {
       await pronto;
+      // montar a cidade e compilar os materiais dela travam alguns quadros: não é o aparelho, não baixa a qualidade
+      qualidade.ignorarCarga(3_000);
       if (cidade) {
         cena.remove(cidade);
         cidade.geometry.dispose();
@@ -1672,6 +1684,7 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
       cena.add(cidade);
       bloqueadoCidade = bloqueioPorRaio([cidade]);
       atribuicaoEntorno = entorno.atribuicao;
+      qualidade.ignorarCarga(3_000); // o 1º quadro com a cidade compila o material dela
       return predios.length;
     },
     gerarGiro,
