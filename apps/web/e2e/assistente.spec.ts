@@ -36,7 +36,8 @@ test('assistente com IA: pergunta no painel destaca e voa até a unidade; no lin
   const chat = page.getByTestId('assistente');
   // corretora virtual: aparece no 3D (e lê as respostas em voz alta)
   await page.getByLabel(/Corretora virtual/).check();
-  await expect(vitrine).not.toHaveAttribute('data-corretora', 'fora');
+  // o aviso sai no quadro seguinte; no 3D por software (CI) o 1º quadro com o boneco leva segundos
+  await expect(vitrine).not.toHaveAttribute('data-corretora', 'fora', { timeout: 30_000 });
   await chat.getByRole('button', { name: 'Quais unidades de 3 quartos estão disponíveis?' }).click();
   const resposta = chat.locator('[data-papel="assistente"]').last();
   await expect(resposta).toHaveText(/^Encontrei 1 unidade: 102 \(R\$\s890\.000,00\)\. Destaquei no 3D\.$/, { timeout: 30_000 });

@@ -91,7 +91,7 @@ test('vendas: link pelo WhatsApp → cliente no celular (sem login) → pedido d
   await cliente.screenshot({ path: test.info().outputPath('portal-celular.png') });
 
   await cliente.getByRole('link', { name: /Quero falar com/ }).tap();
-  await cliente.getByLabel('Seu nome').fill('Carla Mendes');
+  await cliente.getByLabel('Seu nome', { exact: true }).fill('Carla Mendes');
   await cliente.getByLabel('WhatsApp ou telefone (com DDD)').fill('(11) 97777-6666');
   await expect(cliente.getByLabel('Unidade de interesse (opcional)')).toHaveValue(/.+/); // a unidade vista já vem escolhida
   await cliente.getByLabel('Mensagem (opcional)').fill('Posso visitar no sábado?');
