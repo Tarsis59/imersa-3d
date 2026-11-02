@@ -24,6 +24,7 @@ import { cameraAtrasDoOmbro, CORRETORA, criarBoneco, presetBoneco, type Boneco }
 import { alturaDoCorte, planoDeCorte } from './units/corte';
 import { COR_UNIDADE, type Caixa, type StatusUnidade, type UnidadeViewer } from './units/tipos';
 import { planejarVoo, enquadrar, type Pose } from './cameras/voo';
+import { limitesZoom, distanciaDoZoom, zoomDaDistancia } from './cameras/zoom';
 import { passoPrimeiraPessoa, bloqueioPorCaixas, seguirPiso, rumoAoAlvo, yawPara, entradaDoControle, type Entrada, type EstadoPessoa, type OpcoesPasso, type Ponto2D } from './cameras/primeiraPessoa';
 import { calcularShiftVertical, pitchDoOlhar, verticaisRetasAtiva } from './cameras/verticaisRetas';
 import { QualidadeAdaptativa, type NivelQualidade } from './quality/adaptativa';
@@ -111,6 +112,8 @@ export interface EstadoViewer {
   nuvens: boolean;
   /** Câmera de arquitetura com as verticais retas (Plano 12a, item 13): ligada na órbita, dentro da faixa segura de pitch. */
   verticaisRetas: boolean;
+  /** Zoom vertical da órbita (Plano 12b, item 3), de 0 (bem afastado) a 1 (bem perto): reflete a roda/pinça também. */
+  zoom: number;
 }
 
 /** Resumo da visita para a telemetria. */
@@ -240,6 +243,11 @@ export interface Viewer {
   apresentacao(ligada: boolean): void;
   /** Volta à vista do prédio inteiro, em órbita (o estande recomeça para o próximo visitante). */
   visaoGeral(): void;
+  /**
+   * Zoom vertical da órbita (Plano 12b, item 3): aproxima (1) ou afasta (0) a câmera do alvo, pela mesma direção
+   * de hoje. Sem efeito fora da órbita livre (vista da janela, 1ª/3ª pessoa) — lá o zoom é o da própria vista.
+   */
+  definirZoom(t: number): void;
   /** Prédios reais em volta (OSM). Devolve quantos foram desenhados. `null` tira o entorno. */
   definirEntorno(entorno: Entorno | null): Promise<number>;
   /** PNG da vista atual com faixa da marca (empresa, prédio, data, "imagem ilustrativa" e atribuição do OSM). */
@@ -646,6 +654,12 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
     for (const p of pecas.values()) b.union(new THREE.Box3(new THREE.Vector3(p.caixa.minX, p.caixa.minY, p.caixa.minZ), new THREE.Vector3(p.caixa.maxX, p.caixa.maxY, p.caixa.maxZ)));
     for (const s of solidos) b.union(new THREE.Box3().setFromObject(s));
     return b.isEmpty() ? { minX: -10, maxX: 10, minY: 0, maxY: 10, minZ: -10, maxZ: 10 } : caixaDe(b);
+  }
+  /** Para a telemetria: a distância atual da câmera, na mesma escala 0..1 do zoom (reflete roda e pinça também). */
+  function zoomAtual(): number {
+    if (modo !== 'orbita' || emVista) return 0.5;
+    const distancia = camera.position.distanceTo(orbita.target);
+    return zoomDaDistancia(distancia, limitesZoom(caixaDoPredio()));
   }
 
   // -------------------------------------------------------------- câmera
@@ -1465,6 +1479,7 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
       carros: carros?.objeto.visible ? carros.contagem() : 0,
       nuvens: nuvens.objeto.visible,
       verticaisRetas,
+      zoom: zoomAtual(),
     });
   };
   renderer.setAnimationLoop((agora: number, frame?: XRFrame) => {
@@ -1986,6 +2001,16 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
       voo = null;
       selecionar(null);
       enquadrarPredio();
+    },
+    definirZoom(t) {
+      if (modo !== 'orbita' || emVista) return; // vista da janela e 1ª/3ª pessoa têm o próprio zoom
+      const alvo = orbita.target;
+      const direcao = camera.position.clone().sub(alvo);
+      if (direcao.lengthSq() < 1e-6) direcao.set(0, 0, 1); // câmera em cima do alvo (raro): direção qualquer
+      direcao.normalize();
+      const distancia = distanciaDoZoom(t, limitesZoom(caixaDoPredio()));
+      camera.position.copy(alvo).addScaledVector(direcao, distancia);
+      orbita.update();
     },
     async definirEntorno(entorno) {
       await pronto;

@@ -3,6 +3,7 @@ import { useState } from 'react';
 import { Botao, Campo, Cartao, Selecao } from '@/components/ui';
 import { CATEGORIAS_LAZER, ROTULO_LAZER, type CategoriaLazer, type ItemLazer } from '@/lib/tipos';
 import type { NovoLazer } from './actions';
+import { Lightbox, MiniaturaFoto, type FotoGaleria } from './galeria';
 
 export const ICONE_LAZER: Record<CategoriaLazer, string> = {
   piscina: '🏊',
@@ -42,6 +43,7 @@ export function CartaoLazer({
   aoCancelarMarcacao,
   aoRemover,
   erro,
+  fotosDisponiveis = [],
 }: {
   itens: ItemLazer[];
   pronto: boolean;
@@ -54,10 +56,13 @@ export function CartaoLazer({
   aoCancelarMarcacao: () => void;
   aoRemover: (id: string) => void;
   erro: string | null;
+  /** Fotos já enviadas no projeto, para a gestão escolher as da ficha deste espaço (Plano 12b, item 6). */
+  fotosDisponiveis?: FotoGaleria[];
 }) {
   const [categoria, setCategoria] = useState<CategoriaLazer>('piscina');
   const [nome, setNome] = useState('');
   const [descricao, setDescricao] = useState('');
+  const [fotosEscolhidas, setFotosEscolhidas] = useState<string[]>([]);
   if (!itens.length && !gerir) return null;
   return (
     <Cartao titulo="Lazer">
@@ -104,6 +109,24 @@ export function CartaoLazer({
               </Selecao>
               <Campo id="lazer-nome" rotulo="Nome do espaço" value={nome} maxLength={120} onChange={(e) => setNome(e.target.value)} placeholder={ROTULO_LAZER[categoria]} />
               <Campo id="lazer-descricao" rotulo="Descrição (opcional)" value={descricao} maxLength={600} onChange={(e) => setDescricao(e.target.value)} />
+              {fotosDisponiveis.length > 0 && (
+                <fieldset className="grid gap-2" data-testid="lazer-fotos">
+                  <legend className="text-sm font-medium">Fotos da ficha (até 12, opcional)</legend>
+                  <div className="grid max-h-32 gap-1 overflow-y-auto">
+                    {fotosDisponiveis.map((f) => (
+                      <label key={f.id} className="flex items-center gap-2 text-sm">
+                        <input
+                          type="checkbox"
+                          checked={fotosEscolhidas.includes(f.id)}
+                          disabled={!fotosEscolhidas.includes(f.id) && fotosEscolhidas.length >= 12}
+                          onChange={(e) => setFotosEscolhidas((s) => (e.target.checked ? [...s, f.id] : s.filter((x) => x !== f.id)))}
+                        />
+                        {f.nome}
+                      </label>
+                    ))}
+                  </div>
+                </fieldset>
+              )}
               {marcando ? (
                 <div className="grid gap-2">
                   <p role="status" className="text-acento">Clique no 3D, no chão ou no terraço, onde fica o espaço.</p>
@@ -117,9 +140,10 @@ export function CartaoLazer({
                   variante="secundario"
                   disabled={!pronto}
                   onClick={() => {
-                    aoMarcar({ categoria, nome: nome.trim() || ROTULO_LAZER[categoria], descricao: descricao.trim() || null });
+                    aoMarcar({ categoria, nome: nome.trim() || ROTULO_LAZER[categoria], descricao: descricao.trim() || null, fotos: fotosEscolhidas });
                     setNome('');
                     setDescricao('');
+                    setFotosEscolhidas([]);
                   }}
                 >
                   Marcar no 3D
@@ -145,13 +169,17 @@ export function PainelDoPonto({
   total,
   aoProximo,
   aoEncerrar,
+  resolverFoto,
 }: {
   item: ItemLazer | null;
   tour: EstadoTour | null;
   total: number;
   aoProximo: () => void;
   aoEncerrar: () => void;
+  /** Resolve o id do arquivo num link assinado (painel ou link do cliente): a ficha mostra as fotos (Plano 12b, item 6). */
+  resolverFoto?: (id: string) => Promise<string | null>;
 }) {
+  const [fotoAberta, setFotoAberta] = useState<number | null>(null);
   if (tour?.completo)
     return (
       <div data-testid="tour-lazer" data-tour="completo" className="absolute inset-x-3 top-3 z-10 mx-auto grid max-w-md gap-2 rounded-2xl bg-slate-900/85 p-4 text-white shadow" role="status">
@@ -174,6 +202,23 @@ export function PainelDoPonto({
         )}
       </div>
       {item.descricao && <p className="text-sm text-white/85">{item.descricao}</p>}
+      {item.fotos.length > 0 && resolverFoto && (
+        <div data-testid="ficha-fotos" className="flex gap-2 overflow-x-auto">
+          {item.fotos.map((id, i) => (
+            <button key={id} type="button" onClick={() => setFotoAberta(i)} aria-label={`Ver foto ${i + 1} de ${item.fotos.length} de ${item.nome}`} className="h-16 w-16 shrink-0 overflow-hidden rounded-lg">
+              <MiniaturaFoto foto={{ id, nome: `${item.nome} · foto ${i + 1}` }} resolverUrl={resolverFoto} />
+            </button>
+          ))}
+        </div>
+      )}
+      {fotoAberta !== null && resolverFoto && (
+        <Lightbox
+          fotos={item.fotos.map((id, i) => ({ id, nome: `${item.nome} · foto ${i + 1}` }))}
+          indiceInicial={fotoAberta}
+          resolverUrl={resolverFoto}
+          aoFechar={() => setFotoAberta(null)}
+        />
+      )}
       <div className="flex gap-2">
         {tour && (
           <button type="button" onClick={aoProximo} className="rounded-full bg-white px-4 py-1.5 text-sm font-semibold text-slate-900">

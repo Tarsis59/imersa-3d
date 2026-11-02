@@ -30,6 +30,9 @@ export default function LayoutPainel({ children }: { children: ReactNode }) {
           <Link href="/painel/integracoes" className="hover:underline">
             Integrações
           </Link>
+          <Link href="/painel/marca" className="hover:underline">
+            Marca
+          </Link>
         </nav>
         <form action={sair} className="ml-auto">
           <Botao variante="secundario" type="submit">

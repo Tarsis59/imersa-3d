@@ -24,6 +24,7 @@ import { ehPorDoSol, MISSOES, PASSEIO_M, progressoTipologias, somarCaminhada, ty
 import { SimuladorFinanciamento } from './simulador';
 import { CartaoLazer, PainelDoPonto, passoDoTourMs, rotuloDoPonto, type EstadoTour } from './lazer';
 import type { NovoLazer } from './actions';
+import { CartaoGaleria, GestaoGaleria, type FotoGaleria } from './galeria';
 
 const ROTULO_NIVEL = { alto: 'alta', medio: 'média', baixo: 'baixa' } as const;
 const ROTULO_SOL: Record<PeriodoDeSol, string> = { manha: 'Sol da manhã', tarde: 'Sol da tarde', 'dia-todo': 'Sol o dia todo', 'pouco-sol': 'Pouco sol direto' };
@@ -67,6 +68,7 @@ export type EventoVitrine = { tipo: 'unidade' | 'favorito'; unidadeId: string } 
 type EstadoEntorno = { tipo: 'carregando' } | { tipo: 'pronto'; predios: number; atribuicao: string } | { tipo: 'sem_localizacao' } | { tipo: 'indisponivel' };
 
 const SEM_FOTOS: NonNullable<Parameters<typeof Vitrine>[0]['fotos']> = [];
+const SEM_FOTOS_GALERIA: FotoGaleria[] = [];
 
 export function Vitrine({
   predioId,
@@ -101,6 +103,9 @@ export function Vitrine({
   linksParaConduzir = [],
   lazer = [],
   gerirLazer = null,
+  galeria = SEM_FOTOS_GALERIA,
+  fotosProjeto = SEM_FOTOS_GALERIA,
+  gerirGaleria = null,
   amostrasFoto = AMOSTRAS_FOTO,
 }: {
   predioId: string;
@@ -161,6 +166,12 @@ export function Vitrine({
   /** Amostras do path tracing na foto fotorrealista. */
   amostrasFoto?: number;
   gerirLazer?: { criar: (d: NovoLazer) => Promise<{ item?: ItemLazer; erro?: string }>; remover: (id: string) => Promise<{ erro?: string }> } | null;
+  /** Galeria do empreendimento (Plano 12b, item 7): fotos escolhidas pela gestão, já na ordem dela. */
+  galeria?: FotoGaleria[];
+  /** Fotos prontas do projeto: para a gestão escolher as da ficha do lazer e as da galeria. */
+  fotosProjeto?: FotoGaleria[];
+  /** Gestão: escolher e ordenar as fotos da galeria (só no painel). */
+  gerirGaleria?: { salvar: (ids: string[]) => Promise<{ erro?: string }> } | null;
 }) {
   const canvas = useRef<HTMLCanvasElement>(null);
   const coluna = useRef<HTMLDivElement>(null);
@@ -223,6 +234,8 @@ export function Vitrine({
   const sobreposicaoAr = useRef<HTMLDivElement>(null);
   // lazer: pontos no 3D, o tour "Conheça o lazer" e (gestão) a marcação clicando no 3D
   const [itensLazer, setItensLazer] = useState<ItemLazer[]>(lazer);
+  // galeria do empreendimento (Plano 12b, item 7): estado local, atualizado depois de a gestão salvar (como o lazer)
+  const [galeriaAtual, setGaleriaAtual] = useState<FotoGaleria[]>(galeria);
   const [pontoLazer, setPontoLazer] = useState<string | null>(null);
   const [tour, setTour] = useState<EstadoTour | null>(null);
   const [marcandoLazer, setMarcandoLazer] = useState<Omit<NovoLazer, 'x' | 'y' | 'z'> | null>(null);
@@ -951,6 +964,7 @@ export function Vitrine({
         data-no-ar={telemetria?.noAr ? 'sim' : 'nao'}
         data-pulos={telemetria?.pulos ?? 0}
         data-nivel={telemetria?.nivel ?? ''}
+        data-zoom={telemetria ? Math.round(telemetria.zoom * 100) : ''}
         data-som={telemetria?.som ? 'ligado' : 'desligado'}
         data-marcando-lazer={marcandoLazer ? 'sim' : ''}
         data-apresentacao={apresentando ? 'ligada' : 'desligada'}
@@ -964,7 +978,7 @@ export function Vitrine({
         />
         {estado === 'carregando' && <p className="absolute inset-0 grid place-items-center text-suave">Carregando o 3D…</p>}
         {(tour || pontoLazer) && !conducao?.ativo && (
-          <PainelDoPonto item={itensLazer.find((l) => l.id === pontoLazer) ?? null} tour={tour} total={itensLazer.length} aoProximo={proximoDoTour} aoEncerrar={encerrarLazer} />
+          <PainelDoPonto item={itensLazer.find((l) => l.id === pontoLazer) ?? null} tour={tour} total={itensLazer.length} aoProximo={proximoDoTour} aoEncerrar={encerrarLazer} resolverFoto={linkDoArquivo} />
         )}
         {conducao?.ativo && (
           <div className="pointer-events-none absolute inset-x-0 top-3 z-10 flex justify-center px-16">
@@ -1018,6 +1032,38 @@ export function Vitrine({
             <button type="button" onClick={visaoGeral} className="absolute right-3 top-16 min-h-9 rounded-full bg-white/90 px-3 text-xs font-semibold text-slate-900 shadow hover:bg-white">
               Visão geral
             </button>
+            {modo === 'orbita' && (
+              // zoom vertical (Plano 12b, item 3): só a faixa toca (pointer-events-none no resto), para não tirar o toque do 3D
+              <div data-testid="zoom-vertical" className="pointer-events-none absolute right-3 top-28 flex flex-col items-center gap-1">
+                <button
+                  type="button"
+                  aria-label="Aproximar o zoom"
+                  onClick={() => viewer.current?.definirZoom(Math.min(1, (telemetria?.zoom ?? 0.5) + 0.1))}
+                  className="pointer-events-auto grid h-7 w-7 place-items-center rounded-full bg-white/90 text-sm font-bold text-slate-900 shadow hover:bg-white"
+                >
+                  +
+                </button>
+                <input
+                  type="range"
+                  aria-label="Zoom"
+                  min={0}
+                  max={100}
+                  step={5}
+                  value={Math.round((telemetria?.zoom ?? 0.5) * 100)}
+                  onChange={(e) => viewer.current?.definirZoom(Number(e.target.value) / 100)}
+                  style={{ writingMode: 'vertical-lr', direction: 'rtl' }}
+                  className="pointer-events-auto h-28 w-6 accent-white"
+                />
+                <button
+                  type="button"
+                  aria-label="Afastar o zoom"
+                  onClick={() => viewer.current?.definirZoom(Math.max(0, (telemetria?.zoom ?? 0.5) - 0.1))}
+                  className="pointer-events-auto grid h-7 w-7 place-items-center rounded-full bg-white/90 text-sm font-bold text-slate-900 shadow hover:bg-white"
+                >
+                  −
+                </button>
+              </div>
+            )}
             <span className="pointer-events-none absolute bottom-2 left-2 rounded bg-black/45 px-1.5 py-0.5 text-[10px] text-white/90">Imagens meramente ilustrativas</span>
           </>
         )}
@@ -1240,6 +1286,7 @@ export function Vitrine({
             ...(lotes.length ? [['secao-lotes', 'Lotes']] : []),
             ['secao-unidades', 'Unidades'],
             ...(itensLazer.length ? [['secao-lazer', 'Áreas comuns']] : []),
+            ...(galeriaAtual.length > 0 || gerirGaleria ? [['secao-galeria', 'Galeria']] : []),
             ...(proximidades ? [['secao-entorno', 'O que há perto']] : []),
             ['secao-vista', 'Vista e horário'],
           ].map(([id, rotulo]) => (
@@ -1426,7 +1473,23 @@ export function Vitrine({
           aoCancelarMarcacao={() => setMarcandoLazer(null)}
           aoRemover={(id) => void removerPontoLazer(id)}
           erro={erroLazer}
+          fotosDisponiveis={fotosProjeto}
         />
+        {galeriaAtual.length === 0 && gerirGaleria && <div id="secao-galeria" className="scroll-mt-4" />}
+        <CartaoGaleria fotos={galeriaAtual} resolverUrl={linkDoArquivo} />
+        {gerirGaleria && (
+          <Cartao titulo="Gestão da galeria">
+            <GestaoGaleria
+              disponiveis={fotosProjeto}
+              atual={galeriaAtual.map((f) => f.id)}
+              salvar={async (ids) => {
+                const r = await gerirGaleria.salvar(ids);
+                if (!r.erro) setGaleriaAtual(ids.map((id) => fotosProjeto.find((f) => f.id === id) ?? { id, nome: id }));
+                return r;
+              }}
+            />
+          </Cartao>
+        )}
         <Cartao titulo="Vista" id="secao-vista">
           <div className="grid gap-4 text-sm">
             <p data-testid="aviso-entorno" className="text-suave">

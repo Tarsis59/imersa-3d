@@ -6,6 +6,7 @@ import { Vitrine, type EventoVitrine } from '@/app/painel/predios/[id]/vitrine/v
 import type { ResultadoEntorno } from '@/app/painel/predios/[id]/vitrine/actions';
 import type { FonteProximidades } from '@/app/painel/predios/[id]/vitrine/proximidades';
 import { conferir, inicial, tocar, type EstadoEstande } from '@/lib/estande';
+import { estiloMarca, URL_GOOGLE_FONT } from '@/lib/tema';
 import type { Portal } from '@/lib/tipos';
 import type { DadosSinal, enviarSinal } from './actions';
 
@@ -245,16 +246,32 @@ export function TelaEstande({
 
   // modo corretor com os preços escondidos: as unidades chegam sem preço (nenhum canto da tela deixa vazar)
   const unidades: UnidadeViewer[] = portal.unidades.map((u) => ({ id: u.id, codigo: u.codigo, andar: u.andar, status: u.status, areaM2: u.areaM2, quartos: u.quartos, preco: corretor.precosOcultos ? null : u.preco, meshNodeId: u.meshNodeId }));
+  const fonteGoogle = URL_GOOGLE_FONT[portal.empresa.marca.fonte];
   return (
-    <div data-testid="estande" data-apresentacao={estado.apresentando ? 'ligada' : 'desligada'} data-reinicio={estado.reinicio} data-offline={offline ? 'pronto' : ''} className="min-h-dvh select-none overscroll-none bg-fundo">
+    // marca da incorporadora (Plano 12b, item 11): cor, fonte e logo do cliente deste estande
+    <div
+      data-testid="estande"
+      data-apresentacao={estado.apresentando ? 'ligada' : 'desligada'}
+      data-reinicio={estado.reinicio}
+      data-offline={offline ? 'pronto' : ''}
+      className="min-h-dvh select-none overscroll-none bg-fundo"
+      style={estiloMarca(portal.empresa.marca)}
+    >
+      {fonteGoogle && <link rel="stylesheet" href={fonteGoogle} />}
       <header className="flex h-24 items-center justify-between gap-6 px-6">
-        <div className="grid min-w-0 gap-0.5">
-          <span className="truncate text-sm text-suave">
-            {portal.empresa.nome} · {nome}
-          </span>
-          <h1 className="truncate text-3xl font-bold">
-            {portal.projeto.nome} · {portal.predio.nome}
-          </h1>
+        <div className="flex min-w-0 items-center gap-3">
+          {portal.empresa.marca.logoUrl && (
+            // eslint-disable-next-line @next/next/no-img-element -- link assinado, fora dos domínios do loader do Next
+            <img data-testid="logo-marca" src={portal.empresa.marca.logoUrl} alt={`Logo de ${portal.empresa.nome}`} className="h-14 w-auto rounded" />
+          )}
+          <div className="grid min-w-0 gap-0.5">
+            <span className="truncate text-sm text-suave">
+              {portal.empresa.nome} · {nome}
+            </span>
+            <h1 className="truncate text-3xl font-bold">
+              {portal.projeto.nome} · {portal.predio.nome}
+            </h1>
+          </div>
         </div>
         <div className="flex shrink-0 items-center gap-5">
           {semInternet && (
@@ -297,6 +314,7 @@ export function TelaEstande({
           lon={portal.projeto.lon}
           interiores={portal.interiores}
           lazer={portal.lazer}
+          galeria={portal.galeria}
           lotes={portal.lotes}
           giroRenderizado={portal.giro}
           assistenteUrl={portal.assistenteUrl}

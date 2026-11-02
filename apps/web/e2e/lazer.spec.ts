@@ -1,16 +1,31 @@
 import { test, expect, devices } from '@playwright/test';
-import { entrarComoAdminComMfa } from './ajuda';
+import { readFileSync } from 'node:fs';
+import { codigoTotp } from '../../api/src/auth/totp';
+import { API, entrarComoAdminComMfa } from './ajuda';
 
 const PLANILHA = ['predio;andar;codigo;tipologia;area_m2;quartos;preco;status', 'Torre L;1;101;Tipo 2Q;70;2;610.000,00;disponivel', 'Torre L;2;201;Tipo 2Q;70;2;640.000,00;disponivel'].join('\n');
+const FOTO = readFileSync(new URL('./fixtures/video-fzk-capa.jpg', import.meta.url));
 
 test('lazer: a gestão marca no 3D, o tour "Conheça o lazer" mostra cada espaço e o tour completo conta nos Números', async ({ page, request, browser }) => {
   test.setTimeout(300_000);
-  await entrarComoAdminComMfa(page, request, 'lazer');
+  const conta = await entrarComoAdminComMfa(page, request, 'lazer');
   await page.getByLabel('Nome do projeto').fill('Residencial Lazer');
   await page.getByRole('button', { name: 'Criar projeto' }).click();
   await page.getByRole('link', { name: /Residencial Lazer/ }).click();
   await page.waitForURL(/\/painel\/projetos\/[\w-]+$/);
   const paginaProjeto = page.url();
+  const projetoId = paginaProjeto.split('/').at(-1)!;
+
+  // uma foto já enviada no projeto: a ficha das áreas comuns e a galeria escolhem entre fotos existentes (Plano 12b, itens 6 e 7)
+  await page.waitForTimeout(30_500 - (Date.now() % 30_000)); // o código de 6 dígitos não vale duas vezes: espera o próximo
+  const entrada = await request.post(`${API}/auth/login`, { data: { email: conta.email, senha: conta.senha, empresa: conta.empresa, codigoMfa: codigoTotp(conta.segredo) } });
+  const { acesso } = await entrada.json();
+  const declarado = await request.post(`${API}/projetos/${projetoId}/arquivos`, { headers: { authorization: `Bearer ${acesso}` }, data: { nome: 'Fachada principal.jpg', tipo: 'imagem', tamanho: FOTO.length } });
+  expect(declarado.status()).toBe(201);
+  const { envio } = await declarado.json();
+  const enviado = await request.put(envio.url, { headers: { 'content-type': 'application/octet-stream' }, data: FOTO });
+  expect(enviado.ok()).toBeTruthy();
+
   await page.getByLabel('Nome do prédio').fill('Torre L');
   await page.getByLabel('Andares').fill('2');
   await page.getByRole('button', { name: 'Criar prédio' }).click();
@@ -30,10 +45,11 @@ test('lazer: a gestão marca no 3D, o tour "Conheça o lazer" mostra cada espaç
 
   // gestão: escolhe o tipo, dá o nome e clica no chão do 3D onde fica o espaço
   const cartao = page.getByTestId('lazer');
-  const marcar = async (tipo: string, nome: string, descricao: string, fx: number) => {
+  const marcar = async (tipo: string, nome: string, descricao: string, fx: number, foto?: string) => {
     await cartao.getByLabel('Tipo').selectOption({ label: tipo });
     await cartao.getByLabel('Nome do espaço').fill(nome);
     await cartao.getByLabel('Descrição (opcional)').fill(descricao);
+    if (foto) await cartao.getByLabel(foto).check();
     await cartao.getByRole('button', { name: 'Marcar no 3D' }).click();
     await expect(vitrine).toHaveAttribute('data-marcando-lazer', 'sim');
     await vitrine.scrollIntoViewIfNeeded(); // o cartão fica abaixo do 3D no celular e em tela estreita
@@ -41,7 +57,8 @@ test('lazer: a gestão marca no 3D, o tour "Conheça o lazer" mostra cada espaç
     await page.mouse.click(caixa.x + caixa.width * fx, caixa.y + caixa.height * 0.93);
     await expect(vitrine).toHaveAttribute('data-marcando-lazer', '');
   };
-  await marcar('Piscina', 'Piscina adulto', 'Raia de 25 m, aquecida', 0.1);
+  // ficha da área comum (Plano 12b, item 6): a Piscina já marca com a foto do projeto
+  await marcar('Piscina', 'Piscina adulto', 'Raia de 25 m, aquecida', 0.1, 'Fachada principal.jpg');
   await expect(vitrine).toHaveAttribute('data-lazer', '1');
   await marcar('Academia', 'Academia', 'Aberta 24 h', 0.9);
   await expect(vitrine).toHaveAttribute('data-lazer', '2');
@@ -59,6 +76,29 @@ test('lazer: a gestão marca no 3D, o tour "Conheça o lazer" mostra cada espaç
   await expect(painel).toContainText('Aberta 24 h');
   await painel.getByRole('button', { name: 'Fechar' }).click();
   await expect(painel).toHaveCount(0);
+
+  // ficha da área comum (Plano 12b, item 6): tocar na Piscina mostra a foto escolhida, em tela cheia com contador
+  await cartao.getByTestId('lista-lazer').getByRole('button', { name: /Piscina adulto/ }).first().click();
+  await expect(painel.getByTestId('ficha-fotos').getByRole('button')).toHaveCount(1);
+  await painel.getByTestId('ficha-fotos').getByRole('button').click();
+  const lightbox = page.getByTestId('galeria-lightbox');
+  await expect(lightbox).toBeVisible();
+  await expect(page.getByTestId('galeria-contador')).toHaveText('1 de 1');
+  await lightbox.getByRole('button', { name: 'Fechar' }).click();
+  await expect(lightbox).toHaveCount(0);
+  await painel.getByRole('button', { name: 'Fechar' }).click();
+  await expect(painel).toHaveCount(0);
+
+  // galeria do empreendimento (Plano 12b, item 7): a gestão escolhe a foto e a ordem; conta e navega em tela cheia
+  const gestaoGaleria = page.getByTestId('gestao-galeria');
+  await gestaoGaleria.getByLabel('Adicionar foto do projeto').selectOption({ label: 'Fachada principal.jpg' });
+  await gestaoGaleria.getByRole('button', { name: 'Salvar galeria' }).click();
+  await expect(page.getByTestId('galeria').getByRole('button')).toHaveCount(1, { timeout: 15_000 });
+  await page.getByTestId('secoes').getByRole('button', { name: 'Galeria' }).click();
+  await page.getByTestId('galeria').getByRole('button').first().click();
+  await expect(lightbox).toBeVisible();
+  await expect(page.getByTestId('galeria-contador')).toHaveText('1 de 1');
+  await lightbox.getByRole('button', { name: 'Fechar' }).click();
 
   // tour: um espaço de cada vez, com o progresso e o checklist
   await cartao.getByRole('button', { name: 'Conheça o lazer em 2 min' }).click();
@@ -103,6 +143,19 @@ test('lazer: a gestão marca no 3D, o tour "Conheça o lazer" mostra cada espaç
   await page.getByRole('button', { name: 'Desligar o som ambiente' }).click();
   await expect(vitrine).toHaveAttribute('data-som', 'desligado', { timeout: 10_000 });
 
+  // marca da incorporadora (Plano 12b, item 11): a gestão troca a cor e o logo antes de o cliente abrir o link
+  await page.goto('/painel/marca');
+  // input[type=color]: fill() não é aceito pelo navegador para este tipo; o setter nativo evita o React ignorar o valor
+  await page.getByLabel('Cor primária').evaluate((el: HTMLInputElement) => {
+    Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!.call(el, '#16a34a');
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  const seletorLogo = page.getByLabel('Logo (foto já enviada no projeto)');
+  await expect(seletorLogo.locator('option', { hasText: 'Fachada principal.jpg' })).toHaveCount(1, { timeout: 15_000 });
+  await seletorLogo.selectOption({ label: 'Fachada principal.jpg' });
+  await page.getByRole('button', { name: 'Salvar marca' }).click();
+  await expect(page.getByText('Marca salva.')).toBeVisible();
+
   // cliente no celular: vê os mesmos pontos e faz o tour (o tour completo vai para os Números). A Vitrine da gestão
   // sai da tela antes: no CI (desenho por software) dois 3D ao mesmo tempo dividem a CPU e o do celular não carregava
   await page.goto(`${paginaProjeto}/numeros`);
@@ -111,6 +164,11 @@ test('lazer: a gestão marca no 3D, o tour "Conheça o lazer" mostra cada espaç
   await cliente.goto(link);
   await expect(cliente.getByTestId('vitrine-3d')).toHaveAttribute('data-estado', 'pronto', { timeout: 120_000 });
   await expect(cliente.getByTestId('vitrine-3d')).toHaveAttribute('data-lazer', '2');
+  // marca da incorporadora (Plano 12b, item 11): o cliente vê o logo e a cor que a gestão escolheu
+  await expect(cliente.getByTestId('logo-marca')).toBeVisible();
+  await expect
+    .poll(async () => cliente.locator('a[href="#contato"]').evaluate((el) => getComputedStyle(el).getPropertyValue('--acento').trim()))
+    .toBe('#16a34a');
   await expect(cliente.getByTestId('lazer').getByRole('button', { name: 'Marcar no 3D' })).toHaveCount(0); // só a gestão marca
   await cliente.getByRole('button', { name: 'Conheça o lazer em 2 min' }).tap();
   const painelCliente = cliente.getByTestId('tour-lazer');

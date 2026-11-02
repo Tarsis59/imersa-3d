@@ -4,6 +4,7 @@ import type pg from 'pg';
 import { z } from 'zod';
 import { fotosNoLugar, lazerDoPredio } from './lazer';
 import { lotesDoPredio } from './lotes';
+import { galeriaDoPredio } from './galeria';
 import { transmitirSala, type CanalSala } from '../tempo-real/sala';
 import { withTenant } from '@imersa/db';
 import { ErroHttp } from '../erros';
@@ -104,13 +105,17 @@ export function rotasPublicas(app: FastifyInstance, { pool, armazenamento, entor
           modeloId: string | null;
           projeto: { id: string; nome: string; descricao: string | null; cidade: string | null; uf: string | null; lat: number | null; lon: number | null; rotacaoGraus: number; estiloDecorado: string };
           empresa: string;
+          logoAssetId: string | null;
+          corPrimaria: string | null;
+          fonte: string;
           consultora: string;
           whatsapp: string | null;
         }>(
           `SELECT json_build_object('id', b.id, 'nome', b.nome) AS predio, b.modelo_asset_id AS "modeloId",
                   json_build_object('id', p.id, 'nome', p.nome, 'descricao', p.descricao, 'cidade', p.cidade, 'uf', p.uf,
                                     'lat', ST_Y(p.geom), 'lon', ST_X(p.geom), 'rotacaoGraus', p.rotacao_graus::float8, 'estiloDecorado', p.estilo_decorado) AS projeto,
-                  t.nome AS empresa, u.nome AS consultora, (SELECT whatsapp FROM share_links WHERE id = $3) AS whatsapp
+                  t.nome AS empresa, t.logo_asset_id AS "logoAssetId", t.cor_primaria AS "corPrimaria", t.fonte,
+                  u.nome AS consultora, (SELECT whatsapp FROM share_links WHERE id = $3) AS whatsapp
              FROM buildings b JOIN projects p ON p.id = b.project_id JOIN tenants t ON t.id = b.tenant_id, users u
             WHERE b.id = $1 AND u.id = $2`,
           [l.predioId, l.consultoraId, l.linkId],
@@ -132,12 +137,34 @@ export function rotasPublicas(app: FastifyInstance, { pool, armazenamento, entor
           [base.projeto.id, base.modeloId],
         )
       ).rows;
-      return { base, andares, unidades, arquivos, giro: await giroDaVitrine(c, l.predioId), lazer: await lazerDoPredio(c, l.predioId), fotos: await fotosNoLugar(c, base.projeto.id), lotes: await lotesDoPredio(c, l.predioId) };
+      // o logo pode ser de outro projeto da mesma empresa (a marca é da empresa, não do empreendimento)
+      const logo = base.logoAssetId
+        ? (await c.query<{ chave: string; nome: string }>("SELECT chave, nome FROM assets WHERE id = $1 AND status = 'pronto'", [base.logoAssetId])).rows[0]
+        : null;
+      return {
+        base,
+        andares,
+        unidades,
+        arquivos,
+        logo,
+        giro: await giroDaVitrine(c, l.predioId),
+        lazer: await lazerDoPredio(c, l.predioId),
+        fotos: await fotosNoLugar(c, base.projeto.id),
+        galeria: await galeriaDoPredio(c, l.predioId),
+        lotes: await lotesDoPredio(c, l.predioId),
+      };
     });
-    const { base, andares, unidades, arquivos, giro, lazer, fotos, lotes } = dados;
+    const { base, andares, unidades, arquivos, logo, giro, lazer, fotos, galeria, lotes } = dados;
     const modelo = arquivos.find((a) => a.id === base.modeloId && a.tipo === 'modelo_3d');
     return {
-      empresa: { nome: base.empresa },
+      empresa: {
+        nome: base.empresa,
+        marca: {
+          logoUrl: logo ? await armazenamento.urlDownload({ chave: logo.chave, assetId: base.logoAssetId!, tenantId: l.tenantId, nomeArquivo: logo.nome, expiraS: DOWNLOAD_S }) : null,
+          corPrimaria: base.corPrimaria,
+          fonte: base.fonte,
+        },
+      },
       consultora: { nome: base.consultora, whatsapp: base.whatsapp },
       projeto: base.projeto,
       predio: base.predio,
@@ -150,6 +177,7 @@ export function rotasPublicas(app: FastifyInstance, { pool, armazenamento, entor
       giro,
       lazer,
       fotos,
+      galeria,
       lotes,
       // o portal chama o assistente direto na API (resposta em fluxo)
       assistenteUrl: ia.chamar ? `${apiPublica}/publico/links/${(req.params as { token: string }).token}/assistente` : null,
@@ -201,17 +229,29 @@ export function rotasPublicas(app: FastifyInstance, { pool, armazenamento, entor
     return { rota: r };
   });
 
-  /** Link de um arquivo 3D do empreendimento do link (interior real, modelo do prédio ou o giro 360° do prédio). */
+  /**
+   * Link de um arquivo do empreendimento do link: interior real, modelo do prédio, giro 360°, foto com GPS, foto da
+   * ficha de uma área comum (item 6), foto da galeria (item 7) ou o logo da marca da empresa (item 11; pode ser de
+   * outro projeto, a marca é da empresa, não do empreendimento).
+   */
   app.get('/publico/links/:token/arquivos/:id', limite(60, '1 minute'), async (req) => {
     const l = await resolver(req);
     const { id } = TokenArquivo.parse(req.params);
     const a = await withTenant(pool, daEmpresa(l), async (c) =>
       (
         await c.query<{ chave: string; nome: string }>(
-          `SELECT a.chave, a.nome FROM assets a JOIN buildings b ON b.project_id = a.project_id
+          `SELECT a.chave, a.nome FROM assets a, buildings b
             WHERE a.id = $1 AND b.id = $2 AND a.status = 'pronto'
-              AND (a.tipo IN ('splat', 'modelo_3d') OR EXISTS (SELECT 1 FROM giros g WHERE g.zip_asset_id = a.id AND g.building_id = b.id)
-                   OR (a.tipo = 'imagem' AND a.lat IS NOT NULL AND a.papel IN ('foto', 'fachada', 'render')))`,
+              AND (
+                (b.project_id = a.project_id AND (
+                  a.tipo IN ('splat', 'modelo_3d')
+                  OR EXISTS (SELECT 1 FROM giros g WHERE g.zip_asset_id = a.id AND g.building_id = b.id)
+                  OR (a.tipo = 'imagem' AND a.lat IS NOT NULL AND a.papel IN ('foto', 'fachada', 'render'))
+                  OR EXISTS (SELECT 1 FROM galeria_fotos gf WHERE gf.asset_id = a.id AND gf.building_id = b.id)
+                  OR EXISTS (SELECT 1 FROM lazer lz WHERE lz.building_id = b.id AND a.id = ANY(lz.fotos))
+                ))
+                OR EXISTS (SELECT 1 FROM tenants t WHERE t.id = b.tenant_id AND t.logo_asset_id = a.id)
+              )`,
           [id, l.predioId],
         )
       ).rows[0],

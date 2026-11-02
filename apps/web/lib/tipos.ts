@@ -245,10 +245,13 @@ export interface ItemLazer {
   y: number;
   z: number;
   ordem: number;
+  /** Fotos da ficha (ids de arquivos já enviados no projeto; Plano 12b, item 6). */
+  fotos: string[];
 }
 
 export interface Portal {
-  empresa: { nome: string };
+  /** Marca da incorporadora (Plano 12b, item 11): aplicada como variáveis CSS no portal, no estande e na Vitrine. */
+  empresa: { nome: string; marca: Marca };
   /** `whatsapp`: só dígitos com o 55 (o corretor informa ao gerar o link); null = sem botão de WhatsApp. */
   consultora: { nome: string; whatsapp: string | null };
   projeto: { id: string; nome: string; descricao: string | null; cidade: string | null; uf: string | null; lat: number | null; lon: number | null; rotacaoGraus: number; estiloDecorado: 'moderno' | 'classico' | 'jovem' };
@@ -265,10 +268,28 @@ export interface Portal {
   lotes: import('@/app/painel/predios/[id]/vitrine/lotes').LoteVitrine[];
   /** Fotos do imóvel com GPS (quadros no 3D). */
   fotos: Array<{ id: string; nome: string; lat: number; lon: number; rumo: number | null }>;
+  /** Galeria do empreendimento (Plano 12b, item 7): fotos escolhidas pela gestão, na ordem dela. */
+  galeria: Array<{ id: string; nome: string }>;
   /** Assistente com IA (direto na API), ou null se desligado. */
   assistenteUrl: string | null;
   /** Transmissão do status das unidades ao vivo (EventSource direto na API). */
   aoVivoUrl: string;
+}
+
+export const FONTES_MARCA = ['sistema', 'inter', 'poppins', 'roboto', 'merriweather'] as const;
+export type FonteMarca = (typeof FONTES_MARCA)[number];
+export const ROTULO_FONTE: Record<FonteMarca, string> = {
+  sistema: 'Do sistema',
+  inter: 'Inter',
+  poppins: 'Poppins',
+  roboto: 'Roboto',
+  merriweather: 'Merriweather',
+};
+/** Marca da incorporadora (Plano 12b, item 11): logo, cor primária e fonte. */
+export interface Marca {
+  logoUrl: string | null;
+  corPrimaria: string | null;
+  fonte: FonteMarca;
 }
 
 // ------------------------------------------------------------------ BIM

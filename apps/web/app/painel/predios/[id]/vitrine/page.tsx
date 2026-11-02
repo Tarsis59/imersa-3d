@@ -4,8 +4,10 @@ import { notFound } from 'next/navigation';
 import type { UnidadeViewer } from '@imersa/viewer';
 import { apiNaPagina } from '@/lib/sessao';
 import { ehGestao, type Arquivo, type DetalheProjeto, type Espelho, type GirosDoPredio, type ItemLazer, type LinkCliente, type Me, type Portal } from '@/lib/tipos';
+import { estiloMarca, URL_GOOGLE_FONT } from '@/lib/tema';
 import { Vitrine } from './vitrine';
-import { bilheteAoVivo, carregarEntorno, criarLazer, linkDoArquivo, listarPontos, removerLazer, rotaAte } from './actions';
+import { bilheteAoVivo, buscarGaleria, carregarEntorno, criarLazer, fotosDoProjeto, linkDoArquivo, listarPontos, removerLazer, rotaAte, salvarGaleria, type FotoProjeto } from './actions';
+import { buscarMarca } from '../../../marca/actions';
 
 const NIVEIS_FIXOS = ['alto', 'medio', 'baixo'] as const;
 
@@ -21,7 +23,7 @@ export default async function PaginaVitrine({ params, searchParams }: { params: 
   if (r.status !== 200) notFound();
   const { predio, andares } = r.dados;
   // independentes entre si: em paralelo (cada ida à API custa uma volta de rede)
-  const [detalhe, lista, download, me, giros, ia, lazer, fotos, lotes] = await Promise.all([
+  const [detalhe, lista, download, me, giros, ia, lazer, fotos, lotes, fotosProjeto, galeria, marca] = await Promise.all([
     apiNaPagina<DetalheProjeto>(`/projetos/${encodeURIComponent(predio.projetoId)}`, volta),
     apiNaPagina<Arquivo[]>(`/projetos/${encodeURIComponent(predio.projetoId)}/arquivos`, volta),
     predio.modeloArquivoId ? apiNaPagina<{ url: string }>(`/arquivos/${predio.modeloArquivoId}/download`, volta) : null,
@@ -31,6 +33,9 @@ export default async function PaginaVitrine({ params, searchParams }: { params: 
     apiNaPagina<ItemLazer[]>(`/predios/${encodeURIComponent(id)}/lazer`, volta),
     apiNaPagina<Portal['fotos']>(`/predios/${encodeURIComponent(id)}/fotos`, volta),
     apiNaPagina<{ lotes: LoteVitrine[] }>(`/predios/${encodeURIComponent(id)}/lotes`, volta),
+    fotosDoProjeto(id),
+    buscarGaleria(id),
+    buscarMarca(),
   ]);
   const empresa = me.dados.empresas.find((e) => e.id === me.dados.tenantId)?.nome ?? '';
   // visita guiada ao vivo: a consultora conduz pelos links ativos dela (a gestão, por todos)
@@ -43,8 +48,11 @@ export default async function PaginaVitrine({ params, searchParams }: { params: 
   const unidades: UnidadeViewer[] = andares.flatMap((a) =>
     a.unidades.map((u) => ({ id: u.id, codigo: u.codigo, andar: a.numero, status: u.status, areaM2: u.areaM2, quartos: u.quartos, preco: u.preco, meshNodeId: u.meshNodeId })),
   );
+  const fonteGoogle = marca ? URL_GOOGLE_FONT[marca.fonte] : null;
   return (
-    <>
+    // marca da incorporadora (Plano 12b, item 11): variáveis CSS aplicadas aqui também, para a gestão conferir
+    <div style={estiloMarca(marca)}>
+      {fonteGoogle && <link rel="stylesheet" href={fonteGoogle} />}
       <div className="grid gap-1">
         <Link href={`/painel/predios/${predio.id}`} className="text-sm text-suave hover:underline">
           ← {predio.nome}
@@ -84,7 +92,10 @@ export default async function PaginaVitrine({ params, searchParams }: { params: 
         lazer={lazer.status === 200 ? lazer.dados : []}
         lotes={lotes.status === 200 ? lotes.dados.lotes : []}
         gerirLazer={ehGestao(me.dados.papel) ? { criar: criarLazer.bind(null, predio.id), remover: removerLazer } : null}
+        fotosProjeto={fotosProjeto}
+        galeria={galeria}
+        gerirGaleria={ehGestao(me.dados.papel) ? { salvar: salvarGaleria.bind(null, predio.id) } : null}
       />
-    </>
+    </div>
   );
 }

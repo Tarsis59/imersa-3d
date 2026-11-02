@@ -30,7 +30,7 @@ export async function bilheteAoVivo(predioId: string): Promise<string | null> {
   return r.status === 200 ? r.dados.url : null;
 }
 
-export type NovoLazer = { categoria: CategoriaLazer; nome: string; descricao: string | null; x: number; y: number; z: number };
+export type NovoLazer = { categoria: CategoriaLazer; nome: string; descricao: string | null; x: number; y: number; z: number; fotos?: string[] };
 const ERROS_LAZER: Record<number, string> = {
   400: 'Confira o nome e a posição do ponto.',
   403: 'Só a gestão (com verificação em duas etapas) marca o lazer.',
@@ -46,6 +46,24 @@ export async function criarLazer(predioId: string, d: NovoLazer): Promise<{ item
 export async function removerLazer(id: string): Promise<{ erro?: string }> {
   const r = await api(`/lazer/${encodeURIComponent(id)}`, { metodo: 'DELETE', token: await tokenParaAcao() });
   return r.status === 204 ? {} : { erro: ERROS_LAZER[r.status] ?? 'Não foi possível remover o ponto agora.' };
+}
+
+export type FotoProjeto = { id: string; nome: string };
+/** Fotos já prontas do projeto (foto, fachada, render): para a ficha das áreas comuns e a galeria (Plano 12b). */
+export async function fotosDoProjeto(predioId: string): Promise<FotoProjeto[]> {
+  const r = await api<FotoProjeto[]>(`/predios/${encodeURIComponent(predioId)}/fotos-projeto`, { token: await tokenParaAcao() });
+  return r.status === 200 ? r.dados : [];
+}
+
+/** Galeria do empreendimento (Plano 12b, item 7): ids das fotos escolhidas, já na ordem da gestão. */
+export async function buscarGaleria(predioId: string): Promise<FotoProjeto[]> {
+  const r = await api<FotoProjeto[]>(`/predios/${encodeURIComponent(predioId)}/galeria`, { token: await tokenParaAcao() });
+  return r.status === 200 ? r.dados : [];
+}
+
+export async function salvarGaleria(predioId: string, fotos: string[]): Promise<{ erro?: string }> {
+  const r = await api(`/predios/${encodeURIComponent(predioId)}/galeria`, { metodo: 'PUT', corpo: { fotos }, token: await tokenParaAcao() });
+  return r.status === 200 ? {} : { erro: 'Não foi possível salvar a galeria agora.' };
 }
 
 /** O que há perto do empreendimento, com o tempo a pé (Plano 12). */

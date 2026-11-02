@@ -97,6 +97,7 @@ export function PortalVitrine({
         lon={portal.projeto.lon}
         interiores={portal.interiores}
         lazer={portal.lazer}
+        galeria={portal.galeria}
         lotes={portal.lotes}
         giroRenderizado={portal.giro}
         assistenteUrl={portal.assistenteUrl}

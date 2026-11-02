@@ -141,6 +141,22 @@ test('vitrine 3D: volumes do prédio, filtros, favoritos, voo até a unidade, co
   await page.getByRole('button', { name: 'Voltar para a vista de cima' }).click();
   await expect(vitrine).toHaveAttribute('data-modo', 'orbita');
 
+  // zoom vertical (Plano 12b, item 3): o botão "+" aproxima a câmera (o número do zoom sobe), sem sair da órbita
+  const zoomAntes = Number(await vitrine.getAttribute('data-zoom'));
+  await page.getByRole('button', { name: 'Aproximar o zoom' }).click();
+  await expect.poll(async () => Number(await vitrine.getAttribute('data-zoom'))).toBeGreaterThan(zoomAntes);
+  await expect(vitrine).toHaveAttribute('data-modo', 'orbita');
+  const depoisDoMais = Number(await vitrine.getAttribute('data-zoom'));
+  // o botão "−" afasta (o número desce)
+  await page.getByRole('button', { name: 'Afastar o zoom' }).click();
+  await expect.poll(async () => Number(await vitrine.getAttribute('data-zoom'))).toBeLessThan(depoisDoMais);
+  // o slider (role=slider, acessível por teclado: ArrowUp/ArrowDown mudam o valor nativo do range)
+  const slider = page.getByRole('slider', { name: 'Zoom' });
+  await slider.focus();
+  const antesDoTeclado = Number(await vitrine.getAttribute('data-zoom'));
+  await slider.press('ArrowUp');
+  await expect.poll(async () => Number(await vitrine.getAttribute('data-zoom'))).not.toBe(antesDoTeclado);
+
   // telemetria: ao sair da Vitrine a visita é enviada (sendBeacon) e aparece no painel de desempenho
   await page.getByRole('link', { name: 'Desempenho 3D' }).click();
   await expect(page.getByRole('heading', { name: 'Desempenho do 3D' })).toBeVisible();
