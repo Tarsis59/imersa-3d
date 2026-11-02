@@ -340,6 +340,25 @@ export interface GirosDoPredio {
   vitrine: { arquivoId: string; unidades: string[] } | null;
 }
 
+/** Bake da luz (AO + difusa de dia e de noite, Plano 12a, item 6): GLB "assado" no Blender, na GPU do Kaggle. */
+export interface BakePredio {
+  id: string;
+  status: 'na_fila' | 'processando' | 'pronto' | 'erro';
+  mensagem: string | null;
+  metricas: { dispositivo?: string; mb?: number; largura?: number; tempos_s?: Record<string, number> };
+  arquivoId: string | null;
+  criadoEm: string;
+  atualizadoEm: string;
+  /** Feito com o modelo que o prédio usa hoje. */
+  atual: boolean;
+}
+export interface BakesDoPredio {
+  temModelo: boolean;
+  ultimo: BakePredio | null;
+  pronto: BakePredio | null;
+  vitrine: { arquivoId: string } | null;
+}
+
 /** Estúdio de marketing: vídeos do prédio (Blender, fiel ao projeto, com o selo "Imagem ilustrativa"). */
 export interface VideoPredio {
   id: string;

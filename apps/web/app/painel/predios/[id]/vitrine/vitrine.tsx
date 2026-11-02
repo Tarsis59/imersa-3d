@@ -8,6 +8,7 @@ import { brl, COR_STATUS, ROTULO_STATUS, STATUS_UNIDADE } from '@/lib/tipos';
 import { DECODIFICADORES } from '@/lib/decodificadores';
 import { TEXTURAS_PBR } from '@/lib/texturasPbr';
 import { giroDoZip } from '@/lib/giro-zip';
+import { pedidoRenderizadorExperimental } from '@/lib/experimentoWebgpu';
 import type { ResultadoEntorno } from './actions';
 import { InteriorSplat } from './interior';
 import { Giro360 } from './giro';
@@ -78,6 +79,7 @@ export function Vitrine({
   empresa,
   chaveModelo,
   modeloUrl,
+  modeloBakeUrl = null,
   unidades,
   andares,
   rotacaoGraus,
@@ -118,6 +120,8 @@ export function Vitrine({
   /** Identidade estável do modelo (o link assinado muda a cada atualização da página). */
   chaveModelo: string;
   modeloUrl: string | null;
+  /** GLB "assado" (Plano 12a, item 6): luz pré-calculada; usado no lugar de `modeloUrl` quando houver. */
+  modeloBakeUrl?: string | null;
   unidades: UnidadeViewer[];
   andares: Array<{ numero: number; nome: string }>;
   rotacaoGraus: number;
@@ -180,8 +184,8 @@ export function Vitrine({
   const canvas = useRef<HTMLCanvasElement>(null);
   const coluna = useRef<HTMLDivElement>(null);
   const viewer = useRef<Viewer | null>(null);
-  const inicial = useRef({ modeloUrl, unidades, rotacaoGraus, estiloDecorado, lat, lon, projetoId, predioId, qualidadeFixa, carregarEntorno, comTelemetria });
-  inicial.current = { modeloUrl, unidades, rotacaoGraus, estiloDecorado, lat, lon, projetoId, predioId, qualidadeFixa, carregarEntorno, comTelemetria };
+  const inicial = useRef({ modeloUrl, modeloBakeUrl, unidades, rotacaoGraus, estiloDecorado, lat, lon, projetoId, predioId, qualidadeFixa, carregarEntorno, comTelemetria });
+  inicial.current = { modeloUrl, modeloBakeUrl, unidades, rotacaoGraus, estiloDecorado, lat, lon, projetoId, predioId, qualidadeFixa, carregarEntorno, comTelemetria };
   const evento = useRef(aoEvento);
   evento.current = aoEvento;
   const fonteAoVivo = useRef(aoVivo);
@@ -198,6 +202,8 @@ export function Vitrine({
   const [conduzindo, setConduzindo] = useState<string | null>(null);
   const [linkEscolhido, setLinkEscolhido] = useState('');
   const [estado, setEstado] = useState<'carregando' | 'pronto' | 'erro'>('carregando');
+  // `?renderizador=webgpu` (Plano 12a, item 16): só destaca a capacidade medida; não troca o renderizador
+  const [experimentoWebgpu] = useState(() => typeof window !== 'undefined' && pedidoRenderizadorExperimental(window.location.search));
   const [telemetria, setTelemetria] = useState<EstadoViewer | null>(null);
   const [filtro, setFiltro] = useState<Filtro>(filtroVazio);
   const [favoritos, setFavoritos] = useState<Set<string>>(() => new Set());
@@ -432,7 +438,7 @@ export function Vitrine({
     if (!el) return;
     const c = inicial.current;
     setEstado('carregando');
-    const v = criarViewer(el, { unidades: c.unidades, modeloUrl: c.modeloUrl, rotacaoGraus: c.rotacaoGraus, estiloDecorado: c.estiloDecorado, lat: c.lat ?? undefined, lon: c.lon ?? undefined, decodificadores: DECODIFICADORES, texturasPbr: TEXTURAS_PBR,
+    const v = criarViewer(el, { unidades: c.unidades, modeloUrl: c.modeloUrl, modeloBakeUrl: c.modeloBakeUrl, rotacaoGraus: c.rotacaoGraus, estiloDecorado: c.estiloDecorado, lat: c.lat ?? undefined, lon: c.lon ?? undefined, decodificadores: DECODIFICADORES, texturasPbr: TEXTURAS_PBR,
       ...(c.qualidadeFixa !== null ? { qualidadeInicial: c.qualidadeFixa, qualidadeFixa: true } : {}),
     });
     viewer.current = v;
@@ -441,7 +447,11 @@ export function Vitrine({
     // telemetria: uma vez por visita, ao sair da página (ou trocar de página dentro do site)
     let enviado = false;
     let webgpu: boolean | null = null;
-    void temWebGpu().then((w) => (webgpu = w));
+    void temWebGpu().then((w) => {
+      webgpu = w;
+      // experimental: só registra a capacidade medida (o 3D continua no WebGL2); ver /painel/telemetria
+      if (experimentoWebgpu) console.info(`[imersa] renderizador experimental pedido: WebGPU ${w ? 'disponível' : 'indisponível'} neste aparelho (o 3D continua em WebGL2)`);
+    });
     const enviarTelemetria = () => {
       const m = v.metricas();
       if (!c.comTelemetria || enviado || (m.cargaMs === null && m.erros === 0)) return;
@@ -1075,6 +1085,8 @@ export function Vitrine({
         data-marcando-lazer={marcandoLazer ? 'sim' : ''}
         data-apresentacao={apresentando ? 'ligada' : 'desligada'}
         data-unidade-da-vez={vitrineDaVez ?? ''}
+        data-renderizador-experimental={experimentoWebgpu ? 'webgpu' : ''}
+        data-bake={telemetria?.bake ? 'sim' : 'nao'}
         className={`relative ${estande ? 'h-[calc(100dvh-7rem)]' : 'h-[70vh]'} min-h-96 overflow-hidden rounded-2xl border border-borda bg-fundo lg:sticky lg:top-6`}
       >
         <canvas

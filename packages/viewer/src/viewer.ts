@@ -45,6 +45,7 @@ import { criarMarcadoresLazer, placa, poseParaLazer, type MarcadoresLazer, type 
 import { criarNuvens, sombraDeNuvens, SOMBRA_NUVENS, NUVENS_POR_NIVEL } from './ambiente/nuvens';
 import { iniciarAr, iniciarVr, type ContextoXr, type SessaoXr, type TipoXr } from './xr/sessao';
 import { aplicarTexturasPbr, desligarPbr, ESCALA_PBR_M, prepararPbrMundo, urlsPbr, type EstadoPbr } from './ambiente/materiaisPbr';
+import { aplicarBakeNoModelo, type LightmapBake } from './bake/lightmap';
 
 export type ModoCamera = 'orbita' | 'primeira-pessoa';
 
@@ -52,6 +53,8 @@ export interface ConfigViewer {
   unidades: UnidadeViewer[];
   /** GLB do prédio; sem ele, o prédio é desenhado em volumes (andares × unidades). */
   modeloUrl?: string | null;
+  /** GLB "assado" (Plano 12a, item 6: AO + luz dia/noite pré-calculadas no Blender); usado no lugar de `modeloUrl` quando houver. */
+  modeloBakeUrl?: string | null;
   /** Para que rumo a frente (−z) do modelo aponta, em graus a partir do norte. */
   rotacaoGraus?: number;
   lat?: number;
@@ -94,6 +97,8 @@ export interface EstadoViewer {
   lotes: number;
   /** Varredura em ciano do buscador de lotes em andamento (Plano 12d, item 4). */
   varredura: boolean;
+  /** Modelo com a luz pré-calculada (AO + dia/noite) do Plano 12a, item 6. */
+  bake: boolean;
   /** Rota a pé desenhada no chão (número de pontos; 0 = nenhuma). */
   rota: number;
   /** Etiquetas "Apto 1201" à vista (unidades filtradas). */
@@ -594,11 +599,18 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
   let raizPredio: THREE.Object3D | null = null;
   let configurador: Configurador | null = null;
   let planosCorte: THREE.Plane[] = [];
+  // bake de luz (Plano 12a, item 6): 0 de dia → 1 de noite, no mesmo fator das janelas da cidade
+  const bakeEstado: LightmapBake = { noite: { value: 0 }, intensidade: { value: 1 } };
+  let temBake = false;
 
   async function montarModelo(url: string): Promise<void> {
     const { carregador, liberar } = criarCarregadorGltf(renderer, config.decodificadores);
     const gltf = await carregador.loadAsync(url).finally(liberar);
     const modelo = gltf.scene;
+    if (config.modeloBakeUrl) {
+      const n = await aplicarBakeNoModelo(modelo, (i) => gltf.parser.getDependency('texture', i), bakeEstado);
+      temBake = n > 0;
+    }
     const caixa = new THREE.Box3().setFromObject(modelo);
     const centro = caixa.getCenter(new THREE.Vector3());
     modelo.position.set(-centro.x, -caixa.min.y, -centro.z); // centralizado e apoiado no chão
@@ -1298,6 +1310,7 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
     const antes = luzNoturna;
     luzNoturna = Math.round(noite * 20) / 20;
     fachadaCidade.noite.value = luzNoturna;
+    bakeEstado.noite.value = luzNoturna; // bake de luz (Plano 12a, item 6): mesmo fator dia↔noite da fachada
     if (luzNoturna !== antes && pecas.size) pintar();
     pos?.definirBrilho(luzNoturna);
     paisagismo?.definirNoite(luzNoturna);
@@ -1321,6 +1334,7 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
     renderer.setPixelRatio(qualidade.pixelRatio(window.devicePixelRatio));
     fachadaCidade.detalhe.value = n.nome === 'baixo' ? 0 : 1; // apartamento falso nas janelas só onde a placa aguenta
     DETALHE_VARREDURA.value = n.nome === 'baixo' ? 0 : 1; // varredura em ciano dos lotes (Plano 12d, item 4): só médio/alto
+    bakeEstado.intensidade.value = n.nome === 'baixo' ? 0 : 1; // bake de luz (item 6): 2 leituras de textura a mais; só médio/alto
     renderer.shadowMap.enabled = n.sombras;
     for (const l of csm.lights) {
       l.castShadow = n.sombras;
@@ -1544,6 +1558,7 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
       rota: rotaDesenhada?.userData.pontos ?? 0,
       lotes: loteamento?.centros.size ?? 0,
       varredura: varreduraInicio > 0,
+      bake: temBake,
       corretora: !corretora || !corretora.objeto.visible ? 'fora' : corretoraFalando ? 'falando' : 'parada',
       terceiraPessoa,
       boneco: presetId,
@@ -1808,7 +1823,8 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
     cameraOrto.updateProjectionMatrix();
   }
 
-  const pronto = (config.modeloUrl ? montarModelo(config.modeloUrl) : Promise.resolve(montarVolumes())).then(() => {
+  const urlDoModelo = config.modeloBakeUrl ?? config.modeloUrl;
+  const pronto = (urlDoModelo ? montarModelo(urlDoModelo) : Promise.resolve(montarVolumes())).then(() => {
     pintar();
     enquadrarPredio();
     montarPaisagismo();

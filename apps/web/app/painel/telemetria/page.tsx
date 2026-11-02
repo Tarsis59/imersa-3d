@@ -2,6 +2,22 @@ import { Aviso, Cartao } from '@/components/ui';
 import { apiNaPagina } from '@/lib/sessao';
 import { ehGestao, ROTULO_ETAPA, type IdEtapa, type Me } from '@/lib/tipos';
 
+interface Aparelho {
+  visitas: number;
+  medidas: number;
+  comWebgpu: number;
+  percentual: number | null;
+}
+interface ProntoWebgpu {
+  dias: number;
+  celular: Aparelho;
+  computador: Aparelho;
+  fps: { comWebgpu: number | null; semWebgpu: number | null };
+  limiarCelular: number;
+  pronto: boolean;
+  regra: string;
+}
+
 interface Resumo {
   dias: number;
   sessoes: number;
@@ -39,6 +55,9 @@ export default async function PaginaTelemetria() {
   // fluxo da criação integrada (Plano 11f): do envio ao 3D pronto
   const mt = await apiNaPagina<{ total: number; prontas: number; comAvisos: number; falhas: number; medianaMs: number | null; etapas: Record<IdEtapa, { feitas: number; avisos: number; falhas: number; mediaMs: number | null }> }>('/montagens/resumo', volta);
   const m = mt.status === 200 ? mt.dados : null;
+  // Plano 12a, item 16: a decisão da troca de renderizador (WebGL2 → WebGPU), pronta e medida, nunca automática
+  const wg = await apiNaPagina<ProntoWebgpu>('/telemetria/viewer/webgpu', volta);
+  const w = wg.status === 200 ? wg.dados : null;
   return (
     <>
       <div className="grid gap-1">
@@ -85,6 +104,33 @@ export default async function PaginaTelemetria() {
               ) : null;
             })}
           </ul>
+        </Cartao>
+      )}
+      {w && (
+        <Cartao titulo="Pronto para WebGPU?">
+          <p className="text-sm text-suave">
+            O 3D continua no WebGL2 (os efeitos visuais usam um recurso que o renderizador WebGPU do three.js ainda não aceita). Esta medida fica pronta para
+            decidir a troca sem adivinhar: {w.regra}
+          </p>
+          <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4" data-testid="telemetria-pronto-webgpu" data-pronto={String(w.pronto)}>
+            <Numero
+              rotulo="Celular com WebGPU"
+              valor={w.celular.percentual === null ? '—' : `${Math.round(w.celular.percentual * 100)}%`}
+              detalhe={`${w.celular.comWebgpu} de ${w.celular.medidas} visitas medidas (meta: ${Math.round(w.limiarCelular * 100)}%)`}
+              testid="telemetria-webgpu-celular"
+            />
+            <Numero
+              rotulo="Computador com WebGPU"
+              valor={w.computador.percentual === null ? '—' : `${Math.round(w.computador.percentual * 100)}%`}
+              detalhe={`${w.computador.comWebgpu} de ${w.computador.medidas} visitas medidas`}
+            />
+            <Numero
+              rotulo="Fluidez com WebGPU"
+              valor={fps(w.fps.comWebgpu)}
+              detalhe={`sem WebGPU: ${fps(w.fps.semWebgpu)} (celular, mediana)`}
+            />
+            <Numero rotulo="Decisão" valor={w.pronto ? 'Pode trocar' : 'Ainda no WebGL2'} testid="telemetria-webgpu-decisao" />
+          </div>
         </Cartao>
       )}
     </>

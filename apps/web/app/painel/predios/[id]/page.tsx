@@ -2,13 +2,14 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { Cartao } from '@/components/ui';
 import { apiNaPagina } from '@/lib/sessao';
-import { ehGestao, type Arquivo, type Espelho, type Estande, type GirosDoPredio, type LinkCliente, type Me, type VideosDoPredio } from '@/lib/tipos';
+import { ehGestao, type Arquivo, type BakesDoPredio, type Espelho, type Estande, type GirosDoPredio, type LinkCliente, type Me, type VideosDoPredio } from '@/lib/tipos';
 import { ImportarLotes } from './importar-lotes';
-import { comandarEstande, criarEstande, criarLink, importarLotes, mudarStatus, pedirGiro, comandoGestao, pedirVideo, revogarLink, vincularModelo } from './actions';
+import { comandarEstande, criarEstande, criarLink, importarLotes, mudarStatus, pedirBake, pedirGiro, comandoGestao, pedirVideo, revogarLink, vincularModelo } from './actions';
 import { linkDoArquivo } from './vitrine/actions';
 import { Estudio } from './estudio';
 import { Estandes } from './estandes';
 import { GiroRenderizado } from './giro-renderizado';
+import { AssarLuz } from './assar-luz';
 import { LinksClientes } from './links-clientes';
 import { EspelhoVendas } from './espelho';
 import { PedirPorTexto } from './pedir-por-texto';
@@ -18,17 +19,19 @@ export default async function PaginaPredio({ params }: { params: Promise<{ id: s
   const { id } = await params;
   const volta = `/painel/predios/${id}`;
   // independentes entre si: em paralelo (cada ida à API grátis custa centenas de ms)
-  const [r, eu, lGiros, lVideos] = await Promise.all([
+  const [r, eu, lGiros, lVideos, lBakes] = await Promise.all([
     apiNaPagina<Espelho>(`/predios/${encodeURIComponent(id)}`, volta),
     apiNaPagina<Me>('/me', volta),
     apiNaPagina<GirosDoPredio>(`/predios/${encodeURIComponent(id)}/giros`, volta),
     apiNaPagina<VideosDoPredio>(`/predios/${encodeURIComponent(id)}/videos`, volta),
+    apiNaPagina<BakesDoPredio>(`/predios/${encodeURIComponent(id)}/bakes`, volta),
   ]);
   if (r.status !== 200) notFound();
   const espelho = r.dados;
   const me = eu.dados;
   const giros = lGiros.dados;
   const videos = lVideos.dados;
+  const bakes = lBakes.dados;
   // gestão e consultoras geram links para clientes (cada consultora vê só os dela)
   const podeLinks = ehGestao(me.papel) || me.papel === 'consultora';
   // estande: link público que fica anos ligado num PC; só a gestão, com verificação em duas etapas
@@ -108,6 +111,9 @@ export default async function PaginaPredio({ params }: { params: Promise<{ id: s
       </Cartao>
       <Cartao titulo="Giro 360° fotorrealista">
         <GiroRenderizado giros={giros} podePedir={ehGestao(me.papel) && me.mfa} pedir={pedirGiro.bind(null, espelho.predio.id)} />
+      </Cartao>
+      <Cartao titulo="Luz pré-calculada (dia e noite)">
+        <AssarLuz dados={bakes} podePedir={ehGestao(me.papel) && me.mfa} pedir={pedirBake.bind(null, espelho.predio.id)} />
       </Cartao>
     </>
   );

@@ -32,6 +32,7 @@ import { rotasConfigurador } from './rotas/configurador';
 import { rotasPlantas } from './rotas/plantas';
 import { rotasGiros } from './rotas/giros';
 import { rotasVideos } from './rotas/videos';
+import { rotasBakes } from './rotas/bakes';
 import { rotasEstandes } from './rotas/estandes';
 import { rotasLazer } from './rotas/lazer';
 import { rotasLotes } from './rotas/lotes';
@@ -388,6 +389,7 @@ export async function construirApp({ pool, config, logger = false, reportarErro,
   rotasPlantas(app, { pool, exigir });
   rotasGiros(app, { pool, exigir });
   rotasVideos(app, { pool, exigir });
+  rotasBakes(app, { pool, exigir });
   if (config.IA_SIMULADA === 'true' && config.AMBIENTE === 'producao') throw new Error('IA_SIMULADA não pode ser usada em produção');
   const ia: ConfigIA = {
     chamar:

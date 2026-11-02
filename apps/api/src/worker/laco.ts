@@ -11,6 +11,7 @@ import { conversorPython, processarProximaConversao } from '../bim/worker';
 import { leitorPython, processarProximaPlanta } from '../plantas/worker';
 import { processarProximoGiro, renderizadorPython, renderizadorSimulado } from '../giros/worker';
 import { processarProximoVideo, provedorBlender, provedorSimulado } from '../videos/worker';
+import { assadorPython, assadorSimulado, processarProximoBake } from '../bakes/worker';
 
 export const ConfigWorker = z.object({
   RECONSTRUTOR: z.enum(['python', 'simulado']).default('python'),
@@ -58,6 +59,12 @@ export const ConfigWorker = z.object({
   VIDEO_FPS: z.coerce.number().int().min(6).max(60).optional(),
   VIDEO_AMOSTRAS: z.coerce.number().int().min(1).max(4096).optional(),
   VIDEO_ESCALA: z.coerce.number().int().min(10).max(100).optional(),
+  /** Bake da luz (AO + difusa de dia e de noite): Blender (Kaggle, ou o local de GIRO_BLENDER) ou um GLB pronto (testes). */
+  BAKE_ASSADOR: z.enum(['python', 'simulado']).default('python'),
+  BAKE_SIMULADO_GLB: z.string().optional(),
+  /** Qualidade (vazio = padrão do serviço: textura de 1K). */
+  BAKE_LARGURA: z.coerce.number().int().min(256).max(4096).optional(),
+  BAKE_AMOSTRAS: z.coerce.number().int().min(1).max(4096).optional(),
 });
 export type ConfigWorker = z.infer<typeof ConfigWorker>;
 
@@ -109,14 +116,32 @@ function montarGiros(pool: pg.Pool, config: Config, extra: ConfigWorker) {
   return { pool, armazenamento: armazenamentoDaConfig(config), renderizador, pastaTrabalho: resolve(extra.WORKER_PASTA) };
 }
 
+/** Bake da luz: mesmo serviço Python (e mesma conta do Kaggle) dos giros; roda em minutos. */
+function montarBakes(pool: pg.Pool, config: Config, extra: ConfigWorker) {
+  const pythonPadrao = resolve(extra.RECONSTRUCAO_DIR, process.platform === 'win32' ? '.venv/Scripts/python.exe' : '.venv/bin/python');
+  if (extra.BAKE_ASSADOR === 'simulado' && !extra.BAKE_SIMULADO_GLB) throw new Error('Defina BAKE_SIMULADO_GLB');
+  const assador =
+    extra.BAKE_ASSADOR === 'simulado'
+      ? assadorSimulado(extra.BAKE_SIMULADO_GLB!)
+      : assadorPython({
+          python: extra.RECONSTRUCAO_PYTHON ?? pythonPadrao,
+          diretorio: extra.RECONSTRUCAO_DIR,
+          usuarioKaggle: extra.KAGGLE_USERNAME,
+          blender: extra.GIRO_BLENDER,
+          qualidade: { largura: extra.BAKE_LARGURA, amostras: extra.BAKE_AMOSTRAS },
+        });
+  return { pool, armazenamento: armazenamentoDaConfig(config), assador, pastaTrabalho: resolve(extra.WORKER_PASTA) };
+}
+
 /**
- * Processa as capturas e os giros da fila até ela esvaziar e devolve quantos processou (execução agendada, ex.:
- * GitHub Actions).
+ * Processa as capturas, giros, vídeos e bakes da fila até ela esvaziar e devolve quantos processou (execução
+ * agendada, ex.: GitHub Actions).
  */
 export async function processarFila(pool: pg.Pool, config: Config, extra: ConfigWorker): Promise<number> {
   const deps = montarDeps(pool, config, extra);
   const giros = montarGiros(pool, config, extra);
   const videos = montarVideos(pool, config, extra);
+  const bakes = montarBakes(pool, config, extra);
   let n = 0;
   for (;;) {
     const r = await processarProxima(deps);
@@ -125,8 +150,10 @@ export async function processarFila(pool: pg.Pool, config: Config, extra: Config
     if (g !== 'vazia') console.info(`[worker] giro 360° renderizado: ${g}`);
     const v = await processarProximoVideo(videos);
     if (v !== 'vazia') console.info(`[worker] vídeo de marketing renderizado: ${v}`);
-    if (r === 'vazia' && g === 'vazia' && v === 'vazia') return n;
-    n += Number(r !== 'vazia') + Number(g !== 'vazia') + Number(v !== 'vazia');
+    const bk = await processarProximoBake(bakes);
+    if (bk !== 'vazia') console.info(`[worker] bake da luz assado: ${bk}`);
+    if (r === 'vazia' && g === 'vazia' && v === 'vazia' && bk === 'vazia') return n;
+    n += Number(r !== 'vazia') + Number(g !== 'vazia') + Number(v !== 'vazia') + Number(bk !== 'vazia');
   }
 }
 
@@ -145,6 +172,7 @@ export function iniciarWorker(pool: pg.Pool, config: Config, extra: ConfigWorker
   const deps = extra.WORKER_CAPTURAS ? montarDeps(pool, config, extra) : null;
   const giros = extra.WORKER_CAPTURAS ? montarGiros(pool, config, extra) : null;
   const videos = extra.WORKER_CAPTURAS ? montarVideos(pool, config, extra) : null;
+  const bakes = extra.WORKER_CAPTURAS ? montarBakes(pool, config, extra) : null;
   const bim = extra.WORKER_BIM ? montarBim(pool, config, extra) : null;
   const plantas = extra.WORKER_BIM ? montarPlantas(pool, config, extra) : null;
   const retencao = periodica(6 * 3600 * 1000, async () => {
@@ -178,7 +206,9 @@ export function iniciarWorker(pool: pg.Pool, config: Config, extra: ConfigWorker
         if (giro !== 'vazia') console.info(`[worker] giro 360° renderizado: ${giro}`);
         const video = videos ? await processarProximoVideo(videos) : 'vazia';
         if (video !== 'vazia') console.info(`[worker] vídeo de marketing renderizado: ${video}`);
-        if (r === 'vazia' && conversao === 'vazia' && planta === 'vazia' && giro === 'vazia' && video === 'vazia' && ativo) await esperar(extra.WORKER_INTERVALO_S * 1000);
+        const bake = bakes ? await processarProximoBake(bakes) : 'vazia';
+        if (bake !== 'vazia') console.info(`[worker] bake da luz assado: ${bake}`);
+        if (r === 'vazia' && conversao === 'vazia' && planta === 'vazia' && giro === 'vazia' && video === 'vazia' && bake === 'vazia' && ativo) await esperar(extra.WORKER_INTERVALO_S * 1000);
       } catch (e) {
         console.error('[worker] erro inesperado', e);
         if (ativo) await esperar(extra.WORKER_INTERVALO_S * 1000);

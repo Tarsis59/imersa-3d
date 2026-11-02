@@ -3,7 +3,7 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import type { UnidadeViewer } from '@imersa/viewer';
 import { apiNaPagina } from '@/lib/sessao';
-import { ehGestao, type Arquivo, type DetalheProjeto, type Espelho, type GirosDoPredio, type ItemLazer, type LinkCliente, type Me, type Portal } from '@/lib/tipos';
+import { ehGestao, type Arquivo, type BakesDoPredio, type DetalheProjeto, type Espelho, type GirosDoPredio, type ItemLazer, type LinkCliente, type Me, type Portal } from '@/lib/tipos';
 import { estiloMarca, URL_GOOGLE_FONT } from '@/lib/tema';
 import { Vitrine } from './vitrine';
 import { bilheteAoVivo, buscarGaleria, buscarTerrenoLoteamento, carregarEntorno, criarLazer, fotosDoProjeto, linkDoArquivo, listarPontos, removerLazer, rotaAte, salvarGaleria, type FotoProjeto } from './actions';
@@ -23,12 +23,13 @@ export default async function PaginaVitrine({ params, searchParams }: { params: 
   if (r.status !== 200) notFound();
   const { predio, andares } = r.dados;
   // independentes entre si: em paralelo (cada ida à API custa uma volta de rede)
-  const [detalhe, lista, download, me, giros, ia, lazer, fotos, lotes, fotosProjeto, galeria, marca, terreno] = await Promise.all([
+  const [detalhe, lista, download, me, giros, bakes, ia, lazer, fotos, lotes, fotosProjeto, galeria, marca, terreno] = await Promise.all([
     apiNaPagina<DetalheProjeto>(`/projetos/${encodeURIComponent(predio.projetoId)}`, volta),
     apiNaPagina<Arquivo[]>(`/projetos/${encodeURIComponent(predio.projetoId)}/arquivos`, volta),
     predio.modeloArquivoId ? apiNaPagina<{ url: string }>(`/arquivos/${predio.modeloArquivoId}/download`, volta) : null,
     apiNaPagina<Me>('/me', volta),
     apiNaPagina<GirosDoPredio>(`/predios/${encodeURIComponent(id)}/giros`, volta),
+    apiNaPagina<BakesDoPredio>(`/predios/${encodeURIComponent(id)}/bakes`, volta),
     apiNaPagina<{ ligada: boolean }>('/ia', volta),
     apiNaPagina<ItemLazer[]>(`/predios/${encodeURIComponent(id)}/lazer`, volta),
     apiNaPagina<Portal['fotos']>(`/predios/${encodeURIComponent(id)}/fotos`, volta),
@@ -38,6 +39,10 @@ export default async function PaginaVitrine({ params, searchParams }: { params: 
     buscarMarca(),
     buscarTerrenoLoteamento(id),
   ]);
+  // GLB "assado" (Plano 12a, item 6): se houver bake pronto e atual, ele substitui o modelo cru na Vitrine
+  const bakeArquivoId = bakes.status === 200 ? bakes.dados.vitrine?.arquivoId ?? null : null;
+  const downloadBake = bakeArquivoId ? await apiNaPagina<{ url: string }>(`/arquivos/${bakeArquivoId}/download`, volta) : null;
+  const modeloBakeUrl = downloadBake?.status === 200 ? downloadBake.dados.url : null;
   const empresa = me.dados.empresas.find((e) => e.id === me.dados.tenantId)?.nome ?? '';
   // visita guiada ao vivo: a consultora conduz pelos links ativos dela (a gestão, por todos)
   const podeConduzir = ehGestao(me.dados.papel) || me.dados.papel === 'consultora';
@@ -72,6 +77,7 @@ export default async function PaginaVitrine({ params, searchParams }: { params: 
         empresa={empresa}
         chaveModelo={predio.modeloArquivoId ?? 'volumes'}
         modeloUrl={modeloUrl}
+        modeloBakeUrl={modeloBakeUrl}
         unidades={unidades}
         andares={andares.map((a) => ({ numero: a.numero, nome: a.nome }))}
         rotacaoGraus={projeto.rotacaoGraus}

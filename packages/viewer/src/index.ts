@@ -28,4 +28,5 @@ export { planejarQuadros, type FotoNoLugar } from './ambiente/fotos';
 export { PALETA, type EstiloDecorado } from './interior/decorado';
 export { volumeDaRua, cantoDePassaro } from './ambiente/som';
 export { temWebGpu } from './quality/webgpu';
+export { aplicarBakeNoModelo, injetarLightmap, CHAVE_LIGHTMAP_DIA, CHAVE_LIGHTMAP_NOITE, type LightmapBake } from './bake/lightmap';
 export { BONECOS, type PresetBoneco } from './cameras/boneco';
