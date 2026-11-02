@@ -15,7 +15,16 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const local = [projeto.cidade, projeto.uf].filter(Boolean).join(' – ');
   const titulo = `${projeto.nome} · ${predio.nome} em 3D`;
   const descricao = `Visite o ${projeto.nome}${local ? ` (${local})` : ''} em 3D pelo celular: unidades, vista e interior. Atendimento: ${consultora.nome}, ${empresa.nome}.`;
-  return { title: titulo, description: descricao, robots, openGraph: { title: titulo, description: descricao, type: 'website', locale: 'pt_BR', siteName: empresa.nome } };
+  // app instalável: "Adicionar à tela inicial" abre direto neste empreendimento
+  const token = (await params).token;
+  return {
+    title: titulo,
+    description: descricao,
+    robots,
+    openGraph: { title: titulo, description: descricao, type: 'website', locale: 'pt_BR', siteName: empresa.nome },
+    manifest: `/v/${encodeURIComponent(token)}/app.webmanifest`,
+    appleWebApp: { capable: true, title: projeto.nome.slice(0, 30), statusBarStyle: 'black-translucent' },
+  };
 }
 
 /** Portal do comprador: aberto pelo link que a consultora mandou (sem login). */

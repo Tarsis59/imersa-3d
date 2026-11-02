@@ -58,6 +58,10 @@ test('vendas: link pelo WhatsApp → cliente no celular (sem login) → pedido d
   await expect(page.getByTestId('lista-links').getByRole('listitem').first()).toContainText('Família Souza');
 
   // prévia do WhatsApp: título, descrição e imagem gerada
+  // app instalável: o manifesto do link abre direto neste empreendimento (Plano 12b)
+  const manifesto = await (await request.get(`${link}/app.webmanifest`)).json();
+  expect(manifesto).toMatchObject({ start_url: new URL(link).pathname, scope: new URL(link).pathname, display: 'standalone', name: 'Residencial Aurora em 3D' });
+  expect((await request.get(`${new URL(link).origin}/v/token-que-nao-existe-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/app.webmanifest`)).status()).toBe(404);
   const html = await (await request.get(link)).text();
   expect(html).toContain('<meta property="og:title" content="Residencial Aurora · Torre V em 3D"');
   expect(html).toMatch(/<meta name="robots" content="noindex, nofollow"/);
