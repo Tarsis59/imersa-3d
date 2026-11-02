@@ -85,17 +85,42 @@ export function injetarFachada(shader: THREE.WebGLProgramParametersWithUniforms,
       float fJanela = fParede * step(0.0, fCelula.y) * step(fVao.x, fDentro.x) * step(fDentro.x, fVao.y) * step(fVao.z, fDentro.y) * step(fDentro.y, fVao.w);
       float fLaje = fParede * step(0.0, fCelula.y) * (1.0 - step(0.08, fDentro.y));
       diffuseColor.rgb *= 1.0 - 0.12 * fLaje;
-      diffuseColor.rgb = mix(diffuseColor.rgb, mix(vec3(0.07, 0.1, 0.13), vec3(0.1, 0.17, 0.2), fVidroTodo), 0.92 * fJanela);
+      // apartamento falso atrás do vidro ("interior mapping"): o raio da câmera entra numa caixa do tamanho da
+      // janela com 4 m de fundo e acha piso, teto, paredes e um móvel encostado no fundo, sem geometria nenhuma
+      vec2 fW = clamp(vec2((fDentro.x - fVao.x) / (fVao.y - fVao.x), (fDentro.y - fVao.z) / (fVao.w - fVao.z)), 0.0, 1.0);
+      vec3 fVisao = normalize(vFachadaMundo - cameraPosition);
+      vec3 fRaio = vec3(dot(fVisao.xz, fTangente) / (fLargura * (fVao.y - fVao.x)), fVisao.y / (${JANELAS.andar.toFixed(2)} * (fVao.w - fVao.z)), max(dot(fVisao, -fN), 0.02) / 4.0);
+      fRaio.xy = mix(fRaio.xy, vec2(1e-4), step(abs(fRaio.xy), vec2(1e-4)));
+      vec3 fPonto = vec3(fW, 0.0);
+      vec3 fAte = (step(0.0, fRaio) - fPonto) / fRaio;
+      float fT = min(min(fAte.x, fAte.y), fAte.z);
+      vec3 fAchou = fPonto + fRaio * fT;
+      float fSala = fract(sin(dot(floor(fCelula), vec2(41.3, 289.1))) * 15731.7);
+      vec3 fParedeSala = mix(vec3(0.8, 0.75, 0.68), vec3(0.7, 0.73, 0.75), fSala);
+      vec3 fInterior = fParedeSala * 0.92;
+      if (fT == fAte.y) fInterior = fRaio.y < 0.0 ? mix(vec3(0.46, 0.33, 0.23), vec3(0.62, 0.6, 0.57), step(0.6, fSala)) : vec3(0.9, 0.89, 0.86);
+      else if (fT == fAte.z) fInterior = fAchou.y < 0.32 ? mix(vec3(0.32, 0.36, 0.42), vec3(0.55, 0.45, 0.36), fract(fSala * 3.0)) : fParedeSala * 0.8;
+      fInterior *= 1.0 - 0.4 * fAchou.z;
+      // cortina em ~metade das janelas, em alturas diferentes (de cima para baixo)
+      float fCortina = fJanela * (1.0 - fVidroTodo) * step(0.5, fract(fSala * 13.0)) * step(1.0 - (0.2 + 0.65 * fract(fSala * 7.0)), fW.y);
+      float fVidro = fJanela * (1.0 - fCortina);
+      vec3 fVidroCor = mix(vec3(0.07, 0.1, 0.13), vec3(0.1, 0.17, 0.2), fVidroTodo);
+      // de dia o vidro reflete e o interior aparece de leve; em prédio de vidro (escritório) aparece menos
+      vec3 fJanelaCor = mix(fVidroCor, fInterior * 0.55, mix(0.5, 0.2, fVidroTodo));
+      fJanelaCor = mix(fJanelaCor, vec3(0.84, 0.81, 0.75), fCortina);
+      diffuseColor.rgb = mix(diffuseColor.rgb, fJanelaCor, 0.92 * fJanela);
       // laje de cobertura: concreto mais escuro e áspero
       diffuseColor.rgb *= mix(1.0, 0.68, step(0.5, fN.y));`,
     )
-    .replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\nroughnessFactor = mix(roughnessFactor, 0.12, fJanela);')
-    .replace('#include <metalnessmap_fragment>', '#include <metalnessmap_fragment>\nmetalnessFactor = mix(metalnessFactor, 0.3, fJanela);')
+    .replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\nroughnessFactor = mix(roughnessFactor, 0.12, fVidro);')
+    .replace('#include <metalnessmap_fragment>', '#include <metalnessmap_fragment>\nmetalnessFactor = mix(metalnessFactor, 0.3, fVidro);')
     .replace(
       '#include <emissivemap_fragment>',
       `#include <emissivemap_fragment>
       // à noite ~45% das janelas acesas, sorteadas por janela (fixas: a mesma janela fica acesa a noite toda)
       float fSorte = fract(sin(dot(floor(fCelula) + floor(vFachadaMundo.xz * 0.013), vec2(12.9898, 78.233))) * 43758.5453);
-      totalEmissiveRadiance += vec3(1.0, 0.74, 0.45) * fJanela * step(0.55, fSorte) * uFachadaNoite * (0.55 + 0.45 * fract(fSorte * 7.0));`,
+      // a luz acesa mostra o apartamento por dentro (e a cortina fica amarelada, iluminada por trás)
+      vec3 fLuz = mix(fInterior * vec3(1.35, 1.0, 0.7), vec3(1.0, 0.8, 0.55), fCortina);
+      totalEmissiveRadiance += fLuz * fJanela * step(0.55, fSorte) * uFachadaNoite * (0.55 + 0.45 * fract(fSorte * 7.0));`,
     );
 }

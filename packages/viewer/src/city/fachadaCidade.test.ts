@@ -33,13 +33,16 @@ describe('fachada da cidade', () => {
     injetarFachada(shader, { noite });
     expect(shader.vertexShader).toContain('attribute float aBase;');
     expect(shader.vertexShader).toContain('vFachadaBase = aBase;');
-    for (const trecho of ['float fJanela', 'roughnessFactor = mix(roughnessFactor, 0.12, fJanela)', 'metalnessFactor = mix(metalnessFactor, 0.3, fJanela)', 'totalEmissiveRadiance += vec3(1.0, 0.74, 0.45)']) {
+    for (const trecho of ['float fJanela', 'roughnessFactor = mix(roughnessFactor, 0.12, fVidro)', 'metalnessFactor = mix(metalnessFactor, 0.3, fVidro)', 'totalEmissiveRadiance += fLuz * fJanela']) {
       expect(shader.fragmentShader).toContain(trecho);
     }
     // a janela é usada depois de declarada (cor → rugosidade → brilho da noite)
     const f = shader.fragmentShader;
     expect(f.indexOf('float fJanela')).toBeLessThan(f.indexOf('roughnessFactor = mix'));
-    expect(f.indexOf('roughnessFactor = mix')).toBeLessThan(f.indexOf('totalEmissiveRadiance += vec3(1.0'));
+    expect(f.indexOf('roughnessFactor = mix')).toBeLessThan(f.indexOf('totalEmissiveRadiance += fLuz'));
+    // apartamento falso e cortina: o raio da câmera entra na janela
+    expect(f).toContain('vec3 fVisao = normalize(vFachadaMundo - cameraPosition)');
+    expect(f).toContain('float fCortina');
     expect((shader.uniforms as Record<string, unknown>).uFachadaNoite).toBe(noite);
   });
 });
