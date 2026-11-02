@@ -107,7 +107,8 @@ export function filaOverpass(fazer: (consulta: string, tempoMs: number) => Promi
           motivo = `Overpass respondeu ${r.status}`;
           if (r.status !== 429 && r.status < 500) throw new Error(motivo);
         } catch (e) {
-          if ((e as Error).message?.startsWith('Overpass respondeu 4')) throw e;
+          // consulta errada (4xx) não melhora repetindo; e quem já esperou o tempo todo não espera de novo
+          if ((e as Error).message?.startsWith('Overpass respondeu 4') || (e as Error).name === 'TimeoutError') throw e;
           motivo = (e as Error).message;
         }
         if (tentativa >= esperas.length) throw new Error(motivo);

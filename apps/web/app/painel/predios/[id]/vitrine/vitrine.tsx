@@ -854,9 +854,7 @@ export function Vitrine({
           setSeparados(a.ligado);
           break;
         case 'visao_geral':
-          setVista(null);
-          setInterior(null);
-          viewer.current?.visaoGeral();
+          visaoGeral();
           break;
         case 'som':
           void viewer.current?.definirSom(a.ligado);
@@ -872,6 +870,14 @@ export function Vitrine({
     if (a.focar) voar(a.focar);
   };
 
+  // volta ao prédio inteiro de cima (botão, duplo toque no 3D e comando "visão geral")
+  function visaoGeral() {
+    setVista(null);
+    setInterior(null);
+    viewer.current?.visaoGeral();
+  }
+  const irPara = (id: string) => document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+
   return (
     <div className="grid gap-6 lg:grid-cols-[1fr_340px] lg:items-start">
       {/* camada por cima da câmera no AR (o navegador a mostra em tela cheia durante a sessão) */}
@@ -883,6 +889,7 @@ export function Vitrine({
       </div>
       <div
         data-testid="vitrine-3d"
+        onDoubleClick={() => modo === 'orbita' && visaoGeral()}
         data-estado={estado}
         data-modo={modo}
         data-corte={andarCorte || 'nenhum'}
@@ -959,6 +966,25 @@ export function Vitrine({
                 Sair do apartamento
               </button>
             </div>
+          </div>
+        )}
+        {estado === 'pronto' && !mostrarGiro && (
+          // barra de horário em cima do 3D, como nos estandes interativos: arrastar muda sol, sombras e luzes
+          <div className="pointer-events-none absolute inset-x-0 top-3 flex justify-center px-28">
+            <label className="pointer-events-auto flex items-center gap-2 rounded-full bg-black/55 px-3 py-1.5 text-xs text-white">
+              <span className="font-semibold tabular-nums" data-testid="hora-topo">
+                {horaLegivel(horaSol)}
+              </span>
+              <input aria-label="Horário do dia" type="range" min={5} max={22} step={0.25} value={horaSol} onChange={(e) => setHoraSol(Number(e.target.value))} className="w-20 accent-white sm:w-36" />
+            </label>
+          </div>
+        )}
+        {estado === 'pronto' && modo !== 'primeira-pessoa' && !mostrarGiro && (
+          <div className="absolute bottom-2 left-2 grid justify-items-start gap-1">
+            <button type="button" onClick={visaoGeral} className="min-h-9 rounded-full bg-white/90 px-3 text-xs font-semibold text-slate-900 shadow hover:bg-white">
+              Visão geral
+            </button>
+            <span className="rounded bg-black/45 px-1.5 py-0.5 text-[10px] text-white/90">Imagens meramente ilustrativas</span>
           </div>
         )}
         {apresentando && <Apresentacao unidade={unidadesAtuais.find((u) => u.id === vitrineDaVez) ?? null} nomeAndar={(n) => nomeAndar.get(n) ?? `${n}º andar`} />}
@@ -1174,6 +1200,17 @@ export function Vitrine({
             <VisitaEmGrupo url={salaUrl} viewer={viewer} pronto={estado === 'pronto'} />
           </Cartao>
         )}
+        <nav aria-label="Seções da Vitrine" data-testid="secoes" className="flex flex-wrap gap-2">
+          {[
+            ['secao-unidades', 'Unidades'],
+            ...(itensLazer.length ? [['secao-lazer', 'Áreas comuns']] : []),
+            ['secao-vista', 'Vista e horário'],
+          ].map(([id, rotulo]) => (
+            <button key={id} type="button" onClick={() => irPara(id!)} className="min-h-10 rounded-full border border-borda bg-superficie px-4 text-sm font-medium hover:bg-fundo">
+              {rotulo}
+            </button>
+          ))}
+        </nav>
         <Cartao titulo={`Missões · ${missoes.size} de ${MISSOES.length}`}>
           <ul className="grid gap-2 text-sm" data-testid="missoes" data-feitas={missoes.size}>
             {MISSOES.map((m) => (
@@ -1268,7 +1305,7 @@ export function Vitrine({
           </div>
         </Cartao>
 
-        <Cartao titulo="Unidades">
+        <Cartao titulo="Unidades" id="secao-unidades">
           <label htmlFor="busca-unidade" className="mb-2 grid gap-1 text-sm">
             <span className="sr-only">Buscar unidade pelo número</span>
             <input
@@ -1332,6 +1369,7 @@ export function Vitrine({
           </Cartao>
         )}
 
+        <div id="secao-lazer" className="scroll-mt-4" />
         <CartaoLazer
           itens={itensLazer}
           pronto={estado === 'pronto'}
@@ -1351,7 +1389,7 @@ export function Vitrine({
           aoRemover={(id) => void removerPontoLazer(id)}
           erro={erroLazer}
         />
-        <Cartao titulo="Vista">
+        <Cartao titulo="Vista" id="secao-vista">
           <div className="grid gap-4 text-sm">
             <p data-testid="aviso-entorno" className="text-suave">
               {entorno.tipo === 'carregando' && 'Carregando os prédios reais em volta…'}
