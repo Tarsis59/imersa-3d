@@ -320,3 +320,16 @@ describe('editar e pedir por texto (Plano 11e, itens 22 e 23)', () => {
   });
 });
 
+describe('medida do fluxo (Plano 11f)', () => {
+  it('resumo das montagens: total, prontas, avisos, falhas, tempo e etapas', async () => {
+    const r = await req('GET', '/montagens/resumo', undefined, gestao);
+    expect(r.status).toBe(200);
+    expect(r.json.total).toBeGreaterThan(5);
+    expect(r.json.prontas + r.json.comAvisos + r.json.falhas).toBeLessThanOrEqual(r.json.total);
+    expect(r.json.medianaMs).toBeGreaterThanOrEqual(0);
+    expect(r.json.etapas.predio.feitas).toBeGreaterThan(0);
+    expect(Object.keys(r.json.etapas).sort()).toEqual(['arquivos', 'cidade', 'lazer', 'local', 'pontos', 'predio', 'texto']);
+    expect((await req('GET', '/montagens/resumo', undefined, consultora)).status).toBe(403);
+  });
+});
+

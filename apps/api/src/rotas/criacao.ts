@@ -155,6 +155,36 @@ export function rotasCriacao(app: FastifyInstance, { pool, exigir, mapa }: Depen
     return reply.status(202).send({ id, estado: 'montando' });
   });
 
+  /** Medida do fluxo (Plano 11f): quantas montagens deram certo, o tempo do envio ao 3D pronto e as falhas por etapa. */
+  app.get('/montagens/resumo', async (req) => {
+    const s = await exigir(req, 'projeto:criar');
+    return withTenant(pool, ctx(s), async (c) => {
+      const t = (
+        await c.query<{ total: number; prontas: number; com_avisos: number; falhas: number; mediana_ms: number | null }>(
+          `SELECT count(*)::int AS total, count(*) FILTER (WHERE estado = 'pronta')::int AS prontas,
+                  count(*) FILTER (WHERE estado = 'pronta_com_avisos')::int AS com_avisos, count(*) FILTER (WHERE estado = 'falhou')::int AS falhas,
+                  percentile_cont(0.5) WITHIN GROUP (ORDER BY extract(epoch FROM concluida_em - iniciada_em) * 1000) AS mediana_ms
+             FROM montagens WHERE iniciada_em > now() - interval '90 days'`,
+        )
+      ).rows[0]!;
+      const etapas = (
+        await c.query<{ id: string; feitas: number; avisos: number; falhas: number; media_ms: number | null }>(
+          `SELECT e->>'id' AS id, count(*) FILTER (WHERE e->>'estado' = 'feita')::int AS feitas, count(*) FILTER (WHERE e->>'estado' = 'aviso')::int AS avisos,
+                  count(*) FILTER (WHERE e->>'estado' = 'falhou')::int AS falhas, avg((e->>'ms')::numeric)::float8 AS media_ms
+             FROM montagens m, jsonb_array_elements(m.etapas) e WHERE m.iniciada_em > now() - interval '90 days' GROUP BY 1`,
+        )
+      ).rows;
+      return {
+        total: t.total,
+        prontas: t.prontas,
+        comAvisos: t.com_avisos,
+        falhas: t.falhas,
+        medianaMs: t.mediana_ms === null ? null : Math.round(t.mediana_ms),
+        etapas: Object.fromEntries(etapas.map((e) => [e.id, { feitas: e.feitas, avisos: e.avisos, falhas: e.falhas, mediaMs: e.media_ms === null ? null : Math.round(e.media_ms) }])),
+      };
+    });
+  });
+
   app.get('/montagens/:id', async (req) => {
     const s = await exigir(req, 'projeto:ler');
     const { id } = IdParam.parse(req.params);

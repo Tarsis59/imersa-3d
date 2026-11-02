@@ -1,6 +1,6 @@
 import { Aviso, Cartao } from '@/components/ui';
 import { apiNaPagina } from '@/lib/sessao';
-import { ehGestao, type Me } from '@/lib/tipos';
+import { ehGestao, ROTULO_ETAPA, type IdEtapa, type Me } from '@/lib/tipos';
 
 interface Resumo {
   dias: number;
@@ -36,6 +36,9 @@ export default async function PaginaTelemetria() {
   if (r.status === 403) return <Aviso>Ative a verificação em duas etapas (Segurança) para ver o desempenho do 3D.</Aviso>;
   if (r.status !== 200) return <Aviso tipo="erro">Não foi possível carregar o desempenho agora.</Aviso>;
   const d = r.dados;
+  // fluxo da criação integrada (Plano 11f): do envio ao 3D pronto
+  const mt = await apiNaPagina<{ total: number; prontas: number; comAvisos: number; falhas: number; medianaMs: number | null; etapas: Record<IdEtapa, { feitas: number; avisos: number; falhas: number; mediaMs: number | null }> }>('/montagens/resumo', volta);
+  const m = mt.status === 200 ? mt.dados : null;
   return (
     <>
       <div className="grid gap-1">
@@ -62,6 +65,28 @@ export default async function PaginaTelemetria() {
           />
         </div>
       </Cartao>
+      {m && m.total > 0 && (
+        <Cartao titulo="Criação integrada (últimos 90 dias)">
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3" data-testid="telemetria-montagens">
+            <Numero rotulo="Empreendimentos montados" valor={String(m.total)} detalhe={`${m.prontas} prontos, ${m.comAvisos} com avisos, ${m.falhas} com falha`} />
+            <Numero rotulo="Do envio ao 3D pronto" valor={m.medianaMs === null ? '—' : `${(m.medianaMs / 1000).toFixed(1)} s`} detalhe="mediana (sem o 3D real das fotos, que roda na fila da GPU)" />
+            <Numero rotulo="Taxa de sucesso" valor={`${Math.round(((m.prontas + m.comAvisos) / m.total) * 100)}%`} detalhe="prontos, com ou sem aviso" />
+          </div>
+          <ul className="mt-4 grid gap-1 text-sm">
+            {(Object.keys(ROTULO_ETAPA) as IdEtapa[]).map((id) => {
+              const e = m.etapas[id];
+              return e ? (
+                <li key={id} className="flex flex-wrap justify-between gap-2">
+                  <span>{ROTULO_ETAPA[id]}</span>
+                  <span className="text-suave">
+                    {e.feitas} feitas · {e.avisos} avisos · {e.falhas} falhas{e.mediaMs !== null ? ` · ${(e.mediaMs / 1000).toFixed(1)} s` : ''}
+                  </span>
+                </li>
+              ) : null;
+            })}
+          </ul>
+        </Cartao>
+      )}
     </>
   );
 }
