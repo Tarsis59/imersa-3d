@@ -51,6 +51,10 @@ test('vitrine 3D: volumes do prédio, filtros, favoritos, voo até a unidade, co
   // entorno: prédios reais da Av. Paulista em volta (do OSM), com a atribuição exigida pela licença
   await expect(vitrine).toHaveAttribute('data-entorno', /^\d+$/, { timeout: 30_000 });
   expect(Number(await vitrine.getAttribute('data-entorno'))).toBeGreaterThan(300);
+  // carros nas ruas do entorno (Plano 12a, item 10) e nuvens baixas (item 15): o atributo existe sempre; a
+  // contagem de carros pode cair a 0 se a qualidade adaptativa descer para "baixo" num CI lento
+  await expect(vitrine).toHaveAttribute('data-carros', /^\d+$/, { timeout: 30_000 });
+  await expect(vitrine).toHaveAttribute('data-nuvens', /^(sim|nao)$/, { timeout: 30_000 });
   await expect(page.getByRole('link', { name: /OpenStreetMap/ })).toHaveAttribute('href', 'https://www.openstreetmap.org/copyright');
   await expect(page.getByTestId('aviso-entorno')).toContainText('prédios reais em volta');
 

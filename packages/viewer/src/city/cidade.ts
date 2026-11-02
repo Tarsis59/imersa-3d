@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { balancarComVento } from '../ambiente/vegetacao';
+import { sombraDeNuvens } from '../ambiente/nuvens';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { lonLatToLocal, type LonLat } from '../geo/project';
 import type { Caixa } from '../units/tipos';
@@ -288,6 +289,7 @@ export function criarCidade(
   const material = (cor: number, rugosidade: number, extra: Partial<THREE.MeshStandardMaterialParameters> = {}) => {
     const m = new THREE.MeshStandardMaterial({ color: cor, roughness: rugosidade, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1, ...extra });
     preparar(m);
+    sombraDeNuvens(m); // chão, asfalto, calçada, verde e água: a sombra das nuvens passa por cima (Plano 12a, item 15)
     materiais.push(m);
     return m;
   };

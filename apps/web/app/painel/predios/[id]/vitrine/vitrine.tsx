@@ -942,6 +942,8 @@ export function Vitrine({
         data-etiquetas={telemetria?.etiquetas ?? 0}
         data-rota={telemetria?.rota ?? 0}
         data-lotes={telemetria?.lotes ?? 0}
+        data-carros={telemetria?.carros ?? 0}
+        data-nuvens={telemetria?.nuvens ? 'sim' : 'nao'}
         data-terceira={telemetria?.terceiraPessoa ? 'sim' : 'nao'}
         data-boneco={telemetria?.boneco ?? ''}
         data-no-ar={telemetria?.noAr ? 'sim' : 'nao'}

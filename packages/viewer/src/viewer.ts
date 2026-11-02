@@ -16,6 +16,7 @@ import { buildCityMesh } from './city/cityMesh';
 import { injetarFachada } from './city/fachadaCidade';
 import { entornoParaLocal, type Entorno } from './city/entorno';
 import { criarCidade, fita, paraModelo, terrenoDoRelevo, type CidadeCompleta } from './city/cidade';
+import { criarCarros, pistasDeVias, planejarCarros, CARROS_POR_NIVEL, type Carros } from './city/carros';
 import { criarLotes, type LoteViewer, type LotesNoChao } from './city/lotes';
 import { montarDecorado, planejarDecorado, type Decorado, type EstiloDecorado } from './interior/decorado';
 import { criarQuadros, planejarQuadros, type FotoNoLugar, type QuadrosDeFoto } from './ambiente/fotos';
@@ -36,6 +37,7 @@ import type { LuzDaFoto } from './captura/fotorrealista';
 import { caminhoRetangular, criarPessoas, MORADORES_POR_NIVEL, planejarMoradores, type Pessoas } from './ambiente/pessoas';
 import { criarAmbienteSonoro } from './ambiente/som';
 import { criarMarcadoresLazer, placa, poseParaLazer, type MarcadoresLazer, type PontoLazer } from './ambiente/lazer';
+import { criarNuvens, sombraDeNuvens, SOMBRA_NUVENS, NUVENS_POR_NIVEL } from './ambiente/nuvens';
 import { iniciarAr, iniciarVr, type ContextoXr, type SessaoXr, type TipoXr } from './xr/sessao';
 
 export type ModoCamera = 'orbita' | 'primeira-pessoa';
@@ -99,6 +101,10 @@ export interface EstadoViewer {
   /** Pulos dados desde que abriu (num quadro lento o pulo inteiro cabe nele, então só noAr não basta para conferir). */
   pulos: number;
   correndo: boolean;
+  /** Carros andando pelas ruas do entorno (0 no aparelho fraco, sem entorno ou "menos movimento"). */
+  carros: number;
+  /** Camada de nuvens baixas, com sombra no chão (Plano 12a, item 15; falsa no aparelho fraco). */
+  nuvens: boolean;
 }
 
 /** Resumo da visita para a telemetria. */
@@ -366,7 +372,14 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
   chao.rotation.x = -Math.PI / 2;
   chao.receiveShadow = true;
   prepararMaterial(chao.material);
+  sombraDeNuvens(chao.material); // Plano 12a, item 15
   cena.add(chao);
+
+  // nuvens baixas, com sombra no chão (Plano 12a, item 15): desligadas no aparelho fraco
+  const nuvens = criarNuvens((m) => prepararMaterial(m));
+  nuvens.definirNivel(qualidade.nivel.nome);
+  SOMBRA_NUVENS.ligada.value = NUVENS_POR_NIVEL[qualidade.nivel.nome] ? 1 : 0;
+  cena.add(nuvens.objeto);
 
   const pecas = new Map<string, PecaUnidade>();
   /** Além das peças sólidas e do chão, onde dá para pisar (lajes da fachada procedural). */
@@ -382,6 +395,8 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
   let cidade: THREE.Mesh | null = null;
   /** Chão com relevo, ruas, verde, água e árvores de rua (Plano 11b). */
   let cidadeCompleta: CidadeCompleta | null = null;
+  /** Carros andando pelas ruas do entorno (Plano 12a, item 10). */
+  let carros: Carros | null = null;
   let atribuicaoEntorno: string | null = null;
   // cor de cada prédio vem do vértice (acabamento real); janelas e laje no shader (ver city/fachadaCidade)
   const materialCidade = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.88, vertexColors: true });
@@ -1147,6 +1162,7 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
     if (luzNoturna !== antes && pecas.size) pintar();
     pos?.definirBrilho(luzNoturna);
     paisagismo?.definirNoite(luzNoturna);
+    carros?.definirNoite(luzNoturna); // faróis e lanternas só à noite (Plano 12a, item 10)
     (cena.background as THREE.Color).copy(atmosfera.horizonte);
     cena.fog?.color.copy(atmosfera.horizonte);
   }
@@ -1177,6 +1193,10 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
     for (const m of materiais) m.needsUpdate = true;
     pessoas?.definirQuantidade(MORADORES_POR_NIVEL[n.nome]);
     cidadeCompleta?.definirNivel(n.nome);
+    carros?.definirQuantidade(CARROS_POR_NIVEL[n.nome]); // Plano 12a, item 10: nenhum no aparelho fraco
+    nuvens.definirNivel(n.nome); // Plano 12a, item 15: desligadas no aparelho fraco
+    SOMBRA_NUVENS.ligada.value = NUVENS_POR_NIVEL[n.nome] ? 1 : 0;
+    marcadores?.definirNivel(n.nome); // Plano 12a, item 12: água simples no aparelho fraco
     ajustarPos(n);
   }
 
@@ -1382,6 +1402,8 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
       pulos,
       correndo,
       direcao: { x: direcaoCamera.x / (Math.hypot(direcaoCamera.x, direcaoCamera.z) || 1), z: direcaoCamera.z / (Math.hypot(direcaoCamera.x, direcaoCamera.z) || 1) },
+      carros: carros?.objeto.visible ? carros.contagem() : 0,
+      nuvens: nuvens.objeto.visible,
     });
   };
   renderer.setAnimationLoop((agora: number, frame?: XRFrame) => {
@@ -1508,9 +1530,13 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
       const yaw = Math.atan2(-(camera.position.x - corretoraPos.x), -(camera.position.z - corretoraPos.z));
       corretora.atualizar({ x: corretoraPos.x, y: 0, z: corretoraPos.z, yaw }, { distancia: 0, velocidade: 0, noAr: false, acenando: corretoraFalando ? 1 : 0 }, agora / 1000, menosMovimento);
     }
-    atmosfera.quadro(camera, config.qualidadeFixa || menosMovimento ? 0 : agora / 1000); // qualidade fixa = cena determinística (nuvens paradas)
-    VENTO.tempo.value = config.qualidadeFixa || menosMovimento ? 0 : agora / 1000; // copas com vento (paradas na cena de teste)
+    // qualidade fixa ou "menos movimento": cena determinística (nuvens do céu, vento, água, carros e nuvens baixas parados)
+    const tCena = config.qualidadeFixa || menosMovimento ? 0 : agora / 1000;
+    atmosfera.quadro(camera, tCena);
+    VENTO.tempo.value = tCena; // copas com vento e ondulação da água (Plano 12a, item 12)
     pessoas?.quadro(agora / 1000);
+    carros?.quadro(tCena); // Plano 12a, item 10: parados com "menos movimento"
+    nuvens.quadro(camera, tCena);
     som.quadro(camera, agora / 1000, luzNoturna < 0.5);
     csm.update();
     desenhar();
@@ -1704,12 +1730,13 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
     definirLazer(pontos) {
       if (marcadores) {
         cena.remove(marcadores.objeto);
+        for (const m of marcadores.materiais) materiais.delete(m);
         marcadores.destruir();
         marcadores = null;
       }
       pontosLazer = [...pontos];
       if (!pontos.length) return;
-      marcadores = criarMarcadoresLazer(pontos);
+      marcadores = criarMarcadoresLazer(pontos, (m) => prepararMaterial(m), qualidade.nivel.nome);
       cena.add(marcadores.objeto);
       som.definirFontes({ arvores: arvoresDoLote, agua: aguaDoLazer() }); // a água da piscina entra no som
     },
@@ -1916,6 +1943,12 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
         cidadeCompleta.destruir();
         cidadeCompleta = null;
       }
+      if (carros) {
+        cena.remove(carros.objeto);
+        for (const m of carros.materiais) materiais.delete(m);
+        carros.destruir();
+        carros = null;
+      }
       chao.position.y = 0;
       bloqueadoCidade = () => false;
       atribuicaoEntorno = null;
@@ -1948,6 +1981,17 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
         pisosExtras.push(...cidadeCompleta.pisos);
         // além do relevo, o chão do horizonte fica embaixo de tudo (sem cobrir os vales)
         if (cidadeCompleta.terreno.meioLado > 0) chao.position.y = cidadeCompleta.terreno.horizonte;
+      }
+      // carros andando pelas ruas do OSM (Plano 12a, item 10): fora das cenas de teste, que precisam sair sempre iguais
+      if (entorno.vias?.length && !config.qualidadeFixa) {
+        const viasLocais = entorno.vias.map((v) => ({ tipo: v.tipo, largura: v.larguraM, pontos: v.pontos.map((p) => paraModelo(lonLatToLocal({ lon: p[0], lat: p[1] }, entorno.centro), rotacao)) }));
+        const pistas = pistasDeVias(viasLocais);
+        if (pistas.length) {
+          carros = criarCarros(pistas, planejarCarros(pistas, CARROS_POR_NIVEL.alto), (m) => prepararMaterial(m));
+          carros.definirNoite(luzNoturna);
+          carros.definirQuantidade(CARROS_POR_NIVEL[qualidade.nivel.nome]);
+          cena.add(carros.objeto);
+        }
       }
       if (predios.length === 0) {
         atribuicaoEntorno = entorno.atribuicao;
@@ -2091,6 +2135,8 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
       paisagismo?.destruir();
       marcadores?.destruir();
       pessoas?.destruir();
+      carros?.destruir();
+      nuvens.destruir();
       som.destruir();
       cena.traverse((o) => {
         if (o instanceof THREE.Mesh) o.geometry.dispose();
