@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { calcularShiftVertical, LIMITE_PITCH_VERTICAIS_RETAS_RAD, pitchDoOlhar, verticaisRetasAtiva } from './verticaisRetas';
+import { calcularShiftVertical, limparShiftDeCaptura, LIMITE_PITCH_VERTICAIS_RETAS_RAD, pitchDoOlhar, verticaisRetasAtiva } from './verticaisRetas';
 
 describe('quando a correção liga (Plano 12a, item 13)', () => {
   it('só na órbita, nunca na primeira pessoa', () => {
@@ -87,5 +87,51 @@ describe('cálculo do deslocamento (shift) do frustum', () => {
 
   it('no limite seguro de pitch (35°), o deslocamento não passa de 1 altura de quadro (câmera de 50°)', () => {
     expect(Math.abs(calcularShiftVertical(LIMITE_PITCH_VERTICAIS_RETAS_RAD, 50))).toBeLessThan(1);
+  });
+});
+
+describe('captura com pose própria não herda o shift da órbita (Plano 12c, regressão do giro 360°)', () => {
+  it('sem limpar: um shift herdado desloca o alvo da nova pose fora do centro do quadro', async () => {
+    const THREE = await import('three');
+    const fov = 50;
+    const w = 390;
+    const h = 844;
+    const camera = new THREE.PerspectiveCamera(fov, w / h, 0.1, 1000);
+    // a órbita deixou um shift aplicado (verticais retas, olhando para cima)
+    camera.position.set(0, 10, 20);
+    camera.lookAt(0, 0, 0);
+    camera.updateMatrixWorld();
+    camera.setViewOffset(w, h, 0, calcularShiftVertical(0.3, fov) * h, w, h);
+
+    // a captura (giro) reposiciona a câmera e aponta direto (sem nivelar) para um alvo novo
+    const alvo = new THREE.Vector3(5, 8, -12);
+    camera.position.set(0, 5, -30);
+    camera.lookAt(alvo);
+    camera.updateMatrixWorld();
+
+    const ndc = alvo.clone().project(camera);
+    expect(Math.abs(ndc.y)).toBeGreaterThan(0.01); // desalinhado: o alvo não cai no centro do quadro (shift vertical)
+  });
+
+  it('limparShiftDeCaptura: o alvo da nova pose volta a cair exatamente no centro do quadro', async () => {
+    const THREE = await import('three');
+    const fov = 50;
+    const w = 390;
+    const h = 844;
+    const camera = new THREE.PerspectiveCamera(fov, w / h, 0.1, 1000);
+    camera.position.set(0, 10, 20);
+    camera.lookAt(0, 0, 0);
+    camera.updateMatrixWorld();
+    camera.setViewOffset(w, h, 0, calcularShiftVertical(0.3, fov) * h, w, h);
+
+    const alvo = new THREE.Vector3(5, 8, -12);
+    camera.position.set(0, 5, -30);
+    camera.lookAt(alvo);
+    limparShiftDeCaptura(camera);
+    camera.updateMatrixWorld();
+
+    const ndc = alvo.clone().project(camera);
+    expect(ndc.x).toBeCloseTo(0, 5);
+    expect(ndc.y).toBeCloseTo(0, 5);
   });
 });

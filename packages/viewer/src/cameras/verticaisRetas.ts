@@ -32,6 +32,16 @@ export function calcularShiftVertical(pitchRad: number, fovVerticalGraus: number
   return -Math.tan(pitchRad) / (2 * Math.tan(meioFov));
 }
 
+/**
+ * Uma captura com pose própria (giro 360°, máscara de unidades) nunca pode herdar o shift das verticais retas:
+ * ela aponta direto (`lookAt`) para o alvo da captura, sem nivelar — um deslocamento vindo de antes (da órbita,
+ * de um pitch e quadro diferentes) desalinharia a imagem com a máscara (Plano 12c, regressão depois do item 13).
+ * Chamar sempre antes de reposicionar e renderizar uma câmera de captura que sai da órbita normal.
+ */
+export function limparShiftDeCaptura(camera: { clearViewOffset(): void }): void {
+  camera.clearViewOffset();
+}
+
 /** Pitch (rad) do olhar entre `camera` e `alvo`: positivo olhando para cima, negativo para baixo, 0 na horizontal. */
 export function pitchDoOlhar(posicao: { x: number; y: number; z: number }, alvo: { x: number; y: number; z: number }): number {
   const dx = alvo.x - posicao.x;

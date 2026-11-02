@@ -27,7 +27,7 @@ import { COR_UNIDADE, type Caixa, type StatusUnidade, type UnidadeViewer } from 
 import { planejarVoo, enquadrar, enquadrarDeCima, type Pose } from './cameras/voo';
 import { limitesZoom, distanciaDoZoom, zoomDaDistancia } from './cameras/zoom';
 import { passoPrimeiraPessoa, bloqueioPorCaixas, seguirPiso, rumoAoAlvo, yawPara, entradaDoControle, type Entrada, type EstadoPessoa, type OpcoesPasso, type Ponto2D } from './cameras/primeiraPessoa';
-import { calcularShiftVertical, pitchDoOlhar, verticaisRetasAtiva } from './cameras/verticaisRetas';
+import { calcularShiftVertical, limparShiftDeCaptura, pitchDoOlhar, verticaisRetasAtiva } from './cameras/verticaisRetas';
 import { QualidadeAdaptativa, type NivelQualidade } from './quality/adaptativa';
 import { criarCarregadorGltf, type Decodificadores } from './carregador';
 import { layoutMarca, textoDaMarca, type DadosMarca } from './captura/marca';
@@ -1384,6 +1384,9 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
     const distancia = inicial.posicao.distanceTo(inicial.alvo);
     const anguloInicial = Math.atan2(camera.position.x - centro.x, camera.position.z - centro.z);
     const guardada = { posicao: camera.position.clone(), alvo: orbita.target.clone() };
+    // a câmera do giro aponta direto para o centro (sem nivelar); um shift de verticais retas herdado da órbita
+    // (de outro pitch) desalinharia a imagem e a máscara (regressão 12c) — o próximo quadro normal recalcula o dele
+    limparShiftDeCaptura(camera);
 
     // máscara: sem antisserrilhado e sem conversão de cor (alvo linear), para cada pixel ter a cor-ID exata
     const alvoMascara = new THREE.WebGLRenderTarget(w, h);

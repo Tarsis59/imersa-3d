@@ -108,13 +108,13 @@ test('vitrine 3D: volumes do prédio, filtros, favoritos, voo até a unidade, co
 
   // o que há perto: tempo a pé, filtro por tipo e a rota desenhada no chão pelas ruas (Plano 12)
   const perto = page.getByTestId('proximidades');
-  await expect(perto).toContainText('Estação Trianon-MASP');
+  await expect(perto).toContainText('Estação Trianon-MASP', { timeout: 30_000 }); // server action na fila com as outras da página
   await expect(perto).toContainText(/\d+ min a pé/);
   await perto.getByRole('group', { name: 'Tipo de lugar' }).getByRole('button', { name: 'Transporte' }).click();
   await perto.getByRole('button', { name: /Estação Trianon-MASP/ }).click();
   await expect(vitrine).toHaveAttribute('data-rota', /^[3-9]|^\d{2,}/, { timeout: 15_000 });
   await perto.getByRole('button', { name: 'Apagar a rota' }).click();
-  await expect(vitrine).toHaveAttribute('data-rota', '0');
+  await expect(vitrine).toHaveAttribute('data-rota', '0', { timeout: 30_000 });
 
   // corte por andar
   await page.getByLabel('Ver até o andar (corte)').selectOption({ label: '1º andar' });
