@@ -91,6 +91,15 @@ describe('comandos da Vitrine (50 frases)', () => {
     expect(acao('mostre o 5 andar')).toBeUndefined();
   });
 
+  it('casa de bonecas (Plano 12c, item 1): com e sem o andar, e saindo do modo', () => {
+    const acao = (f: string) => interpretarComando(f).acoes.find((x) => x.tipo === 'casa_bonecas');
+    expect(acao('casa de bonecas do 5º andar')).toEqual({ tipo: 'casa_bonecas', ligado: true, andar: 5 });
+    expect(acao('mostra a casa de bonecas do 12 andar')).toEqual({ tipo: 'casa_bonecas', ligado: true, andar: 12 });
+    expect(acao('casa de bonecas')).toEqual({ tipo: 'casa_bonecas', ligado: true, andar: null });
+    expect(acao('sai da casa de bonecas')).toEqual({ tipo: 'casa_bonecas', ligado: false, andar: null });
+    expect(acao('tira a casa de bonecas')).toEqual({ tipo: 'casa_bonecas', ligado: false, andar: null });
+  });
+
   it('números por extenso', () => {
     expect(numeros('vinte e um andares')).toBe('21 andares');
     expect(numeros('novecentos mil')).toBe('900 mil');

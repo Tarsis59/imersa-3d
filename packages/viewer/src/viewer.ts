@@ -22,8 +22,9 @@ import { montarDecorado, planejarDecorado, type Decorado, type EstiloDecorado } 
 import { criarQuadros, planejarQuadros, type FotoNoLugar, type QuadrosDeFoto } from './ambiente/fotos';
 import { cameraAtrasDoOmbro, CORRETORA, criarBoneco, presetBoneco, type Boneco } from './cameras/boneco';
 import { alturaDoCorte, planoDeCorte } from './units/corte';
+import { paredesDoContorno, usarParedesDoModelo } from './units/casaDeBonecas';
 import { COR_UNIDADE, type Caixa, type StatusUnidade, type UnidadeViewer } from './units/tipos';
-import { planejarVoo, enquadrar, type Pose } from './cameras/voo';
+import { planejarVoo, enquadrar, enquadrarDeCima, type Pose } from './cameras/voo';
 import { limitesZoom, distanciaDoZoom, zoomDaDistancia } from './cameras/zoom';
 import { passoPrimeiraPessoa, bloqueioPorCaixas, seguirPiso, rumoAoAlvo, yawPara, entradaDoControle, type Entrada, type EstadoPessoa, type OpcoesPasso, type Ponto2D } from './cameras/primeiraPessoa';
 import { calcularShiftVertical, pitchDoOlhar, verticaisRetasAtiva } from './cameras/verticaisRetas';
@@ -95,6 +96,10 @@ export interface EstadoViewer {
   etiquetas: number;
   /** Vista explodida: 0 = andares juntos, 1 = separados (no meio da animação, entre os dois). */
   explosao: number;
+  /** Corte "casa de bonecas" (Plano 12c, item 1): andar em exposição; `null` = fora do modo. */
+  casaDeBonecas: number | null;
+  /** Planta 3D humanizada (Plano 12c, item 3): câmera ortográfica de cima, ligada ou não. */
+  planta: boolean;
   /** Corretora virtual na tela (e se está falando). */
   corretora: 'fora' | 'parada' | 'falando';
   /** Modo jogo: câmera atrás do boneco (terceira pessoa). */
@@ -151,6 +156,18 @@ export interface Viewer {
    * com as unidades pintadas pela situação. `false` junta de novo.
    */
   separarAndares(ligado: boolean): void;
+  /**
+   * Corte "casa de bonecas" (Plano 12c, item 1): tira a laje de cima do andar escolhido e troca o volume sólido
+   * de cada unidade pelas paredes dela (do contorno, sem planta nem BIM), pintadas pela situação; a câmera vai
+   * para uma vista 3/4 de cima do andar. `null` sai do modo. Devolve `false` se o andar não tem unidade no 3D.
+   */
+  casaDeBonecas(andar: number | null): boolean;
+  /**
+   * Planta 3D humanizada (Plano 12c, item 3): câmera ortográfica de cima sobre o pavimento mobiliado (o decorado
+   * de cada unidade), com marcadores numerados (código + situação) por cima. `null` volta à câmera normal.
+   * Devolve `false` se o andar não tem unidade no 3D.
+   */
+  plantaHumanizada(andar: number | null): boolean;
   /**
    * Rota a pé desenhada no chão, do empreendimento até um ponto próximo (Plano 12a, item 11): pontos [lon, lat] pelas
    * ruas; a câmera voa para enquadrar o caminho todo. `null` apaga. `false` sem o entorno carregado.
@@ -362,6 +379,10 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
   orbita.enableDamping = true;
   orbita.maxPolarAngle = Math.PI / 2 - 0.03;
 
+  // Planta 3D humanizada (Plano 12c, item 3): câmera ortográfica de cima, só enquanto o modo está ligado.
+  const cameraOrto = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 2000);
+  let usarCameraOrto = false;
+
   const csm = new CSM({
     camera,
     parent: cena,
@@ -404,6 +425,16 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
   let favoritos: ReadonlySet<string> = new Set();
   let selecionada: string | null = null;
   let corteY: number | null = null;
+  // Corte "casa de bonecas" (Plano 12c, item 1): andar em exposição, com as paredes geradas por cima das unidades.
+  let andarCasaDeBonecas: number | null = null;
+  let grupoCasaDeBonecas: THREE.Group | null = null;
+  let materiaisCasaDeBonecas: THREE.Material[] = [];
+  // Planta 3D humanizada (Plano 12c, item 3): andar mobiliado visto de cima pela câmera ortográfica.
+  let andarPlanta: number | null = null;
+  let grupoPlanta: THREE.Group | null = null;
+  let materiaisPlanta: THREE.Material[] = [];
+  /** Caixa do andar em exposição na planta: reaproveitada para reenquadrar a ortográfica quando a tela muda de tamanho. */
+  let caixaDaPlanta: Caixa | null = null;
   let bloqueado: OpcoesPasso['bloqueado'] = () => false;
   let bloqueadoCidade: OpcoesPasso['bloqueado'] = () => false;
   let cidade: THREE.Mesh | null = null;
@@ -1297,8 +1328,8 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
       .catch(() => erros++) // sem o acabamento, a imagem continua normal
       .finally(() => (carregandoPos = false));
   }
-  /** O quadro com o acabamento quando há; senão, o desenho direto. */
-  const desenhar = () => (pos && !renderer.xr.isPresenting ? pos.desenhar() : renderer.render(cena, camera));
+  /** O quadro com o acabamento quando há; senão, o desenho direto. Planta humanizada (12c-3): câmera ortográfica, sem o acabamento (vista simples, de cima). */
+  const desenhar = () => (usarCameraOrto ? renderer.render(cena, cameraOrto) : pos && !renderer.xr.isPresenting ? pos.desenhar() : renderer.render(cena, camera));
 
   // -------------------------------------------------------------- tamanho e laço
   const redimensionar = () => {
@@ -1313,6 +1344,8 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
     camera.updateProjectionMatrix();
     csm.updateFrustums();
     pos?.redimensionar(w, h, renderer.getPixelRatio());
+    // planta 3D humanizada (Plano 12c, item 3): a ortográfica reenquadra no novo formato de tela
+    if (usarCameraOrto && caixaDaPlanta) reenquadrarPlanta(caixaDaPlanta);
   };
   const observador = new ResizeObserver(redimensionar);
   observador.observe(canvas.parentElement ?? canvas);
@@ -1466,6 +1499,8 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
       decorado: decorado?.moveis ?? 0,
       outros: outros.size,
       explosao: Math.round(explosao.atual * 100) / 100,
+      casaDeBonecas: andarCasaDeBonecas,
+      planta: usarCameraOrto,
       etiquetas: rotulos.size,
       rota: rotaDesenhada?.userData.pontos ?? 0,
       lotes: loteamento?.centros.size ?? 0,
@@ -1637,6 +1672,97 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
     }
   }
 
+  /** Corte por andar de hoje ("Ver até o andar" e a casa de bonecas usam o mesmo plano de recorte). */
+  function aplicarCorte(andar: number | null): boolean {
+    const y = andar === null ? null : alturaDoCorte([...pecas.values()].map((p) => ({ andar: p.unidade.andar, caixa: p.caixa })), andar);
+    corteY = y;
+    const planos = y === null ? [] : [planoDeCorte(y + 0.01)];
+    planosCorte = planos;
+    for (const m of materiaisPredio) {
+      m.clippingPlanes = planos;
+      m.needsUpdate = true;
+    }
+    return andar === null || y !== null;
+  }
+
+  /** Marcador numerado (código + cor da situação) da planta humanizada: sempre de frente para a câmera. */
+  function marcadorUnidade(codigo: string, status: StatusUnidade): THREE.Sprite {
+    const escala = 2;
+    const dim = 64 * escala;
+    const tela = document.createElement('canvas');
+    tela.width = dim;
+    tela.height = dim;
+    const ctx = tela.getContext('2d')!;
+    ctx.fillStyle = `#${COR_UNIDADE[status].toString(16).padStart(6, '0')}`;
+    ctx.beginPath();
+    ctx.arc(dim / 2, dim / 2, dim / 2 - 4 * escala, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(15, 23, 42, 0.6)';
+    ctx.lineWidth = 2 * escala;
+    ctx.stroke();
+    ctx.fillStyle = '#ffffff';
+    ctx.font = `700 ${18 * escala}px system-ui, sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(codigo, dim / 2, dim / 2 + escala);
+    const textura = new THREE.CanvasTexture(tela);
+    textura.colorSpace = THREE.SRGBColorSpace;
+    const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: textura, depthTest: false, transparent: true }));
+    sprite.scale.set(1.5, 1.5, 1);
+    sprite.renderOrder = 10;
+    return sprite;
+  }
+
+  /** Tira o grupo da casa de bonecas de hoje e devolve a visibilidade do volume sólido das unidades dele. */
+  function limparCasaDeBonecas(): void {
+    if (andarCasaDeBonecas !== null) for (const p of pecas.values()) if (p.unidade.andar === andarCasaDeBonecas) p.malha.visible = true;
+    if (grupoCasaDeBonecas) {
+      cena.remove(grupoCasaDeBonecas);
+      grupoCasaDeBonecas.traverse((o) => {
+        if (o instanceof THREE.Mesh) o.geometry.dispose();
+      });
+      for (const m of materiaisCasaDeBonecas) m.dispose();
+    }
+    grupoCasaDeBonecas = null;
+    materiaisCasaDeBonecas = [];
+    andarCasaDeBonecas = null;
+  }
+
+  /** Tira o grupo da planta humanizada de hoje e devolve a visibilidade do volume sólido das unidades dele. */
+  function limparPlanta(): void {
+    if (andarPlanta !== null) for (const p of pecas.values()) if (p.unidade.andar === andarPlanta) p.malha.visible = true;
+    if (grupoPlanta) {
+      cena.remove(grupoPlanta);
+      grupoPlanta.traverse((o) => {
+        if (o instanceof THREE.Mesh) o.geometry.dispose();
+      });
+      for (const m of materiaisPlanta) {
+        if (m instanceof THREE.SpriteMaterial) m.map?.dispose();
+        m.dispose();
+      }
+    }
+    grupoPlanta = null;
+    materiaisPlanta = [];
+    andarPlanta = null;
+    caixaDaPlanta = null;
+  }
+
+  /** Reenquadra a câmera ortográfica da planta (chamado ao ligar e de novo a cada redimensionamento da tela). */
+  function reenquadrarPlanta(caixaAndar: Caixa): void {
+    const aspecto = camera.aspect || 1;
+    const e = enquadrarDeCima(caixaAndar, aspecto);
+    cameraOrto.position.copy(e.posicao);
+    cameraOrto.up.set(0, 0, -1);
+    cameraOrto.lookAt(e.alvo);
+    cameraOrto.left = -e.meiaAlturaMundo * aspecto;
+    cameraOrto.right = e.meiaAlturaMundo * aspecto;
+    cameraOrto.top = e.meiaAlturaMundo;
+    cameraOrto.bottom = -e.meiaAlturaMundo;
+    cameraOrto.near = 0.1;
+    cameraOrto.far = e.posicao.y - e.alvo.y + 50;
+    cameraOrto.updateProjectionMatrix();
+  }
+
   const pronto = (config.modeloUrl ? montarModelo(config.modeloUrl) : Promise.resolve(montarVolumes())).then(() => {
     pintar();
     enquadrarPredio();
@@ -1665,17 +1791,7 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
       pintar();
       return true;
     },
-    cortarNoAndar(andar) {
-      const y = andar === null ? null : alturaDoCorte([...pecas.values()].map((p) => ({ andar: p.unidade.andar, caixa: p.caixa })), andar);
-      corteY = y;
-      const planos = y === null ? [] : [planoDeCorte(y + 0.01)];
-      planosCorte = planos;
-      for (const m of materiaisPredio) {
-        m.clippingPlanes = planos;
-        m.needsUpdate = true;
-      }
-      return andar === null || y !== null;
-    },
+    cortarNoAndar: aplicarCorte,
     definirLotes(lotes, centro) {
       if (loteamento) {
         loteamento.objeto.removeFromParent();
@@ -1762,6 +1878,101 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
     separarAndares(ligado) {
       if (ligado && modo !== 'orbita') definirModo('orbita');
       explosao.alvo = ligado ? 1 : 0;
+    },
+    casaDeBonecas(andar) {
+      limparCasaDeBonecas();
+      if (andar === null) {
+        aplicarCorte(null);
+        return true;
+      }
+      const doAndar = [...pecas.values()].filter((p) => p.unidade.andar === andar);
+      if (!doAndar.length) return false;
+      aplicarCorte(andar); // tira a laje de cima do andar escolhido (também esconde as paredes/laje do GLB acima: elas entram nos materiais do prédio)
+      andarCasaDeBonecas = andar;
+      // prédio com modelo BIM: as paredes já são de verdade (vieram do IFC) e cada unidade já pinta pela situação
+      // sozinha (pintar() de sempre); só falta a câmera. Sem modelo (volumes), gera as paredes do contorno.
+      if (!usarParedesDoModelo(solidos.length > 0)) {
+        const grupo = new THREE.Group();
+        grupo.name = 'casa-de-bonecas';
+        const materiaisNovos: THREE.Material[] = [];
+        for (const p of doAndar) {
+          p.malha.visible = false; // o volume sólido some; só as paredes ficam
+          const cor = COR_UNIDADE[p.unidade.status];
+          for (const parede of paredesDoContorno(p.caixa)) {
+            const mat = new THREE.MeshStandardMaterial({ color: cor, roughness: 0.9, transparent: parede.translucida, opacity: parede.translucida ? 0.22 : 1 });
+            prepararMaterial(mat);
+            materiaisNovos.push(mat);
+            const c = parede.caixa;
+            const malha = new THREE.Mesh(new THREE.BoxGeometry(c.maxX - c.minX, c.maxY - c.minY, c.maxZ - c.minZ), mat);
+            malha.position.set((c.minX + c.maxX) / 2, (c.minY + c.maxY) / 2, (c.minZ + c.maxZ) / 2);
+            malha.castShadow = !parede.translucida;
+            malha.receiveShadow = true;
+            grupo.add(malha);
+          }
+        }
+        cena.add(grupo);
+        grupoCasaDeBonecas = grupo;
+        materiaisCasaDeBonecas = materiaisNovos;
+      }
+      // câmera: vista 3/4 de cima do andar (o vídeo 3 mostra assim, e as unidades não se escondem umas às outras)
+      if (modo !== 'orbita') definirModo('orbita');
+      orbita.enabled = false;
+      const caixaAndar: Caixa = {
+        minX: Math.min(...doAndar.map((p) => p.caixa.minX)),
+        maxX: Math.max(...doAndar.map((p) => p.caixa.maxX)),
+        minY: Math.min(...doAndar.map((p) => p.caixa.minY)),
+        maxY: Math.max(...doAndar.map((p) => p.caixa.maxY)),
+        minZ: Math.min(...doAndar.map((p) => p.caixa.minZ)),
+        maxZ: Math.max(...doAndar.map((p) => p.caixa.maxZ)),
+      };
+      voo = { trajeto: planejarVoo({ posicao: camera.position.clone(), alvo: orbita.target.clone() }, enquadrar(caixaAndar, camera.fov, camera.aspect || 1, 62, 1.25)), inicio: performance.now() };
+      ultimoAviso = 0;
+      return true;
+    },
+    plantaHumanizada(andar) {
+      limparPlanta();
+      usarCameraOrto = false;
+      if (andar === null) {
+        orbita.enabled = modo === 'orbita';
+        return true;
+      }
+      const doAndar = [...pecas.values()].filter((p) => p.unidade.andar === andar);
+      if (!doAndar.length) return false;
+      if (modo !== 'orbita') definirModo('orbita');
+      andarPlanta = andar;
+      const grupo = new THREE.Group();
+      grupo.name = 'planta-humanizada';
+      const materiaisNovos: THREE.Material[] = [];
+      for (const p of doAndar) {
+        p.malha.visible = false; // o volume sólido some; o pavimento mobiliado fica no lugar
+        const face = faceDaUnidade(p);
+        const plano = planejarDecorado(p.caixa, p.unidade.quartos, face ? { x: face.normal.x, z: face.normal.z } : null, config.estiloDecorado ?? 'moderno');
+        const dec = montarDecorado(plano, (m) => {
+          prepararMaterial(m);
+          materiaisNovos.push(m);
+        });
+        grupo.add(dec.objeto);
+        const marcador = marcadorUnidade(p.unidade.codigo, p.unidade.status);
+        marcador.position.set((p.caixa.minX + p.caixa.maxX) / 2, p.caixa.maxY + 1, (p.caixa.minZ + p.caixa.maxZ) / 2);
+        materiaisNovos.push(marcador.material);
+        grupo.add(marcador);
+      }
+      cena.add(grupo);
+      grupoPlanta = grupo;
+      materiaisPlanta = materiaisNovos;
+      const caixaAndar: Caixa = {
+        minX: Math.min(...doAndar.map((p) => p.caixa.minX)),
+        maxX: Math.max(...doAndar.map((p) => p.caixa.maxX)),
+        minY: Math.min(...doAndar.map((p) => p.caixa.minY)),
+        maxY: Math.max(...doAndar.map((p) => p.caixa.maxY)),
+        minZ: Math.min(...doAndar.map((p) => p.caixa.minZ)),
+        maxZ: Math.max(...doAndar.map((p) => p.caixa.maxZ)),
+      };
+      caixaDaPlanta = caixaAndar;
+      reenquadrarPlanta(caixaAndar);
+      orbita.enabled = false;
+      usarCameraOrto = true;
+      return true;
     },
     andaresComCorte() {
       return [...new Set([...pecas.values()].map((p) => p.unidade.andar))].sort((a, b) => a - b);
@@ -2202,6 +2413,8 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
       return exportarUsdz(montarMaquete([raizPredio, paisagismo?.objeto].filter((o): o is THREE.Object3D => o != null)));
     },
     destruir() {
+      limparCasaDeBonecas();
+      limparPlanta();
       boneco?.destruir();
       destruido = true;
       void imersiva?.encerrar();

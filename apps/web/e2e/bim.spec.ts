@@ -48,4 +48,11 @@ test('BIM: IFC real → 3D otimizado com ambientes → vínculo automático com 
   await page.getByTestId('lista-vitrine').getByRole('button', { name: /^4/ }).click();
   await expect(page.getByRole('heading', { name: 'Unidade 4' })).toBeVisible();
   await page.screenshot({ path: test.info().outputPath('vitrine-bim.png') });
+
+  // casa de bonecas (Plano 12c, item 1): prédio com modelo BIM usa as paredes reais do IFC (não as geradas)
+  await page.getByLabel('Ver até o andar (corte)').selectOption({ label: '1º andar' });
+  await page.getByRole('button', { name: 'Casa de bonecas' }).click();
+  await expect(vitrine).toHaveAttribute('data-casa-bonecas', '1', { timeout: 15_000 });
+  await page.getByRole('button', { name: 'Sair da casa de bonecas' }).click();
+  await expect(vitrine).toHaveAttribute('data-casa-bonecas', '', { timeout: 15_000 });
 });

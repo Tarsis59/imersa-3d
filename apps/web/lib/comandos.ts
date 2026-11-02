@@ -23,7 +23,9 @@ export type AcaoComando =
   | { tipo: 'modo'; modo: 'orbita' | 'primeira-pessoa' }
   | { tipo: 'visao_geral' }
   | { tipo: 'som'; ligado: boolean }
-  | { tipo: 'separar_andares'; ligado: boolean };
+  | { tipo: 'separar_andares'; ligado: boolean }
+  /** Corte "casa de bonecas" (Plano 12c, item 1): `andar: null` usa o andar já escolhido na tela. */
+  | { tipo: 'casa_bonecas'; ligado: boolean; andar: number | null };
 
 export interface Interpretacao {
   acoes: AcaoComando[];
@@ -221,6 +223,16 @@ export function interpretarComando(texto: string): Interpretacao {
   } else if (/\b(tira(r)?|sem|remove(r)?) (o )?corte\b|\bpredio (todo|inteiro)\b/.test(n)) {
     acoes.push({ tipo: 'corte', andar: null });
     partes.push('prédio inteiro');
+  }
+
+  // corte "casa de bonecas" (Plano 12c, item 1): "casa de bonecas do 5º andar", "sai da casa de bonecas"
+  if (/\b(tira(r)?|sai(r)?|fecha(r)?|sem)\b.{0,6}casa de bonecas\b/.test(n)) {
+    acoes.push({ tipo: 'casa_bonecas', ligado: false, andar: null });
+    partes.push('sem casa de bonecas');
+  } else if (/\bcasa de bonecas\b/.test(n)) {
+    const ca = n.match(/(\d{1,3})\s*(?:o\s*)?andar/);
+    acoes.push({ tipo: 'casa_bonecas', ligado: true, andar: ca ? Number(ca[1]) : null });
+    partes.push(ca ? `casa de bonecas do ${ca[1]}º andar` : 'casa de bonecas');
   }
 
   // câmera e som

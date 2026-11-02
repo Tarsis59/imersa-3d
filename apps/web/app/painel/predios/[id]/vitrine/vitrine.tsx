@@ -23,6 +23,7 @@ import type { AcaoComando } from '@/lib/comandos';
 import { ehPorDoSol, MISSOES, PASSEIO_M, progressoTipologias, somarCaminhada, type IdMissao } from '@/lib/missoes';
 import { SimuladorFinanciamento } from './simulador';
 import { CartaoLazer, PainelDoPonto, passoDoTourMs, rotuloDoPonto, type EstadoTour } from './lazer';
+import { CarrosselAreasComuns } from './carrossel-lazer';
 import type { NovoLazer } from './actions';
 import { CartaoGaleria, GestaoGaleria, type FotoGaleria } from './galeria';
 
@@ -201,6 +202,9 @@ export function Vitrine({
   const [andarCorte, setAndarCorte] = useState('');
   const [comCorte, setComCorte] = useState<number[]>([]);
   const [separados, setSeparados] = useState(false);
+  // casa de bonecas (Plano 12c, item 1) e planta 3D humanizada (item 3): os dois usam o andar do corte
+  const [casaDeBonecas, setCasaDeBonecas] = useState<number | null>(null);
+  const [planta, setPlanta] = useState(false);
   // loteamento: lotes no 3D, buscador e o lote escolhido (no 3D ou na lista)
   const [filtroLotes, setFiltroLotes] = useState<FiltroLotes>(FILTRO_LOTES_VAZIO);
   const [loteSelecionado, setLoteSelecionado] = useState<string | null>(null);
@@ -221,6 +225,15 @@ export function Vitrine({
   useEffect(() => {
     if (separados && telemetria && telemetria.modo !== 'orbita') setSeparados(false);
   }, [separados, telemetria]);
+  // casa de bonecas e planta (Plano 12c): trocar para 1ª pessoa (andar a pé ou entrar na unidade) sai dos dois
+  useEffect(() => {
+    if (!telemetria || telemetria.modo === 'orbita' || (casaDeBonecas === null && !planta)) return;
+    viewer.current?.casaDeBonecas(null);
+    viewer.current?.plantaHumanizada(null);
+    setCasaDeBonecas(null);
+    setPlanta(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [telemetria?.modo]);
   const [dataSol, setDataSol] = useState(hoje);
   // abre no fim de tarde: sol baixo e sombras longas são a imagem mais bonita do dia (Plano 12a, item 7)
   const [horaSol, setHoraSol] = useState(16.5);
@@ -747,6 +760,7 @@ export function Vitrine({
     }
   };
   const voar = (id: string) => {
+    sairDosModosDeAndar();
     setVista(null);
     setInterior(null);
     setSelecionada(id);
@@ -893,6 +907,9 @@ export function Vitrine({
           viewer.current?.separarAndares(a.ligado);
           setSeparados(a.ligado);
           break;
+        case 'casa_bonecas':
+          if (!ligarCasaDeBonecas(a.ligado, a.andar)) problemas.push(a.ligado ? 'Escolha o andar para a casa de bonecas.' : 'Não há casa de bonecas aberta.');
+          break;
         case 'visao_geral':
           visaoGeral();
           break;
@@ -912,11 +929,50 @@ export function Vitrine({
 
   // volta ao prédio inteiro de cima (botão, duplo toque no 3D e comando "visão geral")
   function visaoGeral() {
+    sairDosModosDeAndar();
     setVista(null);
     setInterior(null);
     viewer.current?.visaoGeral();
   }
   const irPara = (id: string) => document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+
+  // casa de bonecas (Plano 12c, item 1): liga/desliga no andar do corte (ou no `andar` do comando por voz/texto)
+  const ligarCasaDeBonecas = (ligar: boolean, andarPedido?: number | null) => {
+    const andar = ligar ? (andarPedido ?? (andarCorte ? Number(andarCorte) : null)) : null;
+    if (ligar && andar === null) return false;
+    if (ligar && planta) {
+      viewer.current?.plantaHumanizada(null);
+      setPlanta(false);
+    }
+    const ok = viewer.current?.casaDeBonecas(andar) ?? false;
+    if (ok) {
+      setCasaDeBonecas(andar);
+      if (andar !== null) setAndarCorte(String(andar));
+    }
+    return ok;
+  };
+  // planta 3D humanizada (Plano 12c, item 3): câmera ortográfica de cima, no andar do corte
+  const ligarPlanta = (ligar: boolean) => {
+    if (ligar && !andarCorte) return false;
+    if (ligar && casaDeBonecas !== null) {
+      viewer.current?.casaDeBonecas(null);
+      setCasaDeBonecas(null);
+    }
+    const ok = viewer.current?.plantaHumanizada(ligar ? Number(andarCorte) : null) ?? false;
+    if (ok) setPlanta(ligar);
+    return ok;
+  };
+  // sai da casa de bonecas/planta ao escolher outra unidade ou voltar à visão geral (Plano 12c)
+  const sairDosModosDeAndar = () => {
+    if (casaDeBonecas !== null) {
+      viewer.current?.casaDeBonecas(null);
+      setCasaDeBonecas(null);
+    }
+    if (planta) {
+      viewer.current?.plantaHumanizada(null);
+      setPlanta(false);
+    }
+  };
 
   return (
     <div className="grid gap-6 lg:grid-cols-[1fr_340px] lg:items-start">
@@ -953,6 +1009,8 @@ export function Vitrine({
         data-corretora={telemetria?.corretora ?? 'fora'}
         data-outros={telemetria?.outros ?? 0}
         data-explosao={telemetria?.explosao ?? 0}
+        data-casa-bonecas={telemetria?.casaDeBonecas ?? ''}
+        data-planta={telemetria?.planta ? 'sim' : 'nao'}
         data-etiquetas={telemetria?.etiquetas ?? 0}
         data-rota={telemetria?.rota ?? 0}
         data-lotes={telemetria?.lotes ?? 0}
@@ -1294,6 +1352,16 @@ export function Vitrine({
               {rotulo}
             </button>
           ))}
+          {/* Planta 3D humanizada (Plano 12c, item 3): câmera ortográfica de cima; sai com o próprio botão */}
+          <button
+            type="button"
+            aria-pressed={planta}
+            disabled={estado !== 'pronto' || (!planta && !andarCorte)}
+            onClick={() => ligarPlanta(!planta)}
+            className={`min-h-10 rounded-full border px-4 text-sm font-medium disabled:opacity-50 ${planta ? 'border-acento bg-acento text-acento-texto' : 'border-borda bg-superficie hover:bg-fundo'}`}
+          >
+            {planta ? 'Voltar ao 3D' : 'Planta'}
+          </button>
         </nav>
         <Cartao titulo={`Missões · ${missoes.size} de ${MISSOES.length}`}>
           <ul className="grid gap-2 text-sm" data-testid="missoes" data-feitas={missoes.size}>
@@ -1455,6 +1523,19 @@ export function Vitrine({
 
         {proximidades && <CartaoProximidades fonte={proximidades} pronto={estado === 'pronto'} desenhar={(p) => viewer.current?.desenharRota(p) ?? false} />}
         <div id="secao-lazer" className="scroll-mt-4" />
+        <CarrosselAreasComuns
+          itens={itensLazer}
+          interiores={interiores}
+          temGiro360={giroRenderizado !== null}
+          pronto={estado === 'pronto'}
+          resolverFoto={linkDoArquivo}
+          aoAbrirSplat={(i) => {
+            setInteriorAberto(i);
+            evento.current?.({ tipo: 'interior' });
+          }}
+          aoAbrirGiro360={() => void abrirGiroFoto()}
+          aoVoarAoPonto={(id) => irAoPontoLazer(itensLazer.findIndex((l) => l.id === id), false)}
+        />
         <CartaoLazer
           itens={itensLazer}
           pronto={estado === 'pronto'}
@@ -1517,6 +1598,16 @@ export function Vitrine({
               }}
             >
               {separados ? 'Juntar os andares' : 'Separar os andares'}
+            </Botao>
+            {/* Corte "casa de bonecas" (Plano 12c, item 1): paredes de cada unidade do andar, pintadas pela situação */}
+            <Botao
+              type="button"
+              variante="secundario"
+              aria-pressed={casaDeBonecas !== null}
+              disabled={estado !== 'pronto' || !andarCorte}
+              onClick={() => ligarCasaDeBonecas(casaDeBonecas === null)}
+            >
+              {casaDeBonecas !== null ? 'Sair da casa de bonecas' : 'Casa de bonecas'}
             </Botao>
             <div className="grid grid-cols-2 gap-3">
               <Campo id="data-sol" rotulo="Dia do sol" type="date" value={dataSol} onChange={(e) => e.target.value && setDataSol(e.target.value)} />

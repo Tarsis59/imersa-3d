@@ -77,6 +77,23 @@ test('lazer: a gestão marca no 3D, o tour "Conheça o lazer" mostra cada espaç
   await painel.getByRole('button', { name: 'Fechar' }).click();
   await expect(painel).toHaveCount(0);
 
+  // carrossel das áreas comuns em 3D (Plano 12c, item 4): mesma ordem do tour, cada card sabe o que abrir
+  const carrossel = page.getByTestId('carrossel-lazer');
+  const cartoesCarrossel = carrossel.getByTestId('carrossel-item');
+  await expect(cartoesCarrossel).toHaveCount(2);
+  await expect(cartoesCarrossel.nth(0)).toContainText('Piscina adulto');
+  await expect(cartoesCarrossel.nth(1)).toContainText('Academia');
+  // sem splat nem giro 360° prontos: o toque voa a câmera até o ponto, igual ao da lista
+  await expect(cartoesCarrossel.nth(1)).toHaveAttribute('data-acao', 'voo');
+  await cartoesCarrossel.nth(1).click();
+  await expect(painel).toHaveAttribute('data-tour', 'ponto');
+  await expect(painel).toContainText('Aberta 24 h');
+  await painel.getByRole('button', { name: 'Fechar' }).click();
+  await expect(painel).toHaveCount(0);
+  // a seção "Áreas comuns" da barra de seções leva até o carrossel
+  await page.getByTestId('secoes').getByRole('button', { name: 'Áreas comuns' }).click();
+  await expect(carrossel).toBeInViewport();
+
   // ficha da área comum (Plano 12b, item 6): tocar na Piscina mostra a foto escolhida, em tela cheia com contador
   await cartao.getByTestId('lista-lazer').getByRole('button', { name: /Piscina adulto/ }).first().click();
   await expect(painel.getByTestId('ficha-fotos').getByRole('button')).toHaveCount(1);
