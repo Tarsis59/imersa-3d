@@ -1,13 +1,16 @@
 import type { Caixa } from '../units/tipos';
+import { escolherEspecie, type Especie } from './vegetacao';
 
 export interface Arvore {
   x: number;
   z: number;
   altura: number;
-  /** Raio da copa. */
+  /** Raio da copa (ou das folhas, na palmeira). */
   raio: number;
-  /** 0..1: variação do verde da copa. */
+  /** 0..1: variação do tom (verde da nativa, amarelo/rosa do ipê) e giro da copa. */
   tom: number;
+  /** Espécie da região (Plano 12a, item 8): ipê, palmeira ou nativa genérica, pela posição. */
+  especie: Especie;
 }
 
 export interface PlanoPaisagismo {
@@ -73,7 +76,7 @@ export function planejarPaisagismo(predio: Caixa, obstaculos: readonly Caixa[] =
     const raio = 1.6 + r * 1.2;
     const x = p.x + (ruido(p.z, p.x) - 0.5) * 1.2;
     const z = p.z + (ruido(p.x + 3, p.z - 7) - 0.5) * 1.2;
-    if (livre(x, z, raio)) arvores.push({ x, z, altura: 4.5 + r * 3.5, raio, tom: ruido(p.x - 11, p.z + 5) });
+    if (livre(x, z, raio)) arvores.push({ x, z, altura: 4.5 + r * 3.5, raio, tom: ruido(p.x - 11, p.z + 5), especie: escolherEspecie(x, z) });
   }
   // postes: no meio da calçada
   const meioCalcada = { minX: calcada.minX + CALCADA_M / 2, maxX: calcada.maxX - CALCADA_M / 2, minZ: calcada.minZ + CALCADA_M / 2, maxZ: calcada.maxZ - CALCADA_M / 2 };

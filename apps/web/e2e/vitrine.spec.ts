@@ -55,6 +55,8 @@ test('vitrine 3D: volumes do prédio, filtros, favoritos, voo até a unidade, co
   // contagem de carros pode cair a 0 se a qualidade adaptativa descer para "baixo" num CI lento
   await expect(vitrine).toHaveAttribute('data-carros', /^\d+$/, { timeout: 30_000 });
   await expect(vitrine).toHaveAttribute('data-nuvens', /^(sim|nao)$/, { timeout: 30_000 });
+  // câmera de arquitetura com verticais retas (Plano 12a, item 13): ligada por padrão na órbita (pitch inicial dentro da faixa segura)
+  await expect(vitrine).toHaveAttribute('data-verticais', 'sim', { timeout: 30_000 });
   await expect(page.getByRole('link', { name: /OpenStreetMap/ })).toHaveAttribute('href', 'https://www.openstreetmap.org/copyright');
   await expect(page.getByTestId('aviso-entorno')).toContainText('prédios reais em volta');
 
@@ -129,6 +131,7 @@ test('vitrine 3D: volumes do prédio, filtros, favoritos, voo até a unidade, co
   // primeira pessoa: anda com o teclado e mostra o joystick de toque
   await page.getByRole('button', { name: 'Andar a pé (1ª pessoa)' }).click();
   await expect(vitrine).toHaveAttribute('data-modo', 'primeira-pessoa');
+  await expect(vitrine).toHaveAttribute('data-verticais', 'nao'); // desligada na primeira pessoa (item 13)
   await expect(page.getByTestId('joystick')).toBeVisible();
   await expect(vitrine).not.toHaveAttribute('data-posicao', '');
   const zAntes = Number((await vitrine.getAttribute('data-posicao'))!.split(',')[1]);

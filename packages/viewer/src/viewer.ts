@@ -25,6 +25,7 @@ import { alturaDoCorte, planoDeCorte } from './units/corte';
 import { COR_UNIDADE, type Caixa, type StatusUnidade, type UnidadeViewer } from './units/tipos';
 import { planejarVoo, enquadrar, type Pose } from './cameras/voo';
 import { passoPrimeiraPessoa, bloqueioPorCaixas, seguirPiso, rumoAoAlvo, yawPara, entradaDoControle, type Entrada, type EstadoPessoa, type OpcoesPasso, type Ponto2D } from './cameras/primeiraPessoa';
+import { calcularShiftVertical, pitchDoOlhar, verticaisRetasAtiva } from './cameras/verticaisRetas';
 import { QualidadeAdaptativa, type NivelQualidade } from './quality/adaptativa';
 import { criarCarregadorGltf, type Decodificadores } from './carregador';
 import { layoutMarca, textoDaMarca, type DadosMarca } from './captura/marca';
@@ -39,6 +40,7 @@ import { criarAmbienteSonoro } from './ambiente/som';
 import { criarMarcadoresLazer, placa, poseParaLazer, type MarcadoresLazer, type PontoLazer } from './ambiente/lazer';
 import { criarNuvens, sombraDeNuvens, SOMBRA_NUVENS, NUVENS_POR_NIVEL } from './ambiente/nuvens';
 import { iniciarAr, iniciarVr, type ContextoXr, type SessaoXr, type TipoXr } from './xr/sessao';
+import { aplicarTexturasPbr, desligarPbr, ESCALA_PBR_M, prepararPbrMundo, urlsPbr, type EstadoPbr } from './ambiente/materiaisPbr';
 
 export type ModoCamera = 'orbita' | 'primeira-pessoa';
 
@@ -58,6 +60,8 @@ export interface ConfigViewer {
   estiloDecorado?: EstiloDecorado;
   /** Pastas dos decodificadores Draco/KTX2 (Meshopt já vem embutido). */
   decodificadores?: Decodificadores;
+  /** Pasta pública com as texturas PBR (Plano 12a, item 5); sem isto, os materiais ficam lisos (como hoje). */
+  texturasPbr?: { baseUrl: string };
   /** Liga o configurador (acabamentos por superfície e móveis). Só com modelo GLB. */
   configurador?: boolean;
 }
@@ -105,6 +109,8 @@ export interface EstadoViewer {
   carros: number;
   /** Camada de nuvens baixas, com sombra no chão (Plano 12a, item 15; falsa no aparelho fraco). */
   nuvens: boolean;
+  /** Câmera de arquitetura com as verticais retas (Plano 12a, item 13): ligada na órbita, dentro da faixa segura de pitch. */
+  verticaisRetas: boolean;
 }
 
 /** Resumo da visita para a telemetria. */
@@ -512,6 +518,8 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
     }
     const materiaisFachada = materiaisDaFachada();
     for (const m of Object.values(materiaisFachada)) prepararMaterial(m, true);
+    pbrFachada = prepararPbrMundo(materiaisFachada.concreto, ESCALA_PBR_M.concreto); // Plano 12a, item 5
+    definirNivelPbr(qualidade.nivel.nome);
     for (const malha of malhasDaFachada(planejarFachada(caixas.values()), materiaisFachada)) {
       grupo.add(malha);
       if (malha.name === 'fachada-concreto') pisosExtras.push(malha); // lajes: dá para pisar
@@ -576,6 +584,28 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
     }
   }
 
+  // materiais PBR de mundo (Plano 12a, item 5): concreto da fachada; gramado/calçada e asfalto/calçada da cidade
+  // entram quando existirem (paisagismo e cidadeCompleta, abaixo). Lazy: textura só baixa no médio/alto.
+  let pbrFachada: EstadoPbr | null = null;
+  function definirNivelPbr(nome: NivelQualidade['nome']): void {
+    const todos = [pbrFachada, paisagismo?.pbr.gramado, paisagismo?.pbr.calcada, cidadeCompleta?.pbr.asfalto, cidadeCompleta?.pbr.calcada, cidadeCompleta?.pbr.pedestre].filter((e): e is EstadoPbr => !!e);
+    if (nome === 'baixo' || !config.texturasPbr) {
+      for (const e of todos) desligarPbr(e);
+      return;
+    }
+    const base = config.texturasPbr.baseUrl;
+    if (pbrFachada) void aplicarTexturasPbr(pbrFachada, urlsPbr(base, 'concreto'));
+    if (paisagismo) {
+      void aplicarTexturasPbr(paisagismo.pbr.gramado, urlsPbr(base, 'grama'));
+      void aplicarTexturasPbr(paisagismo.pbr.calcada, urlsPbr(base, 'porcelanato'));
+    }
+    if (cidadeCompleta) {
+      void aplicarTexturasPbr(cidadeCompleta.pbr.asfalto, urlsPbr(base, 'asfalto'));
+      void aplicarTexturasPbr(cidadeCompleta.pbr.calcada, urlsPbr(base, 'concreto'));
+      void aplicarTexturasPbr(cidadeCompleta.pbr.pedestre, urlsPbr(base, 'concreto'));
+    }
+  }
+
   // gramado, calçada, árvores e postes em volta do lote (refeito quando chegam os prédios vizinhos)
   let paisagismo: Paisagismo | null = null;
   function montarPaisagismo(): void {
@@ -604,6 +634,7 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
       pessoas.definirQuantidade(MORADORES_POR_NIVEL[qualidade.nivel.nome]);
       cena.add(pessoas.objeto);
     }
+    definirNivelPbr(qualidade.nivel.nome); // Plano 12a, item 5: textura real do gramado/calçada, só no médio/alto
   }
   let pessoas: Pessoas | null = null;
   let arvoresDoLote: ReadonlyArray<{ x: number; z: number; altura: number }> = [];
@@ -620,6 +651,34 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
   // -------------------------------------------------------------- câmera
   let modo: ModoCamera = 'orbita';
   let voo: { trajeto: (t: number) => Pose; inicio: number } | null = null;
+  /** Câmera de arquitetura com verticais retas (Plano 12a, item 13): telemetria de se está ligada agora. */
+  let verticaisRetas = false;
+
+  /**
+   * Corrige as verticais do prédio na órbita (Plano 12a, item 13): em vez de deixar a câmera inclinar para olhar
+   * para cima/baixo (o que faz as linhas verticais convergirem), ela fica nivelada e o enquadramento desloca no
+   * sentido vertical (frustum assimétrico) para mostrar o mesmo ponto — sem perder o clique nem o giro, porque
+   * nivelar + deslocar mostra exatamente o mesmo pixel na tela que inclinar mostraria. Chamar a cada quadro, depois
+   * de qualquer coisa que mova a câmera (voo, tour guiado ou órbita).
+   */
+  function aplicarVerticaisRetas(): void {
+    const pitch = modo === 'orbita' ? pitchDoOlhar(camera.position, orbita.target) : 0;
+    const ativa = verticaisRetasAtiva(modo, pitch);
+    if (!ativa) {
+      if (verticaisRetas) camera.clearViewOffset();
+      verticaisRetas = false;
+      return;
+    }
+    // nivela: olha na mesma direção horizontal, sem o componente vertical que fazia a câmera inclinar
+    const direcao = orbita.target.clone().sub(camera.position);
+    direcao.y = 0;
+    if (direcao.lengthSq() > 1e-6) camera.lookAt(camera.position.clone().add(direcao.normalize()));
+    const largura = Math.max(1, canvas.width);
+    const altura = Math.max(1, canvas.height);
+    const deslocamento = calcularShiftVertical(pitch, camera.fov);
+    camera.setViewOffset(largura, altura, 0, deslocamento * altura, largura, altura);
+    verticaisRetas = true;
+  }
   const pessoa: EstadoPessoa & { pitch: number; y: number } = { x: 0, z: 0, y: 0, yaw: 0, pitch: 0 };
   /** Tocar no chão para ir (primeira pessoa). */
   let alvoCaminhada: Ponto2D | null = null;
@@ -1197,6 +1256,7 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
     nuvens.definirNivel(n.nome); // Plano 12a, item 15: desligadas no aparelho fraco
     SOMBRA_NUVENS.ligada.value = NUVENS_POR_NIVEL[n.nome] ? 1 : 0;
     marcadores?.definirNivel(n.nome); // Plano 12a, item 12: água simples no aparelho fraco
+    definirNivelPbr(n.nome); // Plano 12a, item 5: textura real só no médio/alto
     ajustarPos(n);
   }
 
@@ -1404,6 +1464,7 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
       direcao: { x: direcaoCamera.x / (Math.hypot(direcaoCamera.x, direcaoCamera.z) || 1), z: direcaoCamera.z / (Math.hypot(direcaoCamera.x, direcaoCamera.z) || 1) },
       carros: carros?.objeto.visible ? carros.contagem() : 0,
       nuvens: nuvens.objeto.visible,
+      verticaisRetas,
     });
   };
   renderer.setAnimationLoop((agora: number, frame?: XRFrame) => {
@@ -1530,6 +1591,7 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
       const yaw = Math.atan2(-(camera.position.x - corretoraPos.x), -(camera.position.z - corretoraPos.z));
       corretora.atualizar({ x: corretoraPos.x, y: 0, z: corretoraPos.z, yaw }, { distancia: 0, velocidade: 0, noAr: false, acenando: corretoraFalando ? 1 : 0 }, agora / 1000, menosMovimento);
     }
+    aplicarVerticaisRetas(); // Plano 12a, item 13: depois de qualquer coisa que tenha movido a câmera neste quadro
     // qualidade fixa ou "menos movimento": cena determinística (nuvens do céu, vento, água, carros e nuvens baixas parados)
     const tCena = config.qualidadeFixa || menosMovimento ? 0 : agora / 1000;
     atmosfera.quadro(camera, tCena);
@@ -1977,6 +2039,7 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
       if (entorno.vias?.length || entorno.areas?.length || entorno.relevo) {
         cidadeCompleta = criarCidade(entorno, rotacao, lote, obstaculos, (m) => prepararMaterial(m));
         cidadeCompleta.definirNivel(qualidade.nivel.nome);
+        definirNivelPbr(qualidade.nivel.nome); // Plano 12a, item 5: asfalto e calçada da cidade
         cena.add(cidadeCompleta.objeto);
         pisosExtras.push(...cidadeCompleta.pisos);
         // além do relevo, o chão do horizonte fica embaixo de tudo (sem cobrir os vales)

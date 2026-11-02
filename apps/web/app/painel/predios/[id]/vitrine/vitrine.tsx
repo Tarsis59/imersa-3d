@@ -6,6 +6,7 @@ import { Botao, Campo, Cartao, Selecao } from '@/components/ui';
 import { alternarFavorito, lerFavoritos, salvarFavoritos } from '@/lib/favoritos';
 import { brl, COR_STATUS, ROTULO_STATUS, STATUS_UNIDADE } from '@/lib/tipos';
 import { DECODIFICADORES } from '@/lib/decodificadores';
+import { TEXTURAS_PBR } from '@/lib/texturasPbr';
 import { giroDoZip } from '@/lib/giro-zip';
 import type { ResultadoEntorno } from './actions';
 import { InteriorSplat } from './interior';
@@ -384,7 +385,7 @@ export function Vitrine({
     if (!el) return;
     const c = inicial.current;
     setEstado('carregando');
-    const v = criarViewer(el, { unidades: c.unidades, modeloUrl: c.modeloUrl, rotacaoGraus: c.rotacaoGraus, estiloDecorado: c.estiloDecorado, lat: c.lat ?? undefined, lon: c.lon ?? undefined, decodificadores: DECODIFICADORES,
+    const v = criarViewer(el, { unidades: c.unidades, modeloUrl: c.modeloUrl, rotacaoGraus: c.rotacaoGraus, estiloDecorado: c.estiloDecorado, lat: c.lat ?? undefined, lon: c.lon ?? undefined, decodificadores: DECODIFICADORES, texturasPbr: TEXTURAS_PBR,
       ...(c.qualidadeFixa !== null ? { qualidadeInicial: c.qualidadeFixa, qualidadeFixa: true } : {}),
     });
     viewer.current = v;
@@ -944,6 +945,7 @@ export function Vitrine({
         data-lotes={telemetria?.lotes ?? 0}
         data-carros={telemetria?.carros ?? 0}
         data-nuvens={telemetria?.nuvens ? 'sim' : 'nao'}
+        data-verticais={telemetria?.verticaisRetas ? 'sim' : 'nao'}
         data-terceira={telemetria?.terceiraPessoa ? 'sim' : 'nao'}
         data-boneco={telemetria?.boneco ?? ''}
         data-no-ar={telemetria?.noAr ? 'sim' : 'nao'}

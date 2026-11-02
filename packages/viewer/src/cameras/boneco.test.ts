@@ -27,12 +27,25 @@ describe('animação do boneco', () => {
     expect(avancarFase(0, 0.75)).toBeCloseTo(0.5, 9);
     expect(avancarFase(0.9, 0.3)).toBeCloseTo(0.1, 9);
   });
+  it('balanço do quadril (Plano 12a, item 9): gira para o lado da perna que avança; parado ou no ar, não gira', () => {
+    const p = poseDoBoneco(0.25, 2.2, false, 0, 0);
+    expect(Math.sign(p.quadrilGiro)).toBe(Math.sign(p.pernaE));
+    expect(poseDoBoneco(0.25, 0, false, 0, 0).quadrilGiro).toBe(0); // parado
+    expect(poseDoBoneco(0.25, 2.2, true, 0, 0).quadrilGiro).toBe(0); // no ar
+  });
 });
 
 describe('boneco', () => {
   it('quatro bonecos para escolher; id desconhecido cai no primeiro', () => {
     expect(BONECOS.map((b) => b.id)).toEqual(['ana', 'beto', 'carla', 'davi']);
     expect(presetBoneco('xyz').id).toBe('ana');
+  });
+  it('altura varia pouco de pessoa para pessoa, em volta de 1', () => {
+    for (const b of BONECOS) {
+      expect(b.altura).toBeGreaterThan(0.9);
+      expect(b.altura).toBeLessThan(1.1);
+    }
+    expect(new Set(BONECOS.map((b) => b.altura)).size).toBe(BONECOS.length); // nenhuma igual à outra
   });
   it('fica de pé com ~1,75 m, nos pés indicados, e troca de roupa sem recriar', () => {
     const b = criarBoneco(presetBoneco('beto'), () => undefined);

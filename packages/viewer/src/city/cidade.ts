@@ -1,6 +1,7 @@
 import * as THREE from 'three';
-import { balancarComVento } from '../ambiente/vegetacao';
+import { construirArvores, escolherEspecie, type Especie } from '../ambiente/vegetacao';
 import { sombraDeNuvens } from '../ambiente/nuvens';
+import { ESCALA_PBR_M, prepararPbrMundo, type EstadoPbr } from '../ambiente/materiaisPbr';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { lonLatToLocal, type LonLat } from '../geo/project';
 import type { Caixa } from '../units/tipos';
@@ -214,6 +215,8 @@ export interface ArvoreDeRua {
   altura: number;
   raio: number;
   tom: number;
+  /** Espécie da região (Plano 12a, item 8): ipê, palmeira ou nativa genérica, pela posição. */
+  especie: Especie;
 }
 
 const ruido = (x: number, z: number) => {
@@ -247,7 +250,7 @@ export function arvoresDeRua(vias: ReadonlyArray<{ tipo: TipoVia; largura: numbe
           if (Math.max(Math.abs(p.x), Math.abs(p.z)) > meioLado - 10) continue;
           if (lote && dentroDe(p, lote, 12)) continue;
           if (obstaculos.some((o) => dentroDe(p, o, 1.5))) continue;
-          saida.push({ x: p.x, y: altura(p.x, p.z), z: p.z, altura: 5 + r * 4, raio: 1.6 + r * 1.2, tom: r });
+          saida.push({ x: p.x, y: altura(p.x, p.z), z: p.z, altura: 5 + r * 4, raio: 1.6 + r * 1.2, tom: r, especie: escolherEspecie(p.x, p.z) });
         }
       }
       resto = ((resto - d) % ESPACO_ARVORE_M + ESPACO_ARVORE_M) % ESPACO_ARVORE_M;
@@ -265,13 +268,12 @@ export interface CidadeCompleta {
   vias: number;
   areas: number;
   arvores: number;
+  /** Estado da textura PBR do asfalto e das calçadas (Plano 12a, item 5): liga/desliga por nível de qualidade. */
+  pbr: { asfalto: EstadoPbr; calcada: EstadoPbr; pedestre: EstadoPbr };
   /** No aparelho fraco: tira calçadas de pedestre e árvores de rua (o que menos faz falta). */
   definirNivel(nivel: 'alto' | 'medio' | 'baixo'): void;
   destruir(): void;
 }
-
-const VERDE_ESCURO = new THREE.Color(0x2f5a2a);
-const VERDE_CLARO = new THREE.Color(0x6f9a3c);
 
 export function criarCidade(
   entrada: { centro: LonLat; vias?: readonly ViaEntorno[]; areas?: readonly AreaEntorno[]; relevo?: RelevoEntorno | null },
@@ -380,6 +382,11 @@ export function criarCidade(
   const mPedestre = material(0xcdc4b2, 0.92, camada(3));
   const mVerde = material(0x6b8f45, 1, camada(1));
   const mAgua = material(0x2f6b8c, 0.08, { metalness: 0.1, ...camada(1) });
+  // materiais PBR de mundo (Plano 12a, item 5): ruas e calçadas sem UV própria (a fita/polígono não tem), então a
+  // textura é projetada pela posição do mundo (ver `materiaisPbr.ts`); desligada até a qualidade pedir
+  const pbrAsfalto = prepararPbrMundo(mAsfalto, ESCALA_PBR_M.asfalto);
+  const pbrCalcada = prepararPbrMundo(mCalcada, ESCALA_PBR_M.concreto);
+  const pbrPedestre = prepararPbrMundo(mPedestre, ESCALA_PBR_M.concreto);
   const pedestres: THREE.Mesh[] = [];
   for (const b of blocos.values()) {
     for (const [lista, m, sombra] of [
@@ -402,41 +409,19 @@ export function criarCidade(
     }
   }
 
-  // árvores de rua
+  // árvores de rua, com as espécies da região (Plano 12a, item 8): poucas malhas instanciadas mesmo com centenas
   const arvores = arvoresDeRua(vias, obstaculos, lote, h, limite);
-  let malhasArvores: THREE.InstancedMesh[] = [];
-  if (arvores.length) {
-    const tronco = new THREE.CylinderGeometry(0.14, 0.22, 1, 6);
-    tronco.translate(0, 0.5, 0);
-    const copa = new THREE.IcosahedronGeometry(1, 1);
-    geos.push(tronco, copa);
-    const troncos = new THREE.InstancedMesh(tronco, material(0x5b4636, 0.95, { polygonOffset: false }), arvores.length);
-    const matCopa = material(0xffffff, 0.9, { polygonOffset: false, flatShading: true });
-    balancarComVento(matCopa);
-    const copas = new THREE.InstancedMesh(copa, matCopa, arvores.length);
-    const m4 = new THREE.Matrix4();
-    const q = new THREE.Quaternion();
-    const eixo = new THREE.Vector3(0, 1, 0);
-    arvores.forEach((a, i) => {
-      const t = a.altura * 0.42;
-      m4.compose(new THREE.Vector3(a.x, a.y, a.z), q.identity(), new THREE.Vector3(1, t, 1));
-      troncos.setMatrixAt(i, m4);
-      q.setFromAxisAngle(eixo, a.tom * Math.PI * 2);
-      m4.compose(new THREE.Vector3(a.x, a.y + t + a.raio * 0.8, a.z), q, new THREE.Vector3(a.raio, a.raio * 1.15, a.raio));
-      copas.setMatrixAt(i, m4);
-      copas.setColorAt(i, VERDE_ESCURO.clone().lerp(VERDE_CLARO, a.tom));
-    });
-    malhasArvores = [troncos, copas];
-    for (const m of malhasArvores) {
-      // árvore de rua não projeta sombra (centenas delas): só recebe; as do lote (paisagismo) projetam
-      m.castShadow = false;
-      m.receiveShadow = true;
-      m.instanceMatrix.needsUpdate = true;
-      m.computeBoundingSphere();
-      objeto.add(m);
-    }
-    if (copas.instanceColor) copas.instanceColor.needsUpdate = true;
-  }
+  const arvoresConstruidas = construirArvores(
+    arvores,
+    (m) => {
+      preparar(m);
+      sombraDeNuvens(m); // chão, asfalto, calçada, verde e água: a sombra das nuvens passa por cima (item 15)
+      materiais.push(m);
+    },
+    { sombra: false, detalheCopa: 1 }, // árvore de rua não projeta sombra (centenas delas): só recebe
+  );
+  const malhasArvores = arvoresConstruidas.malhas;
+  for (const m of malhasArvores) objeto.add(m);
 
   return {
     objeto,
@@ -446,6 +431,7 @@ export function criarCidade(
     vias: nVias,
     areas: nAreas,
     arvores: arvores.length,
+    pbr: { asfalto: pbrAsfalto, calcada: pbrCalcada, pedestre: pbrPedestre },
     definirNivel(nivel) {
       const leve = nivel === 'baixo';
       for (const m of pedestres) m.visible = !leve;
@@ -454,6 +440,7 @@ export function criarCidade(
     destruir() {
       for (const g of geos) g.dispose();
       for (const m of materiais) m.dispose();
+      arvoresConstruidas.destruir();
     },
   };
 }
