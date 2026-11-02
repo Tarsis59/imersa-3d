@@ -261,6 +261,8 @@ export interface Portal {
   giro: { arquivoId: string; unidades: string[] } | null;
   /** Lazer do empreendimento marcado no 3D, na ordem do tour. */
   lazer: ItemLazer[];
+  /** Loteamento: os lotes com quadra, medidas, preço e situação (vazio num prédio). */
+  lotes: import('@/app/painel/predios/[id]/vitrine/lotes').LoteVitrine[];
   /** Fotos do imóvel com GPS (quadros no 3D). */
   fotos: Array<{ id: string; nome: string; lat: number; lon: number; rumo: number | null }>;
   /** Assistente com IA (direto na API), ou null se desligado. */

@@ -1,3 +1,4 @@
+import type { LoteVitrine } from './lotes';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import type { UnidadeViewer } from '@imersa/viewer';
@@ -20,7 +21,7 @@ export default async function PaginaVitrine({ params, searchParams }: { params: 
   if (r.status !== 200) notFound();
   const { predio, andares } = r.dados;
   // independentes entre si: em paralelo (cada ida à API custa uma volta de rede)
-  const [detalhe, lista, download, me, giros, ia, lazer, fotos] = await Promise.all([
+  const [detalhe, lista, download, me, giros, ia, lazer, fotos, lotes] = await Promise.all([
     apiNaPagina<DetalheProjeto>(`/projetos/${encodeURIComponent(predio.projetoId)}`, volta),
     apiNaPagina<Arquivo[]>(`/projetos/${encodeURIComponent(predio.projetoId)}/arquivos`, volta),
     predio.modeloArquivoId ? apiNaPagina<{ url: string }>(`/arquivos/${predio.modeloArquivoId}/download`, volta) : null,
@@ -29,6 +30,7 @@ export default async function PaginaVitrine({ params, searchParams }: { params: 
     apiNaPagina<{ ligada: boolean }>('/ia', volta),
     apiNaPagina<ItemLazer[]>(`/predios/${encodeURIComponent(id)}/lazer`, volta),
     apiNaPagina<Portal['fotos']>(`/predios/${encodeURIComponent(id)}/fotos`, volta),
+    apiNaPagina<{ lotes: LoteVitrine[] }>(`/predios/${encodeURIComponent(id)}/lotes`, volta),
   ]);
   const empresa = me.dados.empresas.find((e) => e.id === me.dados.tenantId)?.nome ?? '';
   // visita guiada ao vivo: a consultora conduz pelos links ativos dela (a gestão, por todos)
@@ -80,6 +82,7 @@ export default async function PaginaVitrine({ params, searchParams }: { params: 
         aoVivo={bilheteAoVivo.bind(null, predio.id)}
         linksParaConduzir={linksAtivos}
         lazer={lazer.status === 200 ? lazer.dados : []}
+        lotes={lotes.status === 200 ? lotes.dados.lotes : []}
         gerirLazer={ehGestao(me.dados.papel) ? { criar: criarLazer.bind(null, predio.id), remover: removerLazer } : null}
       />
     </>

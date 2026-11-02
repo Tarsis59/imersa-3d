@@ -297,6 +297,7 @@ export function TelaEstande({
           lon={portal.projeto.lon}
           interiores={portal.interiores}
           lazer={portal.lazer}
+          lotes={portal.lotes}
           giroRenderizado={portal.giro}
           assistenteUrl={portal.assistenteUrl}
           carregarEntorno={carregarEntorno}

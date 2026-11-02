@@ -15,6 +15,9 @@ import { ComandoVitrine } from './comando';
 import { VisitaEmGrupo } from './visita-grupo';
 import { FalarComCorretor } from './falar-corretor';
 import { CartaoProximidades, type FonteProximidades } from './proximidades';
+import { CartaoLotes, FILTRO_LOTES_VAZIO, filtrarLotes, type FiltroLotes, type LoteVitrine } from './lotes';
+
+const SEM_LOTES: LoteVitrine[] = [];
 import type { AcaoComando } from '@/lib/comandos';
 import { ehPorDoSol, MISSOES, PASSEIO_M, progressoTipologias, somarCaminhada, type IdMissao } from '@/lib/missoes';
 import { SimuladorFinanciamento } from './simulador';
@@ -80,6 +83,7 @@ export function Vitrine({
   salaUrl = null,
   corretor = null,
   proximidades = null,
+  lotes = SEM_LOTES,
   lat,
   lon,
   interiores,
@@ -119,6 +123,8 @@ export function Vitrine({
   corretor?: { nome: string; whatsapp: string; empreendimento: string } | null;
   /** O que há perto e a rota a pé desenhada no chão (painel, link do cliente e estande). */
   proximidades?: FonteProximidades | null;
+  /** Loteamento (Plano 12d): os lotes no chão do 3D com o buscador de lotes. */
+  lotes?: LoteVitrine[];
   /** Abrir já na vista de uma unidade e numa hora (foto pedida por texto). */
   inicio?: { unidadeId: string | null; hora: number | null };
   /** Fotos do imóvel com GPS: quadros no 3D onde foram tiradas (Plano 11c). */
@@ -183,6 +189,22 @@ export function Vitrine({
   const [andarCorte, setAndarCorte] = useState('');
   const [comCorte, setComCorte] = useState<number[]>([]);
   const [separados, setSeparados] = useState(false);
+  // loteamento: lotes no 3D, buscador e o lote escolhido (no 3D ou na lista)
+  const [filtroLotes, setFiltroLotes] = useState<FiltroLotes>(FILTRO_LOTES_VAZIO);
+  const [loteSelecionado, setLoteSelecionado] = useState<string | null>(null);
+  useEffect(() => {
+    if (estado !== 'pronto' || !lotes.length || lat == null || lon == null) return;
+    viewer.current?.definirLotes(lotes, { lon, lat });
+    viewer.current?.aoSelecionarLote((id) => setLoteSelecionado(id));
+  }, [estado, lotes, lat, lon]);
+  useEffect(() => {
+    if (estado !== 'pronto' || !lotes.length) return;
+    const vazio = filtroLotes.precoMax === null && filtroLotes.areaMin === null && !filtroLotes.quadras.size && !filtroLotes.status.size;
+    viewer.current?.destacarLotes(vazio ? null : filtrarLotes(lotes, filtroLotes));
+  }, [estado, lotes, filtroLotes]);
+  useEffect(() => {
+    if (loteSelecionado) viewer.current?.voarParaLote(loteSelecionado);
+  }, [loteSelecionado]);
   // andar a pé ou entrar no apartamento junta os andares no 3D: o botão acompanha
   useEffect(() => {
     if (separados && telemetria && telemetria.modo !== 'orbita') setSeparados(false);
@@ -919,6 +941,7 @@ export function Vitrine({
         data-explosao={telemetria?.explosao ?? 0}
         data-etiquetas={telemetria?.etiquetas ?? 0}
         data-rota={telemetria?.rota ?? 0}
+        data-lotes={telemetria?.lotes ?? 0}
         data-terceira={telemetria?.terceiraPessoa ? 'sim' : 'nao'}
         data-boneco={telemetria?.boneco ?? ''}
         data-no-ar={telemetria?.noAr ? 'sim' : 'nao'}
@@ -975,7 +998,7 @@ export function Vitrine({
         )}
         {estado === 'pronto' && !mostrarGiro && (
           // barra de horário em cima do 3D, como nos estandes interativos: arrastar muda sol, sombras e luzes
-          <div className="pointer-events-none absolute inset-x-0 top-3 flex justify-center px-28">
+          <div className="pointer-events-none absolute inset-x-0 top-14 flex justify-center px-3 md:top-3 md:px-44">
             <label className="pointer-events-auto flex items-center gap-2 rounded-full bg-black/55 px-3 py-1.5 text-xs text-white">
               <span className="font-semibold tabular-nums" data-testid="hora-topo">
                 {horaLegivel(horaSol)}
@@ -1205,8 +1228,10 @@ export function Vitrine({
             <VisitaEmGrupo url={salaUrl} viewer={viewer} pronto={estado === 'pronto'} />
           </Cartao>
         )}
+        {lotes.length > 0 && <CartaoLotes lotes={lotes} filtro={filtroLotes} aoFiltrar={setFiltroLotes} selecionado={loteSelecionado} aoSelecionar={setLoteSelecionado} corretor={corretor} />}
         <nav aria-label="Seções da Vitrine" data-testid="secoes" className="flex flex-wrap gap-2">
           {[
+            ...(lotes.length ? [['secao-lotes', 'Lotes']] : []),
             ['secao-unidades', 'Unidades'],
             ...(itensLazer.length ? [['secao-lazer', 'Áreas comuns']] : []),
             ...(proximidades ? [['secao-entorno', 'O que há perto']] : []),

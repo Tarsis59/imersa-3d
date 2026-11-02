@@ -109,3 +109,17 @@ export async function comandoGestao(predioId: string, texto: string, aplicar: bo
   if (aplicar) revalidatePath(`/painel/predios/${predioId}`);
   return r.dados;
 }
+
+export type PreviaLotes = { lotes: number; quadras: string[]; areaTotalM2: number; avisos: string[]; aplicado: boolean };
+
+/** Loteamento (Plano 12d): DXF/DWG exportado em DXF, ou GeoJSON do QGIS. Sem `aplicar`, só a prévia. */
+export async function importarLotes(predioId: string, formato: 'dxf' | 'geojson', conteudo: string, fuso: number | null, aplicar: boolean): Promise<PreviaLotes | { erro: string }> {
+  const r = await api<PreviaLotes>(`/predios/${encodeURIComponent(predioId)}/lotes/importar`, {
+    metodo: 'POST',
+    corpo: { formato, conteudo, ...(fuso ? { fuso } : {}), aplicar },
+    token: await tokenParaAcao(),
+  });
+  if (r.status !== 200) return { erro: r.status === 400 ? 'Não deu para ler o arquivo. Confira se é DXF (texto) ou GeoJSON.' : mensagem(r.status, r.dados) };
+  if (aplicar) revalidatePath(`/painel/predios/${predioId}`);
+  return r.dados;
+}

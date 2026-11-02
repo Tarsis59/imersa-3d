@@ -16,6 +16,7 @@ import { buildCityMesh } from './city/cityMesh';
 import { injetarFachada } from './city/fachadaCidade';
 import { entornoParaLocal, type Entorno } from './city/entorno';
 import { criarCidade, fita, paraModelo, terrenoDoRelevo, type CidadeCompleta } from './city/cidade';
+import { criarLotes, type LoteViewer, type LotesNoChao } from './city/lotes';
 import { montarDecorado, planejarDecorado, type Decorado, type EstiloDecorado } from './interior/decorado';
 import { criarQuadros, planejarQuadros, type FotoNoLugar, type QuadrosDeFoto } from './ambiente/fotos';
 import { cameraAtrasDoOmbro, CORRETORA, criarBoneco, presetBoneco, type Boneco } from './cameras/boneco';
@@ -79,6 +80,8 @@ export interface EstadoViewer {
   decorado: number;
   /** Pessoas da visita em grupo desenhadas no 3D. */
   outros: number;
+  /** Lotes do loteamento no chão (0 = não é loteamento). */
+  lotes: number;
   /** Rota a pé desenhada no chão (número de pontos; 0 = nenhuma). */
   rota: number;
   /** Etiquetas "Apto 1201" à vista (unidades filtradas). */
@@ -136,6 +139,17 @@ export interface Viewer {
    * ruas; a câmera voa para enquadrar o caminho todo. `null` apaga. `false` sem o entorno carregado.
    */
   desenharRota(pontos: ReadonlyArray<readonly [number, number]> | null): boolean;
+  /**
+   * Loteamento (Plano 12d): os lotes no chão, pintados pela situação, com o número de cada quadra; a câmera enquadra
+   * o loteamento inteiro. Devolve quantos lotes entraram. `centro` = o ponto do empreendimento (lon/lat).
+   */
+  definirLotes(lotes: readonly LoteViewer[], centro: { lon: number; lat: number }): number;
+  /** Filtro do buscador de lotes: quem não passou fica apagado; até 40 lotes ganham o número em cima. */
+  destacarLotes(passam: ReadonlySet<string> | null): void;
+  definirStatusLote(loteId: string, status: StatusUnidade): void;
+  /** Voa até o lote (lote escolhido na lista). */
+  voarParaLote(loteId: string): boolean;
+  aoSelecionarLote(cb: (loteId: string | null) => void): void;
   voarPara(unidadeId: string): boolean;
   selecionar(unidadeId: string | null): void;
   definirModo(modo: ModoCamera): void;
@@ -556,6 +570,7 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
     const plano = planejarPaisagismo(caixaDoPredio(), obstaculos);
     paisagismo = criarPaisagismo(plano, (m) => prepararMaterial(m));
     paisagismo.definirNoite(luzNoturna);
+    paisagismo.objeto.visible = !loteamento; // no loteamento, o jardim do "prédio" vazio não aparece
     cena.add(paisagismo.objeto);
     arvoresDoLote = plano.arvores;
     som.definirFontes({ arvores: arvoresDoLote, agua: aguaDoLazer() });
@@ -725,6 +740,45 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
       s.position.copy(p.malha.worldToLocal(new THREE.Vector3((p.caixa.minX + p.caixa.maxX) / 2, p.caixa.maxY + 0.6, (p.caixa.minZ + p.caixa.maxZ) / 2)));
       p.malha.add(s);
       rotulos.set(id, s);
+    }
+    ultimoAviso = 0;
+  }
+
+  // loteamento (Plano 12d)
+  let loteamento: LotesNoChao | null = null;
+  const statusLotes = new Map<string, StatusUnidade>();
+  let passamLotes: ReadonlySet<string> | null = null;
+  let cbLote: ((id: string | null) => void) | null = null;
+  const placasLotes = new THREE.Group();
+  placasLotes.name = 'numeros-dos-lotes';
+  cena.add(placasLotes);
+  const nomesLotes = new Map<string, string>();
+  function limparPlacas(grupo: THREE.Group): void {
+    for (const s of [...grupo.children] as THREE.Sprite[]) {
+      s.removeFromParent();
+      s.material.map?.dispose();
+      s.material.dispose();
+    }
+  }
+  function numerarLotes(): void {
+    limparPlacas(placasLotes);
+    if (!loteamento) return;
+    // número da quadra sempre; o de cada lote só com o filtro ligado e poucos lotes (senão vira ruído)
+    for (const [q, c] of loteamento.quadras) {
+      const s = placa(`Quadra ${q}`);
+      s.position.copy(c).add(new THREE.Vector3(0, 6, 0));
+      s.scale.multiplyScalar(2.2);
+      placasLotes.add(s);
+    }
+    if (passamLotes && passamLotes.size <= 40) {
+      for (const id of passamLotes) {
+        const c = loteamento.centros.get(id);
+        if (!c) continue;
+        const s = placa(nomesLotes.get(id) ?? '');
+        s.position.copy(c).add(new THREE.Vector3(0, 2.2, 0));
+        s.scale.multiplyScalar(1.2);
+        placasLotes.add(s);
+      }
     }
     ultimoAviso = 0;
   }
@@ -922,6 +976,14 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
       if (chaoTocado && chaoTocado.distance < 60 && (!unidadeTocada || chaoTocado.distance < unidadeTocada.distance || interior !== null)) {
         alvoCaminhada = { x: chaoTocado.point.x, z: chaoTocado.point.z };
         paradoMs = 0;
+        return;
+      }
+    }
+    if (loteamento && modo === 'orbita') {
+      const tocado = raycaster.intersectObject(loteamento.preenchimento, false)[0];
+      const loteId = typeof tocado?.faceIndex === 'number' ? loteamento.idDoTriangulo(tocado.faceIndex) : null;
+      if (loteId && (!passamLotes || passamLotes.has(loteId))) {
+        cbLote?.(loteId);
         return;
       }
     }
@@ -1308,6 +1370,7 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
       explosao: Math.round(explosao.atual * 100) / 100,
       etiquetas: rotulos.size,
       rota: rotaDesenhada?.userData.pontos ?? 0,
+      lotes: loteamento?.centros.size ?? 0,
       corretora: !corretora || !corretora.objeto.visible ? 'fora' : corretoraFalando ? 'falando' : 'parada',
       terceiraPessoa,
       boneco: presetId,
@@ -1500,6 +1563,53 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
         m.needsUpdate = true;
       }
       return andar === null || y !== null;
+    },
+    definirLotes(lotes, centro) {
+      if (loteamento) {
+        loteamento.objeto.removeFromParent();
+        loteamento.destruir();
+        loteamento = null;
+      }
+      statusLotes.clear();
+      nomesLotes.clear();
+      if (!lotes.length) return 0;
+      for (const l of lotes) {
+        statusLotes.set(l.id, l.status);
+        nomesLotes.set(l.id, `Lote ${l.numero}`);
+      }
+      loteamento = criarLotes(lotes, centro, rotacao, cidadeCompleta?.terreno.altura);
+      cena.add(loteamento.objeto);
+      // loteamento não tem torre: o jardim e a fachada do "prédio" vazio sairiam por cima dos lotes
+      if (paisagismo) paisagismo.objeto.visible = false;
+      if (raizPredio) raizPredio.visible = false;
+      loteamento.pintar(statusLotes, passamLotes);
+      numerarLotes();
+      const c = loteamento.caixa;
+      if (modo !== 'orbita') definirModo('orbita');
+      orbita.enabled = false;
+      voo = { trajeto: planejarVoo({ posicao: camera.position.clone(), alvo: orbita.target.clone() }, enquadrar({ ...c, minY: 0, maxY: 10 }, camera.fov, camera.aspect || 1, 50, 1.1)), inicio: performance.now() };
+      ultimoAviso = 0;
+      return loteamento.centros.size;
+    },
+    destacarLotes(passam) {
+      passamLotes = passam;
+      loteamento?.pintar(statusLotes, passam);
+      numerarLotes();
+    },
+    definirStatusLote(id, status) {
+      statusLotes.set(id, status);
+      loteamento?.pintar(statusLotes, passamLotes);
+    },
+    voarParaLote(id) {
+      const c = loteamento?.centros.get(id);
+      if (!c) return false;
+      if (modo !== 'orbita') definirModo('orbita');
+      orbita.enabled = false;
+      voo = { trajeto: planejarVoo({ posicao: camera.position.clone(), alvo: orbita.target.clone() }, enquadrar({ minX: c.x - 25, maxX: c.x + 25, minY: c.y, maxY: c.y + 4, minZ: c.z - 25, maxZ: c.z + 25 }, camera.fov, camera.aspect || 1, 45, 1.2)), inicio: performance.now() };
+      return true;
+    },
+    aoSelecionarLote(cb) {
+      cbLote = cb;
     },
     desenharRota(pontos) {
       apagarRota();

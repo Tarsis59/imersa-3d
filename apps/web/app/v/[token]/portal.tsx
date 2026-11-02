@@ -97,6 +97,7 @@ export function PortalVitrine({
         lon={portal.projeto.lon}
         interiores={portal.interiores}
         lazer={portal.lazer}
+        lotes={portal.lotes}
         giroRenderizado={portal.giro}
         assistenteUrl={portal.assistenteUrl}
         aoPedirContato={(motivo, unidadeId) => setPedidoContato((p) => ({ motivo, unidadeId, vez: (p?.vez ?? 0) + 1 }))}
