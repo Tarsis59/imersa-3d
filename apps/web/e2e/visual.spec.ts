@@ -44,7 +44,6 @@ test('aparência da Vitrine 3D em celular, tablet e computador', async ({ page, 
   await page.getByLabel('Nome do projeto').fill('Residencial Paulista');
   await page.getByRole('button', { name: 'Criar projeto' }).click();
   await page.getByRole('link', { name: /Residencial Paulista/ }).click();
-  const projetoUrl = page.url();
   await page.getByLabel('Latitude').fill('-23.56175');
   await page.getByLabel('Longitude').fill('-46.6545');
   await page.getByRole('button', { name: 'Salvar dados' }).click();
@@ -103,10 +102,20 @@ test('aparência da Vitrine 3D em celular, tablet e computador', async ({ page, 
   await page.getByLabel(/^Hora/).fill('21');
   await page.waitForTimeout(1500);
   await expect(vitrine).toHaveScreenshot('vitrine-computador-noite.png', { maxDiffPixelRatio: 0.02, timeout: 90_000, mask: [page.getByTestId('qualidade')] });
+});
 
-  // loteamento (Plano 12e): produto novo do Plano 12d, lotes coloridos no chão com o terreno (rua, calçada,
-  // meio-fio) do DXF, na mesma localização (lat/lon já salvos no projeto)
-  await page.goto(projetoUrl);
+// loteamento (Plano 12e): produto novo do Plano 12d, lotes coloridos no chão com o terreno (rua, calçada, meio-fio)
+// do DXF. Teste à parte: no CI o 3D é desenhado por software e as 5 imagens do prédio já usam quase todo o tempo.
+test('aparência do loteamento com o terreno do DXF', async ({ page, request }) => {
+  test.setTimeout(600_000);
+  await entrarComoAdminComMfa(page, request, 'visual-lote');
+  await page.getByLabel('Nome do projeto').fill('Residencial dos Ipês');
+  await page.getByRole('button', { name: 'Criar projeto' }).click();
+  await page.getByRole('link', { name: /Residencial dos Ipês/ }).click();
+  await page.getByLabel('Latitude').fill('-23.56175');
+  await page.getByLabel('Longitude').fill('-46.6545');
+  await page.getByRole('button', { name: 'Salvar dados' }).click();
+  await expect(page.getByText('Dados salvos.')).toBeVisible();
   await page.getByLabel('Nome do prédio').fill('Loteamento');
   await page.getByLabel('Andares').fill('1');
   await page.getByRole('button', { name: 'Criar prédio' }).click();
