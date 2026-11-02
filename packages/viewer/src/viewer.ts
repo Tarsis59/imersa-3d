@@ -1898,7 +1898,7 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
       apagarRota();
       centroEntorno = entorno ? { lon: entorno.centro.lon, lat: entorno.centro.lat } : null;
       // montar a cidade e compilar os materiais dela travam alguns quadros: não é o aparelho, não baixa a qualidade
-      qualidade.ignorarCarga(3_000);
+      qualidade.ignorarCarga();
       if (cidade) {
         cena.remove(cidade);
         cidade.geometry.dispose();
@@ -1956,7 +1956,7 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
       cena.add(cidade);
       bloqueadoCidade = bloqueioPorRaio([cidade]);
       atribuicaoEntorno = entorno.atribuicao;
-      qualidade.ignorarCarga(3_000); // o 1º quadro com a cidade compila o material dela
+      qualidade.ignorarCarga(); // o 1º quadro com a cidade compila o material dela
       aquecerMateriais(); // e compila já, em paralelo, para o 1º giro não engasgar
       return predios.length;
     },
