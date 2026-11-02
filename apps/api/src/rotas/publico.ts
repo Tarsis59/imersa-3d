@@ -3,6 +3,7 @@ import type { FastifyInstance, FastifyRequest } from 'fastify';
 import type pg from 'pg';
 import { z } from 'zod';
 import { fotosNoLugar, lazerDoPredio } from './lazer';
+import { lotesDoPredio } from './lotes';
 import { transmitirSala, type CanalSala } from '../tempo-real/sala';
 import { withTenant } from '@imersa/db';
 import { ErroHttp } from '../erros';
@@ -131,9 +132,9 @@ export function rotasPublicas(app: FastifyInstance, { pool, armazenamento, entor
           [base.projeto.id, base.modeloId],
         )
       ).rows;
-      return { base, andares, unidades, arquivos, giro: await giroDaVitrine(c, l.predioId), lazer: await lazerDoPredio(c, l.predioId), fotos: await fotosNoLugar(c, base.projeto.id) };
+      return { base, andares, unidades, arquivos, giro: await giroDaVitrine(c, l.predioId), lazer: await lazerDoPredio(c, l.predioId), fotos: await fotosNoLugar(c, base.projeto.id), lotes: await lotesDoPredio(c, l.predioId) };
     });
-    const { base, andares, unidades, arquivos, giro, lazer, fotos } = dados;
+    const { base, andares, unidades, arquivos, giro, lazer, fotos, lotes } = dados;
     const modelo = arquivos.find((a) => a.id === base.modeloId && a.tipo === 'modelo_3d');
     return {
       empresa: { nome: base.empresa },
@@ -149,6 +150,7 @@ export function rotasPublicas(app: FastifyInstance, { pool, armazenamento, entor
       giro,
       lazer,
       fotos,
+      lotes,
       // o portal chama o assistente direto na API (resposta em fluxo)
       assistenteUrl: ia.chamar ? `${apiPublica}/publico/links/${(req.params as { token: string }).token}/assistente` : null,
       aoVivoUrl: `${apiPublica}/publico/links/${(req.params as { token: string }).token}/ao-vivo`,
