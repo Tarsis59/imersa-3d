@@ -1518,6 +1518,9 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
    * cidade ou o paisagismo engasga compilando shader. Em paralelo quando a placa permite; nunca atrasa a 1ª imagem.
    */
   function aquecerMateriais(): void {
+    // sem compilação paralela na placa (desenho por software, aparelho antigo), compilar tudo de uma vez trava a
+    // página por segundos: aí é melhor compilar aos poucos, no 1º quadro de cada material, como antes
+    if (!renderer.extensions.has('KHR_parallel_shader_compile')) return;
     try {
       void renderer.compileAsync(cena, camera).catch(() => undefined);
     } catch {
