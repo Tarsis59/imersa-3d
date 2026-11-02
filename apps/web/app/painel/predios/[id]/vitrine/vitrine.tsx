@@ -1188,9 +1188,6 @@ export function Vitrine({
                 </button>
               </div>
             )}
-            {/* no celular os créditos do mapa (abaixo) quebram em 2 linhas e cobririam o aviso na mesma faixa; a partir do sm
-                (tablet/computador) cabem lado a lado, então volta para a mesma linha dos créditos */}
-            <span className="pointer-events-none absolute bottom-12 left-2 rounded bg-black/45 px-1.5 py-0.5 text-[10px] text-white/90 sm:bottom-2">Imagens meramente ilustrativas</span>
           </>
         )}
         {apresentando && <Apresentacao unidade={unidadesAtuais.find((u) => u.id === vitrineDaVez) ?? null} nomeAndar={(n) => nomeAndar.get(n) ?? `${n}º andar`} />}
@@ -1206,20 +1203,28 @@ export function Vitrine({
             )}
           </>
         )}
-        {entorno.tipo === 'pronto' && entorno.predios > 0 &&
-          (estande ? (
-            // no estande não há para onde navegar: a atribuição (licença do OSM) fica só como texto
-            <span className="absolute bottom-2 right-2 rounded bg-white/85 px-2 py-0.5 text-[11px] text-slate-800">{entorno.atribuicao}</span>
-          ) : (
-            <a
-              href="https://www.openstreetmap.org/copyright"
-              target="_blank"
-              rel="noreferrer"
-              className="absolute bottom-2 right-2 rounded bg-white/85 px-2 py-0.5 text-[11px] text-slate-800 hover:underline"
-            >
-              {entorno.atribuicao}
-            </a>
-          ))}
+        {/* aviso e créditos do mapa numa faixa só: lado a lado quando cabem, o aviso sobe quando o 3D é estreito
+            (a largura que conta é a do 3D, não a da tela: no computador a Vitrine divide a tela com os cartões) */}
+        <div className="pointer-events-none absolute inset-x-2 bottom-2 flex flex-wrap-reverse items-end justify-between gap-1">
+          {estado === 'pronto' && modo !== 'primeira-pessoa' && !mostrarGiro && (
+            <span className="rounded bg-black/45 px-1.5 py-0.5 text-[10px] text-white/90">Imagens meramente ilustrativas</span>
+          )}
+          {entorno.tipo === 'pronto' &&
+            entorno.predios > 0 &&
+            (estande ? (
+              // no estande não há para onde navegar: a atribuição (licença do OSM) fica só como texto
+              <span className="ml-auto rounded bg-white/85 px-2 py-0.5 text-[11px] text-slate-800">{entorno.atribuicao}</span>
+            ) : (
+              <a
+                href="https://www.openstreetmap.org/copyright"
+                target="_blank"
+                rel="noreferrer"
+                className="pointer-events-auto ml-auto rounded bg-white/85 px-2 py-0.5 text-[11px] text-slate-800 hover:underline"
+              >
+                {entorno.atribuicao}
+              </a>
+            ))}
+        </div>
         {mostrarGiro && (tipoGiro === 'fotorrealista' ? giroFoto : giro) && (
           <Giro360
             giro={(tipoGiro === 'fotorrealista' ? giroFoto : giro)!}

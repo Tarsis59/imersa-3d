@@ -24,7 +24,10 @@ function dxfLoteamento(): string {
   const linha = (camada: string, pts: Array<[number, number]>) => ['0', 'LWPOLYLINE', '8', camada, '90', String(pts.length), '70', '0', ...pts.flatMap(([x, y]) => ['10', String(x), '20', String(y)])];
   const texto = (camada: string, x: number, y: number, t: string) => ['0', 'TEXT', '8', camada, '10', String(x), '20', String(y), '40', '1.5', '1', t];
   const e: string[] = [];
-  const [x0, y0] = [332_100, 7_394_300];
+  // perto do centro do projeto (-23.56175, -46.6545, fuso 23 SIRGAS 2000): ~75 m do pino, bem dentro do raio de
+  // 500-600 m do entorno/relevo (RAIO_ENTORNO_M/RAIO_CIDADE_M em apps/api/src/rotas/mapa.ts) — do contrário os
+  // lotes saem do alcance da cidade do OSM e a captura mostra só o chão cinza sem fim (Plano 12, item 12e).
+  const [x0, y0] = [331_120, 7_393_250];
   for (const [q, dy] of [[1, 0], [2, 50], [3, 100]] as const) {
     e.push(...poli('QUADRAS', [[x0 - 2, y0 + dy - 2], [x0 + 38, y0 + dy - 2], [x0 + 38, y0 + dy + 32], [x0 - 2, y0 + dy + 32]]), ...texto('QUADRAS', x0 + 30, y0 + dy + 31, `Q-${q}`));
     for (let l = 0; l < 3; l++) {
@@ -136,6 +139,9 @@ test('aparência do loteamento com o terreno do DXF', async ({ page, request }) 
   await expect(vitrineLote).toHaveAttribute('data-estado', 'pronto', { timeout: 45_000 });
   await expect(vitrineLote).toHaveAttribute('data-lotes', '9', { timeout: 30_000 });
   await expect(vitrineLote).toHaveAttribute('data-anos', '10', { timeout: 15_000 }); // terreno do DXF carregado
+  // a cidade do OSM monta depois do prédio (estado "pronto" não espera o entorno): sem isto a captura pode sair
+  // antes dela aparecer, como o teste do prédio já garante acima com a mesma espera.
+  await expect(vitrineLote).toHaveAttribute('data-entorno', /^\d+$/, { timeout: 45_000 });
   await page.getByLabel('Dia do sol').fill('2026-06-21');
   await page.getByLabel(/^Hora/).fill('15');
   await page.evaluate(() => window.scrollTo(0, 0));
