@@ -100,6 +100,17 @@ export async function lotesDoPredio(c: pg.PoolClient, predioId: string): Promise
   return lotes;
 }
 
+/** Acima disso o desenho sai do raio em que a cidade (500 m) e o relevo (600 m) são montados em volta do projeto. */
+export const LONGE_DO_PROJETO_M = 500;
+
+/** Distância do centro do desenho ao endereço do projeto, em metros. */
+export function distanciaDoProjetoM(l: Leitura, projeto: { lon: number; lat: number }): number {
+  const todos = l.lotes.flatMap((x) => x.contorno);
+  const lon = todos.reduce((a, p) => a + p[0], 0) / todos.length;
+  const lat = todos.reduce((a, p) => a + p[1], 0) / todos.length;
+  return distanciaLonLatM({ lon, lat }, projeto);
+}
+
 function resumo(l: Leitura) {
   return {
     lotes: l.lotes.length,
@@ -132,7 +143,17 @@ export function rotasLotes(app: FastifyInstance, { pool, exigir }: Dependencias)
     }
     const previa = resumo(leitura);
     return withTenant(pool, ctx(s), async (c) => {
-      if (!(await c.query('SELECT 1 FROM buildings WHERE id = $1', [id])).rowCount) throw new ErroHttp(404, 'nao_encontrado');
+      const projeto = (
+        await c.query<{ lon: number | null; lat: number | null }>('SELECT ST_X(p.geom) AS lon, ST_Y(p.geom) AS lat FROM buildings b JOIN projects p ON p.id = b.project_id WHERE b.id = $1', [id])
+      ).rows[0];
+      if (!projeto) throw new ErroHttp(404, 'nao_encontrado');
+      // desenho longe do endereço do projeto: os lotes cairiam fora da cidade e do relevo montados em volta dele
+      const longe = leitura.lotes.length && projeto.lon != null && projeto.lat != null ? distanciaDoProjetoM(leitura, { lon: projeto.lon, lat: projeto.lat }) : 0;
+      if (longe > LONGE_DO_PROJETO_M) {
+        previa.avisos.unshift(
+          `O loteamento fica a ${(longe / 1000).toLocaleString('pt-BR', { maximumFractionDigits: 1 })} km do endereço do projeto: confira o fuso do DXF ou a latitude e longitude do projeto (a cidade em volta é montada a partir do endereço).`,
+        );
+      }
       if (!d.aplicar || !leitura.lotes.length) return { ...previa, aplicado: false };
       for (const l of leitura.lotes) {
         const anel = [...l.contorno, l.contorno[0]!];
