@@ -3,13 +3,15 @@ export interface NivelQualidade {
   pixelRatioMax: number;
   sombras: boolean;
   tamanhoSombra: number;
+  /** Sombra de contato, brilho suave e antisserrilhado de pós-processamento (só onde sobra placa de vídeo). */
+  posProcessamento: boolean;
 }
 
 /** Do mais bonito ao mais leve. */
 export const NIVEIS: readonly NivelQualidade[] = [
-  { nome: 'alto', pixelRatioMax: 2, sombras: true, tamanhoSombra: 2048 },
-  { nome: 'medio', pixelRatioMax: 1.5, sombras: true, tamanhoSombra: 1024 },
-  { nome: 'baixo', pixelRatioMax: 1, sombras: false, tamanhoSombra: 0 },
+  { nome: 'alto', pixelRatioMax: 2, sombras: true, tamanhoSombra: 2048, posProcessamento: true },
+  { nome: 'medio', pixelRatioMax: 1.5, sombras: true, tamanhoSombra: 1024, posProcessamento: false },
+  { nome: 'baixo', pixelRatioMax: 1, sombras: false, tamanhoSombra: 0, posProcessamento: false },
 ];
 
 export interface OpcoesQualidade {
@@ -37,6 +39,8 @@ export class QualidadeAdaptativa {
   private soma = 0;
   private desdeTroca = 0;
   private acimaMs = 0;
+  /** Quadros longos seguidos (aparelho que não dá conta, não aba em segundo plano). */
+  private longos = 0;
 
   constructor(opcoes: OpcoesQualidade = {}) {
     this.indice = Math.min(Math.max(opcoes.inicial ?? 0, 0), NIVEIS.length - 1);
@@ -66,7 +70,17 @@ export class QualidadeAdaptativa {
 
   /** Registra a duração de um quadro. Devolve o novo nível quando troca; senão `null`. */
   registrar(dtMs: number): NivelQualidade | null {
-    if (!(dtMs > 0) || dtMs > this.o.quadroMaxMs) return null;
+    if (!(dtMs > 0)) return null;
+    if (dtMs > this.o.quadroMaxMs) {
+      // um quadro longo sozinho é travada ou a volta de uma aba escondida (que não desenha nada enquanto escondida);
+      // vários seguidos, de qualquer tamanho, é o aparelho que não dá conta: desce um nível na hora. Sem teto: no
+      // desenho por software, com o acabamento de imagem, um quadro passa de 5 s e travava a página inteira
+      if (this.o.fixo) return null;
+      this.longos++;
+      if (this.longos >= 3 && this.indice < NIVEIS.length - 1) return this.trocar(this.indice + 1);
+      return null;
+    }
+    this.longos = 0;
     this.janela.push(dtMs);
     this.soma += dtMs;
     while (this.janela.length > 1 && this.soma - this.janela[0]! >= this.o.janelaMs) this.soma -= this.janela.shift()!;
@@ -88,6 +102,7 @@ export class QualidadeAdaptativa {
     this.soma = 0;
     this.desdeTroca = 0;
     this.acimaMs = 0;
+    this.longos = 0;
     return this.nivel;
   }
 }

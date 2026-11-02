@@ -208,6 +208,8 @@ export interface Numeros {
   dias: number;
   visitas: number;
   interiores: number;
+  /** Tours do lazer completos (o visitante viu todos os pontos). */
+  toursLazer: number;
   tempoMedioS: number | null;
   leads: number;
   conversao: number;
@@ -216,6 +218,34 @@ export interface Numeros {
 }
 
 /** O que o portal público recebe pelo token do link (sem login). */
+// ------------------------------------------------------------------ lazer
+export const CATEGORIAS_LAZER = ['piscina', 'academia', 'salao_festas', 'churrasqueira', 'playground', 'quadra', 'espaco_gourmet', 'brinquedoteca', 'coworking', 'pet', 'jardim', 'outro'] as const;
+export type CategoriaLazer = (typeof CATEGORIAS_LAZER)[number];
+export const ROTULO_LAZER: Record<CategoriaLazer, string> = {
+  piscina: 'Piscina',
+  academia: 'Academia',
+  salao_festas: 'Salão de festas',
+  churrasqueira: 'Churrasqueira',
+  playground: 'Playground',
+  quadra: 'Quadra',
+  espaco_gourmet: 'Espaço gourmet',
+  brinquedoteca: 'Brinquedoteca',
+  coworking: 'Coworking',
+  pet: 'Espaço pet',
+  jardim: 'Jardim',
+  outro: 'Outro',
+};
+export interface ItemLazer {
+  id: string;
+  categoria: CategoriaLazer;
+  nome: string;
+  descricao: string | null;
+  x: number;
+  y: number;
+  z: number;
+  ordem: number;
+}
+
 export interface Portal {
   empresa: { nome: string };
   consultora: { nome: string };
@@ -227,6 +257,8 @@ export interface Portal {
   interiores: Array<{ id: string; nome: string }>;
   /** Giro 360° fotorrealista pronto do prédio (Blender), ou null. */
   giro: { arquivoId: string; unidades: string[] } | null;
+  /** Lazer do empreendimento marcado no 3D, na ordem do tour. */
+  lazer: ItemLazer[];
   /** Assistente com IA (direto na API), ou null se desligado. */
   assistenteUrl: string | null;
   /** Transmissão do status das unidades ao vivo (EventSource direto na API). */
@@ -274,7 +306,9 @@ export interface VideoPredio {
   formato: '9:16' | '1:1' | '16:9';
   status: 'na_fila' | 'processando' | 'pronto' | 'erro';
   mensagem: string | null;
-  metricas: { largura?: number; altura?: number; segundos?: number; mb?: number; dispositivo?: string };
+  metricas: { largura?: number; altura?: number; segundos?: number; mb?: number; dispositivo?: string; narracao?: { voz: string; legenda?: string } };
+  /** Locução pedida (voz e roteiro falado), ou null. */
+  narracao: { voz: 'pf_dora' | 'pm_alex'; texto: string } | null;
   arquivoId: string | null;
   capaId: string | null;
   criadoEm: string;

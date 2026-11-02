@@ -342,7 +342,7 @@ describe('telemetria do viewer', () => {
   it('resumo: p50/p95 de carga, p50 e 5% piores de FPS, erros e celular; só gestão', async () => {
     const cargas = [1000, 1200, 1400, 1600, 1800, 2000, 2200, 2400, 2600, 9000];
     for (const [i, cargaMs] of cargas.entries()) {
-      await req('POST', '/telemetria/viewer', sessao({ cargaMs, fpsMedio: 30 + i * 3, erros: i === 9 ? 2 : 0, celular: i % 2 === 0, nivel: i < 8 ? 'alto' : 'baixo' }), consultora);
+      await req('POST', '/telemetria/viewer', sessao({ cargaMs, fpsMedio: 30 + i * 3, erros: i === 9 ? 2 : 0, celular: i % 2 === 0, nivel: i < 8 ? 'alto' : 'baixo', ...(i < 6 ? { webgpu: i < 3 } : {}) }), consultora);
     }
     expect((await req('GET', '/telemetria/viewer/resumo', undefined, consultora)).status).toBe(403);
     const r = await req('GET', '/telemetria/viewer/resumo?dias=7', undefined, admin);
@@ -355,6 +355,7 @@ describe('telemetria do viewer', () => {
     expect(r.json.taxaErro).toBeCloseTo(1 / 11, 3);
     expect(r.json.porNivel).toEqual({ alto: 9, medio: 0, baixo: 2 });
     expect(r.json.celular.sessoes).toBe(5);
+    expect(r.json.webgpu).toEqual({ visitas: 3, medidas: 6 }); // quem não mediu (null) fica de fora da conta
     expect((await req('GET', '/telemetria/viewer/resumo', undefined, outra)).json.sessoes).toBe(0);
   });
 });

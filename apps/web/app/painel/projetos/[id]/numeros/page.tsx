@@ -59,6 +59,7 @@ export default async function PaginaNumeros({ params, searchParams }: { params: 
           <Numero rotulo="Pedidos de contato" valor={String(n.leads)} testid="numeros-leads" />
           <Numero rotulo="Conversão" valor={pct(n.conversao)} detalhe="pedidos ÷ visitas" />
           <Numero rotulo="Abriram o interior real" valor={String(n.interiores)} />
+          <Numero rotulo="Tours do lazer completos" valor={String(n.toursLazer)} testid="numeros-tours-lazer" />
         </div>
       </Cartao>
       <Cartao titulo="Unidades mais vistas">

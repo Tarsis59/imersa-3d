@@ -100,6 +100,28 @@ test('configurador: catálogo → acabamentos trocados em < 200 ms → móvel �
   if (process.env.E2E_GPU === '1') for (const t of ateQuadro) expect(t).toBeLessThan(200);
   await expect(page.getByTestId('tempo-troca')).toBeVisible();
 
+  // decoração com um toque: todas as superfícies de uma vez, com o catálogo da empresa
+  const estilos = page.getByTestId('estilos');
+  await estilos.getByRole('button', { name: 'Moderno' }).click();
+  await expect(estilos.getByRole('button', { name: 'Moderno' })).toHaveAttribute('aria-pressed', 'true');
+  await expect(piso.locator('option:checked')).toHaveText(/^Porcelanato cimentício grafite/);
+  await expect(paredes.locator('option:checked')).toHaveText(/^Pintura acrílica cinza urbano/);
+  await expect(page.getByTestId('tempo-estilo')).toHaveAttribute('data-ms', /^\d+$/);
+  const msModerno = Number(await page.getByTestId('tempo-estilo').getAttribute('data-ms'));
+  await estilos.getByRole('button', { name: 'Clássico' }).click();
+  await expect(piso.locator('option:checked')).toHaveText(/^Mármore Carrara/);
+  await expect(page.getByLabel('Acabamento: Telhado').locator('option:checked')).toHaveText(/^Telha cerâmica natural/);
+  await expect(page.getByTestId('tempo-estilo')).toHaveAttribute('data-ms', /^\d+$/);
+  const msClassico = Number(await page.getByTestId('tempo-estilo').getAttribute('data-ms'));
+  test.info().annotations.push({ type: 'estilo', description: `moderno ${msModerno} ms · clássico ${msClassico} ms` });
+  // aceite do plano: troca de estilo em menos de 1 s (com placa de vídeo; no CI o tempo mede o desenho por software)
+  if (process.env.E2E_GPU === '1') for (const t of [msModerno, msClassico]) expect(t).toBeLessThan(1000);
+  // ajustar uma superfície à mão desmarca o estilo; volta à combinação do teste
+  await escolher(piso, PORCELANATO);
+  await expect(estilos.getByRole('button', { name: 'Clássico' })).toHaveAttribute('aria-pressed', 'false');
+  await escolher(paredes, 'Tijolinho aparente');
+  await expect(paredes.locator('option:checked')).toHaveText(/^Tijolinho aparente/);
+
   // móvel: escolhe, coloca no térreo, ajusta
   await escolher(page.getByLabel('Móvel do catálogo'), 'Cadeira');
   await page.getByRole('button', { name: 'Colocar no centro do térreo' }).click();

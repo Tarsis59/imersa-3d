@@ -20,6 +20,7 @@ import {
   type MovelColocado,
   type Orcamento,
 } from '@/lib/configurador';
+import { ESTILOS, LISTA_ESTILOS, escolhasDoEstilo, type Estilo } from '@/lib/estilos';
 import type { DadosSalvar } from './actions';
 
 const PASSO_M = 0.1;
@@ -101,6 +102,8 @@ export function Configurador({
   const [colocando, setColocando] = useState<string | null>(null);
   const [ultimaTroca, setUltimaTroca] = useState<{ trabalhoMs: number; ateQuadroMs: number; n: number } | null>(null);
   const [aviso, setAviso] = useState<string | null>(null);
+  // decoração com um toque: o estilo escolhido e quanto levou até a tela mostrar tudo trocado
+  const [estilo, setEstilo] = useState<{ nome: Estilo; ms: number | null } | null>(null);
   const [nome, setNome] = useState(aberta?.nome ?? '');
   const [cliente, setCliente] = useState(aberta?.cliente ?? '');
   const [unidadeId, setUnidadeId] = useState(aberta?.unidadeId ?? '');
@@ -186,9 +189,31 @@ export function Configurador({
     const m = materialId ? materiais.find((x) => x.id === materialId) : undefined;
     // o 3D troca primeiro; o resto da tela (prévia do orçamento, amostras) atualiza como transição, sem segurar o quadro
     const ms = viewer.current?.definirAcabamento(chave, m ? acabamentoDe(m) : null);
-    startTransition(() => setEscolha((e) => ({ ...e, [chave]: materialId })));
+    startTransition(() => {
+      setEscolha((e) => ({ ...e, [chave]: materialId }));
+      setEstilo(null); // mexeu à mão: já não é o estilo pronto
+    });
     const tempo = await ms;
     if (tempo) startTransition(() => setUltimaTroca((t) => ({ ...tempo, n: (t?.n ?? 0) + 1 })));
+  }
+
+  /** Todas as superfícies de uma vez, com o material do catálogo que combina com o estilo. */
+  async function aplicarEstilo(nome: Estilo) {
+    const v = viewer.current;
+    if (!v) return;
+    const inicio = performance.now();
+    const novas = escolhasDoEstilo(nome, superficies, materiais);
+    const trocas = Object.entries(novas).map(([chave, id]) => {
+      const m = materiais.find((x) => x.id === id);
+      return m ? v.definirAcabamento(chave, acabamentoDe(m)) : null;
+    });
+    startTransition(() => {
+      setEscolha((e) => ({ ...e, ...novas }));
+      setEstilo({ nome, ms: null });
+    });
+    await Promise.all(trocas);
+    const ms = Math.round(performance.now() - inicio);
+    startTransition(() => setEstilo((e) => (e?.nome === nome ? { nome, ms } : e)));
   }
 
   function mover(dx: number, dz: number, giro = 0) {
@@ -259,6 +284,31 @@ export function Configurador({
       <div className="grid gap-6 md:grid-cols-2">
         <Cartao titulo="Acabamentos">
           {estado === 'pronto' && superficies.length === 0 && <p className="text-sm text-suave">Este modelo não tem superfícies que possam ser trocadas.</p>}
+          {superficies.length > 0 && (
+            <fieldset className="mb-4 grid gap-2" data-testid="estilos">
+              <legend className="text-sm font-medium">Decoração com um toque</legend>
+              <div className="grid grid-cols-3 gap-2">
+                {LISTA_ESTILOS.map((e) => (
+                  <button
+                    key={e}
+                    type="button"
+                    disabled={estado !== 'pronto'}
+                    aria-pressed={estilo?.nome === e}
+                    title={ESTILOS[e].descricao}
+                    onClick={() => void aplicarEstilo(e)}
+                    className={`rounded-lg border px-3 py-2 text-sm font-medium disabled:opacity-50 ${estilo?.nome === e ? 'border-acento bg-acento text-acento-texto' : 'border-borda hover:bg-fundo'}`}
+                  >
+                    {ESTILOS[e].rotulo}
+                  </button>
+                ))}
+              </div>
+              <p className="text-xs text-suave" data-testid="tempo-estilo" data-ms={estilo?.ms ?? ''}>
+                {estilo
+                  ? `${ESTILOS[estilo.nome].descricao}.${estilo.ms !== null ? ` Aplicado em ${estilo.ms} ms.` : ''}`
+                  : 'Escolha um estilo: todas as superfícies trocam de uma vez, com os materiais do seu catálogo. Depois dá para ajustar cada uma.'}
+              </p>
+            </fieldset>
+          )}
           <div className="grid gap-3">
             {superficies.map((s) => {
               const opcoes = materiaisPara(s, materiais);

@@ -18,6 +18,8 @@ const Visita = z.object({
   nivel: z.enum(['alto', 'medio', 'baixo']).nullable(),
   erros: z.number().int().min(0).max(1000).default(0),
   celular: z.boolean().default(false),
+  /** O navegador tem WebGPU (adaptador de verdade, não só a API). */
+  webgpu: z.boolean().nullable().default(null),
 });
 const Periodo = z.object({ dias: z.coerce.number().int().min(1).max(90).default(7) });
 const ctx = (s: Sessao) => ({ tenantId: s.tenantId, userId: s.userId });
@@ -29,13 +31,14 @@ export function rotasTelemetria(app: FastifyInstance, { pool, exigir }: Dependen
     const v = Visita.parse(req.body);
     try {
       await withTenant(pool, ctx(s), (c) =>
-        c.query('INSERT INTO telemetria_viewer (building_id, carga_ms, fps_medio, nivel, erros, celular) VALUES ($1, $2, $3, $4, $5, $6)', [
+        c.query('INSERT INTO telemetria_viewer (building_id, carga_ms, fps_medio, nivel, erros, celular, webgpu) VALUES ($1, $2, $3, $4, $5, $6, $7)', [
           v.predioId,
           v.cargaMs,
           v.fpsMedio,
           v.nivel,
           v.erros,
           v.celular,
+          v.webgpu,
         ]),
       );
     } catch (e) {
@@ -63,6 +66,8 @@ export function rotasTelemetria(app: FastifyInstance, { pool, exigir }: Dependen
         baixo: number;
         celular: number;
         celular_fps_p50: number | null;
+        webgpu: number;
+        webgpu_medido: number;
       }>(
         `SELECT count(*)::int AS sessoes,
                 percentile_cont(0.5) WITHIN GROUP (ORDER BY carga_ms) AS carga_p50,
@@ -74,7 +79,9 @@ export function rotasTelemetria(app: FastifyInstance, { pool, exigir }: Dependen
                 count(*) FILTER (WHERE nivel = 'medio')::int AS medio,
                 count(*) FILTER (WHERE nivel = 'baixo')::int AS baixo,
                 count(*) FILTER (WHERE celular)::int AS celular,
-                percentile_cont(0.5) WITHIN GROUP (ORDER BY fps_medio) FILTER (WHERE celular) AS celular_fps_p50
+                percentile_cont(0.5) WITHIN GROUP (ORDER BY fps_medio) FILTER (WHERE celular) AS celular_fps_p50,
+                count(*) FILTER (WHERE webgpu)::int AS webgpu,
+                count(webgpu)::int AS webgpu_medido
            FROM telemetria_viewer
           WHERE criado_em > now() - make_interval(days => $1)`,
         [dias],
@@ -89,6 +96,8 @@ export function rotasTelemetria(app: FastifyInstance, { pool, exigir }: Dependen
         taxaErro: x.sessoes ? x.com_erro / x.sessoes : 0,
         porNivel: { alto: x.alto, medio: x.medio, baixo: x.baixo },
         celular: { sessoes: x.celular, fpsP50: arred(x.celular_fps_p50) },
+        // parte das visitas (que mediram) com WebGPU: a decisão de migrar o 3D sai daqui
+        webgpu: { visitas: x.webgpu, medidas: x.webgpu_medido },
       };
     });
   });

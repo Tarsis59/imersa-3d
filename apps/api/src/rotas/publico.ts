@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import type pg from 'pg';
 import { z } from 'zod';
+import { lazerDoPredio } from './lazer';
 import { withTenant } from '@imersa/db';
 import { ErroHttp } from '../erros';
 import { hashToken } from '../auth/hash';
@@ -25,7 +26,7 @@ interface Dependencias {
 const DOWNLOAD_S = 60 * 60;
 const TokenLink = z.object({ token: z.string().regex(/^[\w-]{43}$/) });
 const TokenArquivo = TokenLink.extend({ id: z.uuid() });
-const TIPOS_EVENTO = ['abriu', 'unidade', 'favorito', 'interior', 'tempo'] as const;
+const TIPOS_EVENTO = ['abriu', 'unidade', 'favorito', 'interior', 'tempo', 'tour_lazer'] as const;
 const Eventos = z.object({
   sessao: z.uuid(),
   eventos: z
@@ -113,9 +114,9 @@ export function rotasPublicas(app: FastifyInstance, { pool, armazenamento, entor
           [base.projeto.id, base.modeloId],
         )
       ).rows;
-      return { base, andares, unidades, arquivos, giro: await giroDaVitrine(c, l.predioId) };
+      return { base, andares, unidades, arquivos, giro: await giroDaVitrine(c, l.predioId), lazer: await lazerDoPredio(c, l.predioId) };
     });
-    const { base, andares, unidades, arquivos, giro } = dados;
+    const { base, andares, unidades, arquivos, giro, lazer } = dados;
     const modelo = arquivos.find((a) => a.id === base.modeloId && a.tipo === 'modelo_3d');
     return {
       empresa: { nome: base.empresa },
@@ -129,6 +130,7 @@ export function rotasPublicas(app: FastifyInstance, { pool, armazenamento, entor
         : null,
       interiores: arquivos.filter((a) => a.tipo === 'splat').map((a) => ({ id: a.id, nome: a.nome })),
       giro,
+      lazer,
       // o portal chama o assistente direto na API (resposta em fluxo)
       assistenteUrl: ia.chamar ? `${apiPublica}/publico/links/${(req.params as { token: string }).token}/assistente` : null,
       aoVivoUrl: `${apiPublica}/publico/links/${(req.params as { token: string }).token}/ao-vivo`,
@@ -138,7 +140,7 @@ export function rotasPublicas(app: FastifyInstance, { pool, armazenamento, entor
   /** Status das unidades ao vivo para o cliente (uma unidade vendida agora muda de cor na tela dele). */
   app.get('/publico/links/:token/ao-vivo', limite(30, '1 minute'), async (req, reply) => {
     const l = await resolver(req);
-    await transmitirPredio(req, reply, canal, { tenantId: l.tenantId, predioId: l.predioId });
+    await transmitirPredio(req, reply, canal, { tenantId: l.tenantId, predioId: l.predioId, linkId: l.linkId });
   });
 
   app.get('/publico/links/:token/entorno', limite(60, '1 minute'), async (req) => {

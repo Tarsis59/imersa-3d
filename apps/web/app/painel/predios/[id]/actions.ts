@@ -75,8 +75,13 @@ export async function pedirGiro(predioId: string): Promise<{ erro?: string }> {
 }
 
 /** Pede um vídeo de marketing do prédio no formato escolhido (render no Blender, na GPU gratuita do Kaggle). */
-export async function pedirVideo(predioId: string, formato: '9:16' | '1:1' | '16:9'): Promise<{ erro?: string }> {
-  const r = await api(`/predios/${encodeURIComponent(predioId)}/videos`, { metodo: 'POST', corpo: { formato }, token: await tokenParaAcao() });
+export async function pedirVideo(
+  predioId: string,
+  formato: '9:16' | '1:1' | '16:9',
+  narracao: { voz: 'pf_dora' | 'pm_alex'; texto?: string } | null = null,
+): Promise<{ erro?: string }> {
+  const corpo = narracao ? { formato, narracao: { voz: narracao.voz, ...(narracao.texto?.trim() ? { texto: narracao.texto.trim() } : {}) } } : { formato };
+  const r = await api(`/predios/${encodeURIComponent(predioId)}/videos`, { metodo: 'POST', corpo, token: await tokenParaAcao() });
   if (r.status !== 201) return { erro: mensagem(r.status, r.dados) };
   revalidatePath(`/painel/predios/${predioId}`);
   return {};

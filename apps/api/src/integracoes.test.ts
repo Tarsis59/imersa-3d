@@ -176,6 +176,33 @@ describe('status ao vivo (SSE)', () => {
     await req('POST', `/links/${link.id}/revogar`, {}, ana);
     expect((await fetch(naApi(portal.aoVivoUrl))).status).toBe(410);
   });
+
+  it('tour guiado ao vivo: a câmera da consultora chega só a quem assiste aquele link', async () => {
+    const link = (await req('POST', `/predios/${emp.torreA}/links`, {}, ana)).json;
+    const outro = (await req('POST', `/predios/${emp.torreA}/links`, {}, ana)).json;
+    const cliente = assistir(naApi((await req('GET', `/publico/links/${link.url.split('/v/')[1]}`)).json.aoVivoUrl));
+    const vizinho = assistir(naApi((await req('GET', `/publico/links/${outro.url.split('/v/')[1]}`)).json.aoVivoUrl));
+    expect(await cliente.pronto).toBe(200);
+    expect(await vizinho.pronto).toBe(200);
+    await cliente.esperar(': conectado');
+    await vizinho.esperar(': conectado');
+    const pose = { ativo: true, posicao: [10, 20, 30], alvo: [0, 5, 0], unidade: emp.u101 };
+    expect((await req('POST', `/links/${link.id}/conducao`, pose, ana)).status).toBe(204);
+    await cliente.esperar('event: conducao');
+    await cliente.esperar('"posicao":[10,20,30]');
+    expect(cliente.texto()).toContain(emp.u101);
+    expect(vizinho.texto()).not.toContain('conducao');
+    // outra empresa, entrada inválida e link revogado
+    expect((await req('POST', `/links/${link.id}/conducao`, pose, outra)).status).toBe(404);
+    expect((await req('POST', `/links/${link.id}/conducao`, { ativo: true, posicao: [1, 2] }, ana)).status).toBe(400);
+    expect((await req('POST', `/links/${link.id}/conducao`, { ativo: true, posicao: [1e9, 0, 0] }, ana)).status).toBe(400);
+    expect((await req('POST', `/links/${link.id}/conducao`, { ativo: false }, ana)).status).toBe(204);
+    await cliente.esperar('"ativo":false');
+    cliente.fechar();
+    vizinho.fechar();
+    await req('POST', `/links/${link.id}/revogar`, {}, ana);
+    expect((await req('POST', `/links/${link.id}/conducao`, pose, ana)).status).toBe(404);
+  });
 });
 
 describe('integrações (chaves de API e webhooks)', () => {

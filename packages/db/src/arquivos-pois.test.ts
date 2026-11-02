@@ -332,3 +332,22 @@ describe('estandes de vendas', () => {
     await expect(comoA((c) => c.query('DELETE FROM estandes WHERE id = $1', [e]))).rejects.toThrow(/permission denied/);
   });
 });
+
+describe('lazer do empreendimento', () => {
+  it('isolado por empresa, categoria e posição conferidas, tour completo vira evento', async () => {
+    const novo = (c: pg.PoolClient, categoria: string, x = 10) =>
+      c.query<{ id: string }>('INSERT INTO lazer (building_id, categoria, nome, x_m, z_m) VALUES ($1, $2, $3, $4, 5) RETURNING id', [predioA, categoria, 'Piscina adulto', x]).then((r) => r.rows[0]!.id);
+    const p = await comoA((c) => novo(c, 'piscina'));
+    await expect(comoA((c) => novo(c, 'cassino'))).rejects.toThrow(/check/);
+    await expect(comoA((c) => novo(c, 'piscina', 5000))).rejects.toThrow(/check/); // longe demais do prédio
+    expect(await comoB(async (c) => (await c.query('SELECT * FROM lazer')).rowCount)).toBe(0);
+    await expect(comoB((c) => c.query('DELETE FROM lazer WHERE id = $1 RETURNING id', [p]).then((r) => r.rowCount))).resolves.toBe(0);
+    await expect(comoA((c) => c.query('DELETE FROM lazer WHERE id = $1 RETURNING id', [p]).then((r) => r.rowCount))).resolves.toBe(1);
+    const u = (await owner.query<{ id: string }>("INSERT INTO users (email, nome, senha_hash) VALUES ('lazer@a.test', 'Consultora', 'x') RETURNING id")).rows[0]!.id;
+    const link = await comoA((c) =>
+      c.query<{ id: string }>("INSERT INTO share_links (building_id, token_hash, criado_por, expira_em) VALUES ($1, 'hash-lazer', $2, now() + interval '1 day') RETURNING id", [predioA, u]).then((r) => r.rows[0]!.id),
+    );
+    await comoA((c) => c.query("INSERT INTO view_events (link_id, tipo) VALUES ($1, 'tour_lazer')", [link]));
+    await expect(comoA((c) => c.query("INSERT INTO view_events (link_id, tipo) VALUES ($1, 'outro')", [link]))).rejects.toThrow(/check/);
+  });
+});

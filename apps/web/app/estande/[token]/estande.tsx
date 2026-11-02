@@ -7,7 +7,7 @@ import { conferir, inicial, tocar, type EstadoEstande } from '@/lib/estande';
 import type { Portal } from '@/lib/tipos';
 import type { DadosSinal, enviarSinal } from './actions';
 
-type EventoApi = { tipo: 'abriu' | 'unidade' | 'favorito' | 'interior' | 'tempo'; unidadeId?: string; duracaoS?: number };
+type EventoApi = { tipo: 'abriu' | 'unidade' | 'favorito' | 'interior' | 'tempo' | 'tour_lazer'; unidadeId?: string; duracaoS?: number };
 /** O PC do estande fica dias ligado: recarrega (memória limpa, versão nova do site) quando está só apresentando. */
 const RECARGA_H = 12;
 
@@ -29,6 +29,24 @@ function useFps() {
     return () => cancelAnimationFrame(id);
   }, []);
   return fps;
+}
+
+/** Estande offline: o PC guarda página, código e modelo 3D (ver public/sw-estande.js) e abre mesmo sem internet. */
+function useEstandeOffline() {
+  const [pronto, setPronto] = useState(false);
+  useEffect(() => {
+    if (!('serviceWorker' in navigator)) return;
+    let vivo = true;
+    navigator.serviceWorker
+      .register('/sw-estande.js', { scope: '/estande/' })
+      .then(() => navigator.serviceWorker.ready)
+      .then(() => vivo && setPronto(true))
+      .catch(() => undefined); // sem service worker (navegador antigo, modo privado): funciona só online, como antes
+    return () => {
+      vivo = false;
+    };
+  }, []);
+  return pronto;
 }
 
 type TravaTela = { release: () => Promise<void> };
@@ -138,6 +156,7 @@ export function TelaEstande({
   const fps = useFps();
   const visitas = useVisitas(token);
   useTelaAcesa();
+  const offline = useEstandeOffline();
 
   // toque, clique, tecla ou roda: alguém está usando
   useEffect(() => {
@@ -221,7 +240,7 @@ export function TelaEstande({
 
   const unidades: UnidadeViewer[] = portal.unidades.map((u) => ({ id: u.id, codigo: u.codigo, andar: u.andar, status: u.status, areaM2: u.areaM2, quartos: u.quartos, preco: u.preco, meshNodeId: u.meshNodeId }));
   return (
-    <div data-testid="estande" data-apresentacao={estado.apresentando ? 'ligada' : 'desligada'} data-reinicio={estado.reinicio} className="min-h-dvh select-none overscroll-none bg-fundo">
+    <div data-testid="estande" data-apresentacao={estado.apresentando ? 'ligada' : 'desligada'} data-reinicio={estado.reinicio} data-offline={offline ? 'pronto' : ''} className="min-h-dvh select-none overscroll-none bg-fundo">
       <header className="flex h-24 items-center justify-between gap-6 px-6">
         <div className="grid min-w-0 gap-0.5">
           <span className="truncate text-sm text-suave">
@@ -268,6 +287,7 @@ export function TelaEstande({
           lat={portal.projeto.lat}
           lon={portal.projeto.lon}
           interiores={portal.interiores}
+          lazer={portal.lazer}
           giroRenderizado={portal.giro}
           assistenteUrl={portal.assistenteUrl}
           carregarEntorno={carregarEntorno}

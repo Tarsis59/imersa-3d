@@ -1,7 +1,7 @@
 'use client';
 import { useEffect, useMemo, useRef, useState, type PointerEvent as EventoPonteiro } from 'react';
-import { criarViewer, filtrar, type Clima, type Giro, filtroVazio, pontoCardeal, vetorJoystick, type EstadoViewer, type Filtro, type UnidadeViewer, type Viewer } from '@imersa/viewer';
-import type { StatusUnidade } from '@/lib/tipos';
+import { criarViewer, filtrar, suporteImersivo, temWebGpu, type SuporteImersivo, type Caixa, type Clima, type EstudoSolar, type PeriodoDeSol, type Giro, filtroVazio, pontoCardeal, vetorJoystick, type EstadoViewer, type Filtro, type UnidadeViewer, type Viewer } from '@imersa/viewer';
+import type { ItemLazer, StatusUnidade } from '@/lib/tipos';
 import { Botao, Campo, Cartao, Selecao } from '@/components/ui';
 import { alternarFavorito, lerFavoritos, salvarFavoritos } from '@/lib/favoritos';
 import { brl, COR_STATUS, ROTULO_STATUS, STATUS_UNIDADE } from '@/lib/tipos';
@@ -11,8 +11,38 @@ import type { ResultadoEntorno } from './actions';
 import { InteriorSplat } from './interior';
 import { Giro360 } from './giro';
 import { Assistente, type AcaoAssistente } from './assistente';
+import { SimuladorFinanciamento } from './simulador';
+import { CartaoLazer, PainelDoPonto, passoDoTourMs, rotuloDoPonto, type EstadoTour } from './lazer';
+import type { NovoLazer } from './actions';
 
 const ROTULO_NIVEL = { alto: 'alta', medio: 'média', baixo: 'baixa' } as const;
+const ROTULO_SOL: Record<PeriodoDeSol, string> = { manha: 'Sol da manhã', tarde: 'Sol da tarde', 'dia-todo': 'Sol o dia todo', 'pouco-sol': 'Pouco sol direto' };
+const horas = (h: number) => `${h.toLocaleString('pt-BR')} h`;
+const MAX_COMPARAR = 3;
+/** Amostras do path tracing na foto: ~5 a 15 s numa placa de vídeo comum. */
+const AMOSTRAS_FOTO = 64;
+
+/** Texto falado da unidade (narração pela voz do próprio navegador, em português). */
+function textoDaUnidade(u: UnidadeViewer, andar: string, sol: EstudoSolar | undefined): string {
+  const partes = [`Unidade ${u.codigo}, ${andar}`];
+  if (u.quartos !== null) partes.push(`${u.quartos} ${u.quartos === 1 ? 'quarto' : 'quartos'}`);
+  if (u.areaM2 !== null) partes.push(`${u.areaM2.toLocaleString('pt-BR')} metros quadrados`);
+  if (sol) partes.push(`${ROTULO_SOL[sol.periodo].toLowerCase()}, com ${sol.inverno.toLocaleString('pt-BR')} horas de sol direto no inverno`);
+  if (u.status === 'disponivel' && u.preco !== null) partes.push(`por ${brl(u.preco)}`);
+  return `${partes.join(', ')}.`;
+}
+
+function narrar(texto: string): boolean {
+  if (typeof window === 'undefined' || !('speechSynthesis' in window)) return false;
+  window.speechSynthesis.cancel();
+  const fala = new SpeechSynthesisUtterance(texto);
+  fala.lang = 'pt-BR';
+  const voz = window.speechSynthesis.getVoices().find((v) => v.lang.toLowerCase().startsWith('pt-br')) ?? window.speechSynthesis.getVoices().find((v) => v.lang.toLowerCase().startsWith('pt'));
+  if (voz) fala.voice = voz;
+  fala.rate = 1.02;
+  window.speechSynthesis.speak(fala);
+  return true;
+}
 const hoje = () => new Date().toISOString().slice(0, 10);
 const horaLegivel = (h: number) => `${String(Math.floor(h)).padStart(2, '0')}:${String(Math.round((h % 1) * 60)).padStart(2, '0')}`;
 const filtroAtivo = (f: Filtro) => f.quartos.length > 0 || f.areaMin !== null || f.precoMax !== null || f.status.length > 0 || f.somenteFavoritos;
@@ -22,7 +52,7 @@ function alternar<T>(lista: T[], x: T): T[] {
 }
 
 /** O que o visitante fez, para os números de vendas (portal público). */
-export type EventoVitrine = { tipo: 'unidade' | 'favorito'; unidadeId: string } | { tipo: 'interior' };
+export type EventoVitrine = { tipo: 'unidade' | 'favorito'; unidadeId: string } | { tipo: 'interior' } | { tipo: 'tour_lazer' };
 
 type EstadoEntorno = { tipo: 'carregando' } | { tipo: 'pronto'; predios: number; atribuicao: string } | { tipo: 'sem_localizacao' } | { tipo: 'indisponivel' };
 
@@ -49,6 +79,10 @@ export function Vitrine({
   assistenteUrl = null,
   aoPedirContato,
   estande = null,
+  linksParaConduzir = [],
+  lazer = [],
+  gerirLazer = null,
+  amostrasFoto = AMOSTRAS_FOTO,
 }: {
   predioId: string;
   projetoId: string;
@@ -86,6 +120,14 @@ export function Vitrine({
    * unidades disponíveis aparecem uma a uma; cada `reinicio` novo volta tudo ao começo (próximo visitante).
    */
   estande?: { apresentando: boolean; reinicio: number } | null;
+  /** Painel: links ativos de clientes que a consultora pode conduzir ao vivo (a câmera do cliente segue a dela). */
+  linksParaConduzir?: Array<{ id: string; titulo: string | null }>;
+  /** Lazer do empreendimento marcado no 3D, na ordem do tour. */
+  lazer?: ItemLazer[];
+  /** Gestão: marcar e remover pontos do lazer (no painel). */
+  /** Amostras do path tracing na foto fotorrealista. */
+  amostrasFoto?: number;
+  gerirLazer?: { criar: (d: NovoLazer) => Promise<{ item?: ItemLazer; erro?: string }>; remover: (id: string) => Promise<{ erro?: string }> } | null;
 }) {
   const canvas = useRef<HTMLCanvasElement>(null);
   const coluna = useRef<HTMLDivElement>(null);
@@ -101,6 +143,12 @@ export function Vitrine({
   const statusAoVivoRef = useRef(statusAoVivo);
   statusAoVivoRef.current = statusAoVivo;
   const [estadoAoVivo, setEstadoAoVivo] = useState<'desligado' | 'conectando' | 'conectado'>('desligado');
+  // tour guiado ao vivo, lado do cliente: a câmera segue a da consultora até ele escolher explorar sozinho
+  const [conducao, setConducao] = useState<{ ativo: boolean; posicao?: [number, number, number]; alvo?: [number, number, number]; unidade?: string | null } | null>(null);
+  const [soltou, setSoltou] = useState(false);
+  // lado da consultora: qual link está conduzindo
+  const [conduzindo, setConduzindo] = useState<string | null>(null);
+  const [linkEscolhido, setLinkEscolhido] = useState('');
   const [estado, setEstado] = useState<'carregando' | 'pronto' | 'erro'>('carregando');
   const [telemetria, setTelemetria] = useState<EstadoViewer | null>(null);
   const [filtro, setFiltro] = useState<Filtro>(filtroVazio);
@@ -113,9 +161,136 @@ export function Vitrine({
   const [clima, setClima] = useState<Clima>('limpo');
   const [entorno, setEntorno] = useState<EstadoEntorno>({ tipo: 'carregando' });
   const [interiorAberto, setInteriorAberto] = useState<{ id: string; nome: string } | null>(null);
+  // VR no óculos, maquete na mesa (Android) e AR do iPhone: só o que o aparelho abre
+  const [imersivo, setImersivo] = useState<SuporteImersivo>({ vr: false, ar: false, quickLook: false });
+  const [usdz, setUsdz] = useState<string | null>(null);
+  const [erroImersivo, setErroImersivo] = useState<string | null>(null);
+  const sobreposicaoAr = useRef<HTMLDivElement>(null);
+  // lazer: pontos no 3D, o tour "Conheça o lazer" e (gestão) a marcação clicando no 3D
+  const [itensLazer, setItensLazer] = useState<ItemLazer[]>(lazer);
+  const [pontoLazer, setPontoLazer] = useState<string | null>(null);
+  const [tour, setTour] = useState<EstadoTour | null>(null);
+  const [marcandoLazer, setMarcandoLazer] = useState<Omit<NovoLazer, 'x' | 'y' | 'z'> | null>(null);
+  const [erroLazer, setErroLazer] = useState<string | null>(null);
 
   // depois da hidratação: o servidor não conhece o navegador de quem vê
   useEffect(() => setFavoritos(lerFavoritos(predioId)), [predioId]);
+  useEffect(() => {
+    let vivo = true;
+    void suporteImersivo().then((s) => vivo && setImersivo(s));
+    return () => {
+      vivo = false;
+    };
+  }, []);
+  // iPhone: o arquivo da maquete fica pronto antes do toque (o Quick Look abre direto pelo link), refeito quando a
+  // situação de alguma unidade muda ao vivo
+  useEffect(() => {
+    if (!imersivo.quickLook || estado !== 'pronto') return;
+    let vivo = true;
+    let url: string | null = null;
+    const t = setTimeout(() => {
+      void viewer.current
+        ?.arquivoUsdz()
+        .then((b) => {
+          if (!vivo) return;
+          url = URL.createObjectURL(b);
+          setUsdz(url);
+        })
+        .catch(() => viewer.current?.registrarErro());
+    }, 800);
+    return () => {
+      vivo = false;
+      clearTimeout(t);
+      if (url) URL.revokeObjectURL(url);
+    };
+  }, [imersivo.quickLook, estado, statusAoVivo]);
+  // a sessão de AR acabou (pelo botão, pelo "voltar" do Android ou pelo navegador): a camada some
+  const emImersivo = telemetria?.imersivo ?? null;
+  useEffect(() => {
+    if (emImersivo !== 'ar' && sobreposicaoAr.current) sobreposicaoAr.current.hidden = true;
+  }, [emImersivo]);
+  // lazer no 3D: marcadores com o nome; tocar num marcador voa até ele
+  useEffect(() => {
+    if (estado !== 'pronto') return;
+    viewer.current?.definirLazer(itensLazer.map((l) => ({ id: l.id, x: l.x, y: l.y, z: l.z, rotulo: rotuloDoPonto(l), agua: l.categoria === 'piscina' })));
+  }, [estado, itensLazer]);
+  useEffect(() => {
+    if (estado !== 'pronto') return;
+    viewer.current?.aoSelecionarLazer((id) => {
+      viewer.current?.voarParaLazer(id);
+      setPontoLazer(id);
+    });
+  }, [estado]);
+  // gestão: o próximo clique no 3D (chão, laje ou terraço) marca o espaço
+  useEffect(() => {
+    const v = viewer.current;
+    if (!v || estado !== 'pronto' || !gerirLazer || !marcandoLazer) return;
+    const d = marcandoLazer;
+    const cm = (n: number) => Math.round(n * 100) / 100;
+    v.aoClicarPiso((ponto) => {
+      setMarcandoLazer(null);
+      void gerirLazer.criar({ ...d, x: cm(ponto.x), y: cm(ponto.y), z: cm(ponto.z) }).then((r) => {
+        if (r.item) {
+          setItensLazer((l) => [...l, r.item!]);
+          setErroLazer(null);
+        } else setErroLazer(r.erro ?? 'Não foi possível salvar o ponto agora.');
+      });
+    });
+    return () => v.aoClicarPiso(null);
+  }, [marcandoLazer, estado, gerirLazer]);
+  const removerPontoLazer = async (id: string) => {
+    if (!gerirLazer) return;
+    const r = await gerirLazer.remover(id);
+    if (r.erro) return setErroLazer(r.erro);
+    setErroLazer(null);
+    setItensLazer((l) => l.filter((x) => x.id !== id));
+    setPontoLazer((p) => (p === id ? null : p));
+  };
+  // tour "Conheça o lazer em 2 min": um ponto de cada vez (sozinho ou no "Próximo"), checklist e evento no fim
+  const tourRef = useRef(tour);
+  tourRef.current = tour;
+  const irAoPontoLazer = (indice: number, emTour: boolean) => {
+    const item = itensLazer[indice];
+    if (!item) return;
+    setVista(null);
+    setInterior(null);
+    viewer.current?.voarParaLazer(item.id);
+    setPontoLazer(item.id);
+    if (emTour) setTour((t) => ({ indice, vistos: t?.vistos.includes(item.id) ? t.vistos : [...(t?.vistos ?? []), item.id], completo: false }));
+  };
+  const proximoDoTour = () => {
+    const t = tourRef.current;
+    if (!t || t.completo) return;
+    if (t.indice + 1 < itensLazer.length) return irAoPontoLazer(t.indice + 1, true);
+    setTour({ ...t, completo: true });
+    setPontoLazer(null);
+    aoEvento?.({ tipo: 'tour_lazer' });
+  };
+  useEffect(() => {
+    if (!tour || tour.completo) return;
+    const id = setTimeout(proximoDoTour, passoDoTourMs(itensLazer.length));
+    return () => clearTimeout(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tour?.indice, tour?.completo]);
+  const encerrarLazer = () => {
+    setTour(null);
+    setPontoLazer(null);
+    viewer.current?.visaoGeral();
+  };
+  const entrarEmVr = async () => {
+    setErroImersivo(null);
+    if (!(await viewer.current?.entrarEmVr())) setErroImersivo('O óculos não abriu a visita. Confira se ele está ligado e se o navegador dele tem permissão para VR.');
+  };
+  const entrarEmAr = async () => {
+    const camada = sobreposicaoAr.current;
+    if (!camada) return;
+    setErroImersivo(null);
+    camada.hidden = false; // antes do pedido: o navegador mostra esta camada por cima da câmera
+    if (!(await viewer.current?.entrarEmAr(camada))) {
+      camada.hidden = true;
+      setErroImersivo('A câmera não abriu. Permita o uso da câmera para ver a maquete na mesa.');
+    }
+  };
 
   // um viewer por modelo
   useEffect(() => {
@@ -131,11 +306,13 @@ export function Vitrine({
     v.aoSelecionar((id) => setSelecionada(id));
     // telemetria: uma vez por visita, ao sair da página (ou trocar de página dentro do site)
     let enviado = false;
+    let webgpu: boolean | null = null;
+    void temWebGpu().then((w) => (webgpu = w));
     const enviarTelemetria = () => {
       const m = v.metricas();
       if (!c.comTelemetria || enviado || (m.cargaMs === null && m.erros === 0)) return;
       enviado = true;
-      const corpo = JSON.stringify({ predioId: c.predioId, ...m, celular: window.matchMedia('(pointer: coarse)').matches });
+      const corpo = JSON.stringify({ predioId: c.predioId, ...m, celular: window.matchMedia('(pointer: coarse)').matches, webgpu });
       navigator.sendBeacon?.('/api/telemetria', new Blob([corpo], { type: 'application/json' }));
     };
     const aoEsconder = () => document.visibilityState === 'hidden' && enviarTelemetria();
@@ -194,6 +371,7 @@ export function Vitrine({
       if (!url) return reconectar();
       fonte = new EventSource(url);
       fonte.onopen = () => vivo && setEstadoAoVivo('conectado');
+      fonte.addEventListener('conducao', (e) => setConducao(JSON.parse((e as MessageEvent<string>).data)));
       fonte.addEventListener('unidade', (e) => {
         const m = JSON.parse((e as MessageEvent<string>).data) as { id: string; status: StatusUnidade };
         setStatusAoVivo((s) => ({ ...s, [m.id]: m.status }));
@@ -213,8 +391,50 @@ export function Vitrine({
   }, [predioId]);
 
   const unidadesAtuais = useMemo(() => unidades.map((u) => (statusAoVivo[u.id] ? { ...u, status: statusAoVivo[u.id]! } : u)), [unidades, statusAoVivo]);
-  const passam = useMemo(() => filtrar(unidadesAtuais, filtro, favoritos), [unidadesAtuais, filtro, favoritos]);
-  const ativo = filtroAtivo(filtro);
+  // estudo solar de cada unidade (depois do entorno: os prédios em volta fazem sombra)
+  const [solar, setSolar] = useState<ReadonlyMap<string, EstudoSolar>>(() => new Map());
+  const [filtroSol, setFiltroSol] = useState<PeriodoDeSol[]>([]);
+  const passamBase = useMemo(() => filtrar(unidadesAtuais, filtro, favoritos), [unidadesAtuais, filtro, favoritos]);
+  const passam = useMemo(
+    () => (filtroSol.length ? new Set([...passamBase].filter((id) => filtroSol.includes(solar.get(id)?.periodo ?? 'pouco-sol'))) : passamBase),
+    [passamBase, filtroSol, solar],
+  );
+  const ativo = filtroAtivo(filtro) || filtroSol.length > 0;
+  // vista da janela da unidade (câmera na varanda)
+  const [vista, setVista] = useState<string | null>(null);
+  // comparar unidades lado a lado (até 3)
+  const [comparar, setComparar] = useState<string[]>([]);
+  const [podeNarrar, setPodeNarrar] = useState(false);
+  useEffect(() => setPodeNarrar('speechSynthesis' in window), []);
+  // dentro do apartamento (primeira pessoa) e o elevador que leva até ele
+  const [interior, setInterior] = useState<string | null>(null);
+  const [elevador, setElevador] = useState<{ destino: number; atual: number; nome: string } | null>(null);
+  const entrar = (u: UnidadeViewer) => {
+    if (elevador) return;
+    setVista(null);
+    const destino = Math.max(0, u.andar);
+    const passos = Math.max(1, destino);
+    let atual = 0;
+    setElevador({ destino, atual, nome: nomeAndar.get(u.andar) ?? `${u.andar}º andar` });
+    // o número do andar sobe em ~2 s (mais rápido em prédio alto), depois a porta "abre" na sala
+    const t = setInterval(
+      () => {
+        atual = Math.min(destino, atual + 1);
+        setElevador((e) => (e ? { ...e, atual } : e));
+        if (atual < destino) return;
+        clearInterval(t);
+        setTimeout(() => {
+          if (viewer.current?.entrarNaUnidade(u.id)) setInterior(u.id);
+          setElevador(null);
+        }, 450);
+      },
+      Math.max(120, 1800 / passos),
+    );
+  };
+  const sairDoApartamento = () => {
+    setInterior(null);
+    viewer.current?.definirModo('orbita');
+  };
   // unidades que o assistente mostrou: valem até a pessoa mexer nos filtros
   const [destaqueIA, setDestaqueIA] = useState<ReadonlySet<string> | null>(null);
   // apresentação do estande: a unidade disponível da vez
@@ -234,12 +454,58 @@ export function Vitrine({
   useEffect(() => {
     if (estado === 'pronto') viewer.current?.definirClima(clima);
   }, [estado, clima]);
+  // cliente: segue a câmera da consultora (e a unidade que ela abrir)
+  useEffect(() => {
+    if (estado !== 'pronto') return;
+    if (!conducao?.ativo) {
+      viewer.current?.seguirPose(null);
+      setSoltou(false);
+      return;
+    }
+    if (soltou) return viewer.current?.seguirPose(null);
+    if (conducao.posicao && conducao.alvo) viewer.current?.seguirPose({ posicao: conducao.posicao, alvo: conducao.alvo });
+    if (conducao.unidade !== undefined) {
+      setSelecionada(conducao.unidade);
+      viewer.current?.selecionar(conducao.unidade);
+    }
+  }, [estado, conducao, soltou]);
+  // consultora: manda a câmera ~3 vezes por segundo enquanto conduz (só quando muda); ao parar, avisa o cliente
+  const selecionadaRef = useRef(selecionada);
+  selecionadaRef.current = selecionada;
+  useEffect(() => {
+    if (!conduzindo) return;
+    const url = `/painel/links/${conduzindo}/conducao`;
+    const enviar = (corpo: object) => fetch(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(corpo), keepalive: true }).catch(() => undefined);
+    let ultimo = '';
+    const t = setInterval(() => {
+      const pose = viewer.current?.poseCamera();
+      if (!pose) return;
+      const corpo = { ativo: true, ...pose, unidade: selecionadaRef.current };
+      const chave = JSON.stringify(corpo);
+      if (chave === ultimo) return;
+      ultimo = chave;
+      void enviar(corpo);
+    }, 330);
+    return () => {
+      clearInterval(t);
+      void enviar({ ativo: false });
+    };
+  }, [conduzindo]);
+  useEffect(() => {
+    if (estado === 'pronto' && entorno.tipo !== 'carregando' && viewer.current) setSolar(viewer.current.estudoSolar());
+  }, [estado, entorno.tipo]);
 
   // estande: o próximo visitante começa do zero (sem filtro, unidade, corte ou interior do anterior)
   const reinicio = estande?.reinicio ?? 0;
   useEffect(() => {
     if (!reinicio) return;
     setFiltro(filtroVazio);
+    setFiltroSol([]);
+    setVista(null);
+    setInterior(null);
+    setElevador(null);
+    setComparar([]);
+    if ('speechSynthesis' in window) window.speechSynthesis.cancel();
     setSelecionada(null);
     setAndarCorte('');
     setInteriorAberto(null);
@@ -334,6 +600,34 @@ export function Vitrine({
       setProgressoGiro(null);
     }
   };
+  // foto fotorrealista (path tracing): a imagem revela na tela; cancelar mexendo no botão
+  const [foto, setFoto] = useState<{ feitas: number; total: number } | null>(null);
+  const [erroFoto, setErroFoto] = useState<string | null>(null);
+  const cancelarFoto = useRef<AbortController | null>(null);
+  const tirarFoto = async () => {
+    const v = viewer.current;
+    if (!v) return;
+    setErroFoto(null);
+    const controle = new AbortController();
+    cancelarFoto.current = controle;
+    setFoto({ feitas: 0, total: amostrasFoto });
+    try {
+      const png = await v.fotoRealista({ empresa, predio: predioNome, data: new Date() }, { amostras: amostrasFoto, sinal: controle.signal, aoProgredir: (feitas, total) => setFoto({ feitas, total }) });
+      const link = document.createElement('a');
+      link.href = URL.createObjectURL(png);
+      link.download = `${predioNome.replace(/[^\p{L}\p{N}]+/gu, '-').toLowerCase()}-foto-${hoje()}.png`;
+      link.click();
+      setTimeout(() => URL.revokeObjectURL(link.href), 10_000);
+    } catch (e) {
+      if ((e as Error).name !== 'AbortError') {
+        v.registrarErro();
+        setErroFoto(giroRenderizado ? 'Este aparelho não fez a foto fotorrealista. Use o giro 360° fotorrealista.' : 'Este aparelho não fez a foto fotorrealista. Tente num computador com placa de vídeo.');
+      }
+    } finally {
+      cancelarFoto.current = null;
+      setFoto(null);
+    }
+  };
   const baixarImagem = async () => {
     const v = viewer.current;
     if (!v) return;
@@ -350,6 +644,8 @@ export function Vitrine({
     }
   };
   const voar = (id: string) => {
+    setVista(null);
+    setInterior(null);
     setSelecionada(id);
     viewer.current?.voarPara(id);
   };
@@ -361,6 +657,13 @@ export function Vitrine({
 
   return (
     <div className="grid gap-6 lg:grid-cols-[1fr_340px] lg:items-start">
+      {/* camada por cima da câmera no AR (o navegador a mostra em tela cheia durante a sessão) */}
+      <div ref={sobreposicaoAr} hidden data-testid="camada-ar" className="fixed inset-0 z-50 flex flex-col items-center justify-between bg-transparent p-4 text-white">
+        <p className="rounded-2xl bg-black/60 px-4 py-2 text-center text-sm">Aponte para a mesa e toque para colocar a maquete. Com dois dedos: aumentar, diminuir e girar.</p>
+        <button type="button" onClick={() => void viewer.current?.sairDoImersivo()} className="rounded-full bg-white px-6 py-3 font-semibold text-slate-900 shadow">
+          Sair da maquete
+        </button>
+      </div>
       <div
         data-testid="vitrine-3d"
         data-estado={estado}
@@ -372,6 +675,17 @@ export function Vitrine({
         data-destaque-ia={destaqueIA ? [...destaqueIA].sort().join(',') : ''}
         data-ao-vivo={estadoAoVivo}
         data-clima={clima}
+        data-vista={vista ?? ''}
+        data-interior={interior ?? ''}
+        data-conducao={conducao?.ativo ? (soltou ? 'solto' : 'seguindo') : conduzindo ? 'conduzindo' : ''}
+        data-elevador={elevador ? String(elevador.atual) : ''}
+        data-acabamento={telemetria?.acabamento ? 'ligado' : 'desligado'}
+        data-imersivo={emImersivo ?? ''}
+        data-lazer={itensLazer.length}
+        data-moradores={telemetria?.moradores ?? 0}
+        data-nivel={telemetria?.nivel ?? ''}
+        data-som={telemetria?.som ? 'ligado' : 'desligado'}
+        data-marcando-lazer={marcandoLazer ? 'sim' : ''}
         data-apresentacao={apresentando ? 'ligada' : 'desligada'}
         data-unidade-da-vez={vitrineDaVez ?? ''}
         className={`relative ${estande ? 'h-[calc(100dvh-7rem)]' : 'h-[70vh]'} min-h-96 overflow-hidden rounded-2xl border border-borda bg-fundo lg:sticky lg:top-6`}
@@ -382,6 +696,44 @@ export function Vitrine({
           aria-label="Prédio em 3D. Arraste para girar, role para aproximar, toque numa unidade para ver os detalhes."
         />
         {estado === 'carregando' && <p className="absolute inset-0 grid place-items-center text-suave">Carregando o 3D…</p>}
+        {(tour || pontoLazer) && !conducao?.ativo && (
+          <PainelDoPonto item={itensLazer.find((l) => l.id === pontoLazer) ?? null} tour={tour} total={itensLazer.length} aoProximo={proximoDoTour} aoEncerrar={encerrarLazer} />
+        )}
+        {conducao?.ativo && (
+          <div className="pointer-events-none absolute inset-x-0 top-3 z-10 flex justify-center px-16">
+            <div className="pointer-events-auto flex flex-wrap items-center justify-center gap-2 rounded-2xl bg-acento px-3 py-1.5 text-center text-sm text-acento-texto shadow" role="status">
+              <span>{soltou ? 'A consultora está conduzindo a visita.' : 'A consultora está conduzindo a visita: você vê o que ela mostra.'}</span>
+              <button type="button" onClick={() => setSoltou((x) => !x)} className="rounded-full bg-white px-3 py-1 font-semibold text-slate-900 hover:bg-white/90">
+                {soltou ? 'Seguir a consultora' : 'Explorar sozinho'}
+              </button>
+            </div>
+          </div>
+        )}
+        {modo === 'primeira-pessoa' && telemetria && viewer.current && !elevador && (
+          <Minimapa mapa={viewer.current.mapaDoLote()} posicao={{ x: telemetria.posicao.x, z: telemetria.posicao.z }} direcao={telemetria.direcao} />
+        )}
+        {elevador && (
+          <div data-testid="elevador" className="absolute inset-0 z-20 grid place-items-center bg-slate-950/90 text-white" role="status" aria-live="polite">
+            <div className="grid justify-items-center gap-2">
+              <span className="text-sm uppercase tracking-[0.3em] text-white/70">Elevador</span>
+              <span className="text-7xl font-bold tabular-nums">{elevador.atual === 0 ? 'T' : `${elevador.atual}º`}</span>
+              <span className="text-white/80">{elevador.atual < elevador.destino ? 'Subindo…' : `${elevador.nome}: a porta está abrindo`}</span>
+            </div>
+          </div>
+        )}
+        {interior && !elevador && (
+          <div className="pointer-events-none absolute inset-x-0 bottom-9 z-10 flex justify-center px-28">
+            {/* o toque passa pela faixa (é chão para andar, em tela pequena ela cobre o piso); só o botão recebe */}
+            <div className="flex flex-wrap items-center justify-center gap-2 rounded-2xl bg-black/65 px-3 py-1.5 text-center text-xs text-white backdrop-blur sm:text-sm">
+              <span>
+                Dentro da unidade {unidadesAtuais.find((u) => u.id === interior)?.codigo} · toque no chão para andar · arraste para olhar
+              </span>
+              <button type="button" onClick={sairDoApartamento} className="pointer-events-auto rounded-full bg-white px-3 py-1 font-semibold text-slate-900 hover:bg-white/90">
+                Sair do apartamento
+              </button>
+            </div>
+          </div>
+        )}
         {apresentando && <Apresentacao unidade={unidadesAtuais.find((u) => u.id === vitrineDaVez) ?? null} nomeAndar={(n) => nomeAndar.get(n) ?? `${n}º andar`} />}
         {estado === 'erro' && <p className="absolute inset-0 grid place-items-center text-perigo">Não foi possível carregar o modelo 3D.</p>}
         {telemetria && (
@@ -440,6 +792,16 @@ export function Vitrine({
                 <dt className="text-suave">Preço</dt>
                 <dd>{brl(unidade.preco)}</dd>
               </dl>
+              {solar.get(unidade.id) && (
+                <div data-testid="sol-unidade" className="grid gap-1 rounded-lg bg-fundo px-3 py-2">
+                  <span className="font-semibold">☀ {ROTULO_SOL[solar.get(unidade.id)!.periodo]}</span>
+                  <span className="text-xs text-suave">
+                    Sol direto na janela: {horas(solar.get(unidade.id)!.inverno)} no inverno · {horas(solar.get(unidade.id)!.equinocio)} no outono/primavera ·{' '}
+                    {horas(solar.get(unidade.id)!.verao)} no verão{entorno.tipo === 'pronto' ? ', com a sombra dos prédios em volta' : ''}.
+                  </span>
+                </div>
+              )}
+              {unidade.status === 'disponivel' && unidade.preco !== null && <SimuladorFinanciamento key={unidade.id} preco={unidade.preco} />}
               <div className="flex flex-wrap gap-2">
                 <Botao type="button" variante="secundario" onClick={() => favoritar(unidade.id)} aria-pressed={favoritos.has(unidade.id)}>
                   {favoritos.has(unidade.id) ? '★ Favorita' : '☆ Favoritar'}
@@ -447,11 +809,124 @@ export function Vitrine({
                 <Botao type="button" variante="secundario" onClick={() => voar(unidade.id)}>
                   Ir até ela
                 </Botao>
+                <Botao
+                  type="button"
+                  variante="secundario"
+                  aria-pressed={comparar.includes(unidade.id)}
+                  disabled={!comparar.includes(unidade.id) && comparar.length >= MAX_COMPARAR}
+                  onClick={() => setComparar((c) => (c.includes(unidade.id) ? c.filter((x) => x !== unidade.id) : [...c, unidade.id]))}
+                >
+                  {comparar.includes(unidade.id) ? '✓ Comparando' : 'Comparar'}
+                </Botao>
+                {podeNarrar && (
+                  <Botao type="button" variante="secundario" onClick={() => narrar(textoDaUnidade(unidade, nomeAndar.get(unidade.andar) ?? `${unidade.andar}º andar`, solar.get(unidade.id)))}>
+                    Ouvir
+                  </Botao>
+                )}
+                {interior !== unidade.id && (
+                  <Botao type="button" variante="secundario" disabled={estado !== 'pronto' || elevador !== null} onClick={() => entrar(unidade)}>
+                    Entrar no apartamento
+                  </Botao>
+                )}
+                {solar.has(unidade.id) &&
+                  (vista === unidade.id ? (
+                    <Botao
+                      type="button"
+                      variante="secundario"
+                      onClick={() => {
+                        setVista(null);
+                        viewer.current?.visaoGeral();
+                      }}
+                    >
+                      Voltar ao prédio
+                    </Botao>
+                  ) : (
+                    <Botao type="button" onClick={() => viewer.current?.vistaDaUnidade(unidade.id) && setVista(unidade.id)}>
+                      Ver a vista desta unidade
+                    </Botao>
+                  ))}
               </div>
             </div>
           </Cartao>
         )}
 
+        {comparar.length >= 2 && (
+          <Cartao titulo="Comparar unidades">
+            <div className="overflow-x-auto" data-testid="comparador">
+              <table className="w-full text-left text-sm">
+                <thead>
+                  <tr>
+                    <th className="py-1 pr-2 font-medium text-suave" scope="col">
+                      <span className="sr-only">Item</span>
+                    </th>
+                    {comparar.map((id) => (
+                      <th key={id} scope="col" className="py-1 pr-2 font-semibold">
+                        {unidadesAtuais.find((u) => u.id === id)?.codigo}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {(
+                    [
+                      ['Situação', (u: UnidadeViewer) => ROTULO_STATUS[u.status]],
+                      ['Andar', (u: UnidadeViewer) => nomeAndar.get(u.andar) ?? String(u.andar)],
+                      ['Quartos', (u: UnidadeViewer) => (u.quartos === null ? '—' : String(u.quartos))],
+                      ['Área', (u: UnidadeViewer) => (u.areaM2 === null ? '—' : `${u.areaM2.toLocaleString('pt-BR')} m²`)],
+                      ['Preço', (u: UnidadeViewer) => brl(u.preco)],
+                      ['Preço por m²', (u: UnidadeViewer) => (u.preco !== null && u.areaM2 ? brl(Math.round(u.preco / u.areaM2)) : '—')],
+                      ['Sol', (u: UnidadeViewer) => (solar.get(u.id) ? ROTULO_SOL[solar.get(u.id)!.periodo] : '—')],
+                      ['Sol no inverno', (u: UnidadeViewer) => (solar.get(u.id) ? horas(solar.get(u.id)!.inverno) : '—')],
+                    ] as const
+                  ).map(([rotulo, valor]) => (
+                    <tr key={rotulo} className="border-t border-borda">
+                      <th scope="row" className="py-1 pr-2 font-normal text-suave">
+                        {rotulo}
+                      </th>
+                      {comparar.map((id) => {
+                        const u = unidadesAtuais.find((x) => x.id === id);
+                        return (
+                          <td key={id} className="py-1 pr-2">
+                            {u ? valor(u) : '—'}
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              <Botao type="button" variante="secundario" className="mt-2" onClick={() => setComparar([])}>
+                Limpar comparação
+              </Botao>
+            </div>
+          </Cartao>
+        )}
+        {linksParaConduzir.length > 0 && (
+          <Cartao titulo="Visita guiada ao vivo">
+            <div className="grid gap-3 text-sm" data-testid="conduzir">
+              <p className="text-suave">Ligue com o cliente e conduza: quem estiver com o link aberto vê exatamente o que você mostra aqui, em tempo real.</p>
+              {conduzindo ? (
+                <Botao type="button" variante="perigo" onClick={() => setConduzindo(null)}>
+                  Encerrar visita guiada
+                </Botao>
+              ) : (
+                <>
+                  <Selecao id="link-conduzir" rotulo="Link do cliente" value={linkEscolhido} onChange={(e) => setLinkEscolhido(e.target.value)}>
+                    <option value="">Escolha…</option>
+                    {linksParaConduzir.map((l) => (
+                      <option key={l.id} value={l.id}>
+                        {l.titulo ?? 'Link sem nome'}
+                      </option>
+                    ))}
+                  </Selecao>
+                  <Botao type="button" disabled={!linkEscolhido} onClick={() => setConduzindo(linkEscolhido)}>
+                    Conduzir ao vivo
+                  </Botao>
+                </>
+              )}
+            </div>
+          </Cartao>
+        )}
         {assistenteUrl && (
           <Cartao titulo="Pergunte ao assistente">
             <Assistente url={assistenteUrl} aoAcao={aoAcaoIA} />
@@ -487,12 +962,32 @@ export function Vitrine({
                 ))}
               </div>
             </fieldset>
+            {solar.size > 0 && (
+              <fieldset className="grid gap-2">
+                <legend className="mb-1 font-medium">Sol</legend>
+                <div className="flex flex-wrap gap-x-4 gap-y-1">
+                  {(['manha', 'tarde', 'dia-todo'] as const).map((p) => (
+                    <label key={p} className="flex min-h-10 items-center gap-2">
+                      <input type="checkbox" checked={filtroSol.includes(p)} onChange={() => setFiltroSol((f) => alternar(f, p))} />
+                      {ROTULO_SOL[p]}
+                    </label>
+                  ))}
+                </div>
+              </fieldset>
+            )}
             <label className="flex min-h-10 items-center gap-2">
               <input type="checkbox" checked={filtro.somenteFavoritos} onChange={(e) => setFiltro({ ...filtro, somenteFavoritos: e.target.checked })} />
               Só favoritas ({favoritos.size})
             </label>
             {ativo && (
-              <Botao type="button" variante="secundario" onClick={() => setFiltro(filtroVazio())}>
+              <Botao
+                type="button"
+                variante="secundario"
+                onClick={() => {
+                  setFiltro(filtroVazio());
+                  setFiltroSol([]);
+                }}
+              >
                 Limpar filtros
               </Botao>
             )}
@@ -551,6 +1046,25 @@ export function Vitrine({
           </Cartao>
         )}
 
+        <CartaoLazer
+          itens={itensLazer}
+          pronto={estado === 'pronto'}
+          tour={tour}
+          aoIr={(id) => irAoPontoLazer(itensLazer.findIndex((l) => l.id === id), false)}
+          aoComecarTour={() => {
+            setTour({ indice: 0, vistos: [], completo: false });
+            irAoPontoLazer(0, true);
+          }}
+          gerir={gerirLazer !== null}
+          marcando={marcandoLazer !== null}
+          aoMarcar={(d) => {
+            setErroLazer(null);
+            setMarcandoLazer(d);
+          }}
+          aoCancelarMarcacao={() => setMarcandoLazer(null)}
+          aoRemover={(id) => void removerPontoLazer(id)}
+          erro={erroLazer}
+        />
         <Cartao titulo="Vista">
           <div className="grid gap-4 text-sm">
             <p data-testid="aviso-entorno" className="text-suave">
@@ -571,7 +1085,7 @@ export function Vitrine({
               <Campo id="data-sol" rotulo="Dia do sol" type="date" value={dataSol} onChange={(e) => e.target.value && setDataSol(e.target.value)} />
               <label htmlFor="hora-sol" className="grid gap-1">
                 <span className="font-medium">Hora: {horaLegivel(horaSol)}</span>
-                <input id="hora-sol" type="range" min={6} max={19} step={0.25} value={horaSol} onChange={(e) => setHoraSol(Number(e.target.value))} />
+                <input id="hora-sol" type="range" min={5} max={22} step={0.25} value={horaSol} onChange={(e) => setHoraSol(Number(e.target.value))} />
               </label>
             </div>
             <fieldset className="grid gap-2">
@@ -590,6 +1104,15 @@ export function Vitrine({
                 ))}
               </div>
             </fieldset>
+            <Botao
+              type="button"
+              variante="secundario"
+              disabled={estado !== 'pronto'}
+              aria-pressed={telemetria?.som ?? false}
+              onClick={() => void viewer.current?.definirSom(!telemetria?.som)}
+            >
+              {telemetria?.som ? 'Desligar o som ambiente' : 'Ligar o som ambiente'}
+            </Botao>
             {giroRenderizado && (
               <Botao type="button" disabled={progressoGiro !== null} onClick={() => void abrirGiroFoto()}>
                 Abrir giro 360° fotorrealista
@@ -603,25 +1126,91 @@ export function Vitrine({
             <Botao type="button" variante="secundario" disabled={estado !== 'pronto' || progressoGiro !== null} onClick={() => void abrirGiro()}>
               {giro ? 'Abrir giro 360° (modo leve)' : 'Gerar giro 360° (modo leve)'}
             </Botao>
+            {!estande &&
+              (foto ? (
+                <div className="grid gap-2" data-testid="foto-revelando">
+                  <p role="status">
+                    Revelando a foto fotorrealista… {foto.feitas} de {foto.total}
+                  </p>
+                  <progress max={foto.total} value={foto.feitas} className="w-full" aria-label="Progresso da foto" />
+                  <Botao type="button" variante="secundario" onClick={() => cancelarFoto.current?.abort()}>
+                    Cancelar a foto
+                  </Botao>
+                </div>
+              ) : (
+                <Botao type="button" variante="secundario" disabled={estado !== 'pronto' || baixando} onClick={() => void tirarFoto()}>
+                  Foto fotorrealista (PNG)
+                </Botao>
+              ))}
+            {erroFoto && (
+              <p role="alert" className="text-sm text-perigo">
+                {erroFoto}
+              </p>
+            )}
             {!estande && (
               <Botao type="button" variante="secundario" disabled={estado !== 'pronto' || baixando} onClick={() => void baixarImagem()}>
                 {baixando ? 'Gerando imagem…' : 'Baixar imagem (PNG)'}
               </Botao>
             )}
             {modo === 'orbita' ? (
-              <Botao type="button" variante="secundario" disabled={estado !== 'pronto'} onClick={() => viewer.current?.definirModo('primeira-pessoa')}>
+              <Botao type="button" variante="secundario" disabled={estado !== 'pronto'} onClick={() => {
+                  setVista(null);
+                  setInterior(null);
+                  viewer.current?.definirModo('primeira-pessoa');
+                }}>
                 Andar a pé (1ª pessoa)
               </Botao>
             ) : (
               <>
                 <p className="text-suave">WASD ou setas para andar, arraste para olhar. No celular, use o controle no canto da tela.</p>
-                <Botao type="button" variante="secundario" onClick={() => viewer.current?.definirModo('orbita')}>
+                <Botao type="button" variante="secundario" onClick={() => {
+                  setVista(null);
+                  setInterior(null);
+                  viewer.current?.definirModo('orbita');
+                }}>
                   Voltar para a vista de cima
                 </Botao>
               </>
             )}
           </div>
         </Cartao>
+        {(imersivo.vr || imersivo.ar || imersivo.quickLook) && (
+          <Cartao titulo="Realidade virtual e aumentada">
+            <div className="grid gap-3 text-sm" data-testid="imersivo">
+              {imersivo.vr && (
+                <>
+                  <p className="text-suave">No óculos de VR: ande pelo empreendimento em tamanho real. Aponte o controle para o chão e solte o gatilho para ir até lá; aponte para uma unidade para abri-la.</p>
+                  <Botao type="button" disabled={estado !== 'pronto' || emImersivo !== null} onClick={() => void entrarEmVr()}>
+                    Ver em VR
+                  </Botao>
+                </>
+              )}
+              {imersivo.ar && (
+                <>
+                  <p className="text-suave">Pela câmera do celular, a maquete do prédio aparece sobre a mesa, com a situação de cada unidade.</p>
+                  <Botao type="button" variante="secundario" disabled={estado !== 'pronto' || emImersivo !== null} onClick={() => void entrarEmAr()}>
+                    Ver a maquete na mesa (AR)
+                  </Botao>
+                </>
+              )}
+              {imersivo.quickLook &&
+                (usdz ? (
+                  // Quick Look da Apple: o link precisa ter uma imagem dentro para abrir em AR
+                  <a rel="ar" href={usdz} data-testid="link-quick-look" className="flex items-center gap-3 rounded-lg border border-borda px-3 py-2 font-medium hover:bg-fundo">
+                    <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='%230369a1' d='M12 2 3 7v10l9 5 9-5V7zm0 2.3 6.5 3.6L12 11.5 5.5 7.9zM5 9.6l6 3.3v6.8l-6-3.3zm8 10.1v-6.8l6-3.3v6.8z'/%3E%3C/svg%3E" alt="" width={28} height={28} />
+                    Ver a maquete na mesa (AR do iPhone)
+                  </a>
+                ) : (
+                  <p className="text-suave">Preparando a maquete para o AR do iPhone…</p>
+                ))}
+              {erroImersivo && (
+                <p role="alert" className="text-perigo">
+                  {erroImersivo}
+                </p>
+              )}
+            </div>
+          </Cartao>
+        )}
       </div>
     </div>
   );
@@ -644,6 +1233,32 @@ function Apresentacao({ unidade, nomeAndar }: { unidade: UnidadeViewer | null; n
       )}
       <p className="animate-pulse rounded-full bg-white/20 px-5 py-2 text-lg font-semibold backdrop-blur">Toque na tela para explorar</p>
     </div>
+  );
+}
+
+/** Minimapa (primeira pessoa): o prédio, os vizinhos reais e você, com a seta para onde olha. */
+function Minimapa({ mapa, posicao, direcao }: { mapa: { predio: Caixa; vizinhos: Caixa[]; lazer: Array<{ id: string; x: number; z: number }> }; posicao: { x: number; z: number }; direcao: { x: number; z: number } }) {
+  const p = mapa.predio;
+  const meio = { x: (p.minX + p.maxX) / 2, z: (p.minZ + p.maxZ) / 2 };
+  const alcance = Math.max(p.maxX - p.minX, p.maxZ - p.minZ) / 2 + 35; // metros do centro até a borda do mapa
+  const L = 140;
+  const px = (x: number) => ((x - meio.x) / alcance) * (L / 2) + L / 2;
+  const pz = (z: number) => ((z - meio.z) / alcance) * (L / 2) + L / 2;
+  const caixa = (c: Caixa, cor: string, chave: string) => (
+    <rect key={chave} x={px(c.minX)} y={pz(c.minZ)} width={((c.maxX - c.minX) / alcance) * (L / 2)} height={((c.maxZ - c.minZ) / alcance) * (L / 2)} fill={cor} />
+  );
+  const x = Math.min(L - 6, Math.max(6, px(posicao.x)));
+  const y = Math.min(L - 6, Math.max(6, pz(posicao.z)));
+  return (
+    <svg data-testid="minimapa" width={L} height={L} viewBox={`0 0 ${L} ${L}`} className="absolute bottom-9 right-3 rounded-xl border border-white/40 bg-slate-900/70 shadow" role="img" aria-label="Minimapa: você está no ponto azul">
+      {mapa.vizinhos.map((c, i) => caixa(c, '#64748b', `v${i}`))}
+      {caixa(p, '#e2e8f0', 'predio')}
+      {mapa.lazer.map((l) => (
+        <circle key={l.id} cx={Math.min(L - 4, Math.max(4, px(l.x)))} cy={Math.min(L - 4, Math.max(4, pz(l.z)))} r={3.5} fill="#f59e0b" />
+      ))}
+      <circle cx={x} cy={y} r={5} fill="#0ea5e9" stroke="#fff" strokeWidth={2} />
+      <line x1={x} y1={y} x2={x + direcao.x * 14} y2={y + direcao.z * 14} stroke="#0ea5e9" strokeWidth={3} strokeLinecap="round" />
+    </svg>
   );
 }
 

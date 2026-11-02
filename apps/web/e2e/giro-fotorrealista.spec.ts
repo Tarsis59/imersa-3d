@@ -87,9 +87,13 @@ test('giro 360° fotorrealista: IFC real → pedido na página do prédio → wo
   // estúdio de marketing: vídeo 9:16 do prédio (Blender, com selo) → assistir e baixar
   await page.goto(predio);
   const estudio = page.getByTestId('estudio');
+  // com narração (voz feminina, roteiro automático com os dados do prédio); no teste, a voz é simulada
+  await estudio.getByLabel('Voz').selectOption({ label: 'Voz feminina (Dora)' });
+  await expect(estudio.getByLabel('Roteiro (opcional)')).toBeVisible();
   await estudio.getByRole('button', { name: 'Gerar vídeo Reels e Stories (9:16)' }).click();
-  await expect(estudio.getByRole('button', { name: /Reels e Stories \(9:16\): na fila/ })).toBeVisible();
+  // o pedido entra na lista (o worker do teste pega em 2 s: "na fila" pode já ter passado quando a tela atualiza)
   const itemVideo = estudio.getByTestId('lista-videos').getByRole('listitem').first();
+  await expect(itemVideo).toHaveAttribute('data-status-video', /na_fila|processando|pronto/);
   await expect
     .poll(
       async () => {
@@ -99,6 +103,7 @@ test('giro 360° fotorrealista: IFC real → pedido na página do prédio → wo
       { timeout: 420_000, intervals: [3_000] },
     )
     .toBe('pronto');
+  await expect(itemVideo.getByTestId('video-narrado')).toContainText('Voz feminina (Dora)');
   await itemVideo.getByRole('button', { name: 'Assistir' }).click();
   const video = itemVideo.locator('video');
   await expect.poll(() => video.evaluate((v: HTMLVideoElement) => v.readyState >= 1 && v.videoHeight > v.videoWidth), { timeout: 30_000 }).toBe(true);

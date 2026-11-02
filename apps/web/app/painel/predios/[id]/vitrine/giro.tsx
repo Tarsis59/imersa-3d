@@ -1,6 +1,6 @@
 'use client';
 import { useEffect, useRef, useState } from 'react';
-import { indiceDaCor, quadroPorArrasto, type Giro } from '@imersa/viewer';
+import { indiceMaisProximo, quadroPorArrasto, type Giro } from '@imersa/viewer';
 import { Botao } from '@/components/ui';
 import { pontoNaImagem } from '@/lib/giro-zip';
 
@@ -49,8 +49,12 @@ export function Giro360({
     mascara.close();
     const x = Math.min(tela.width - 1, Math.max(0, Math.floor(fx * tela.width)));
     const y = Math.min(tela.height - 1, Math.max(0, Math.floor(fy * tela.height)));
-    const [r, g, b] = ctx.getImageData(x, y, 1, 1).data;
-    const i = indiceDaCor(r!, g!, b!);
+    // o dedo é impreciso: caiu numa laje, pilar ou fresta, vale a unidade mais perto (até ~3% da imagem)
+    const raio = Math.max(4, Math.round(Math.min(tela.width, tela.height) * 0.03));
+    const x0 = Math.max(0, x - raio);
+    const y0 = Math.max(0, y - raio);
+    const janela = ctx.getImageData(x0, y0, Math.min(tela.width, x + raio + 1) - x0, Math.min(tela.height, y + raio + 1) - y0);
+    const i = indiceMaisProximo(janela.data, janela.width, janela.height, x - x0, y - y0, raio);
     return i === null ? null : (giro.unidades[i] ?? null);
   }
 

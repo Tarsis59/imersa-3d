@@ -48,6 +48,11 @@ jobs:
       - run: pnpm e2e
         env:
           BIM_PYTHON: python
+      # estande offline: a página guardada pelo service worker só hidrata no site de produção (build otimizado)
+      - run: pnpm --filter @imersa/web exec playwright test e2e/estande.spec.ts --project=chromium
+        env:
+          BIM_PYTHON: python
+          E2E_PRODUCAO: '1'
       - uses: actions/upload-artifact@v4
         if: failure()
         with:

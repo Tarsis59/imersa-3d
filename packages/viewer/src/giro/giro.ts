@@ -14,6 +14,32 @@ export function indiceDaCor(r: number, g: number, b: number): number | null {
   return v === 0 ? null : v - 1;
 }
 
+/**
+ * Toque no giro: a unidade no ponto ou, se o dedo caiu numa laje, pilar ou fresta, a mais próxima dentro de `raio`
+ * pixels (procura em anéis cada vez maiores). `pixels` = RGBA da máscara inteira. `null` se não há unidade perto.
+ */
+export function indiceMaisProximo(pixels: ArrayLike<number>, largura: number, altura: number, x: number, y: number, raio: number): number | null {
+  const em = (px: number, py: number): number | null => {
+    if (px < 0 || py < 0 || px >= largura || py >= altura) return null;
+    const k = (py * largura + px) * 4;
+    return indiceDaCor(pixels[k]!, pixels[k + 1]!, pixels[k + 2]!);
+  };
+  const cx = Math.round(x);
+  const cy = Math.round(y);
+  for (let r = 0; r <= raio; r++) {
+    let melhor: { i: number; d: number } | null = null;
+    for (let dy = -r; dy <= r; dy++)
+      for (let dx = -r; dx <= r; dx++) {
+        if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue; // só o anel
+        const i = em(cx + dx, cy + dy);
+        const d = dx * dx + dy * dy;
+        if (i !== null && (!melhor || d < melhor.d)) melhor = { i, d };
+      }
+    if (melhor) return melhor.i;
+  }
+  return null;
+}
+
 /** Arrastar a largura inteira do giro = uma volta completa. Volta ao início dos dois lados. */
 export function quadroPorArrasto(atual: number, dxPx: number, larguraPx: number, total: number): number {
   const passos = Math.round((dxPx / larguraPx) * total);
