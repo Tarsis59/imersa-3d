@@ -6,7 +6,7 @@ import { apiNaPagina } from '@/lib/sessao';
 import { ehGestao, type Arquivo, type DetalheProjeto, type Espelho, type GirosDoPredio, type ItemLazer, type LinkCliente, type Me, type Portal } from '@/lib/tipos';
 import { estiloMarca, URL_GOOGLE_FONT } from '@/lib/tema';
 import { Vitrine } from './vitrine';
-import { bilheteAoVivo, buscarGaleria, carregarEntorno, criarLazer, fotosDoProjeto, linkDoArquivo, listarPontos, removerLazer, rotaAte, salvarGaleria, type FotoProjeto } from './actions';
+import { bilheteAoVivo, buscarGaleria, buscarTerrenoLoteamento, carregarEntorno, criarLazer, fotosDoProjeto, linkDoArquivo, listarPontos, removerLazer, rotaAte, salvarGaleria, type FotoProjeto } from './actions';
 import { buscarMarca } from '../../../marca/actions';
 
 const NIVEIS_FIXOS = ['alto', 'medio', 'baixo'] as const;
@@ -23,7 +23,7 @@ export default async function PaginaVitrine({ params, searchParams }: { params: 
   if (r.status !== 200) notFound();
   const { predio, andares } = r.dados;
   // independentes entre si: em paralelo (cada ida à API custa uma volta de rede)
-  const [detalhe, lista, download, me, giros, ia, lazer, fotos, lotes, fotosProjeto, galeria, marca] = await Promise.all([
+  const [detalhe, lista, download, me, giros, ia, lazer, fotos, lotes, fotosProjeto, galeria, marca, terreno] = await Promise.all([
     apiNaPagina<DetalheProjeto>(`/projetos/${encodeURIComponent(predio.projetoId)}`, volta),
     apiNaPagina<Arquivo[]>(`/projetos/${encodeURIComponent(predio.projetoId)}/arquivos`, volta),
     predio.modeloArquivoId ? apiNaPagina<{ url: string }>(`/arquivos/${predio.modeloArquivoId}/download`, volta) : null,
@@ -36,6 +36,7 @@ export default async function PaginaVitrine({ params, searchParams }: { params: 
     fotosDoProjeto(id),
     buscarGaleria(id),
     buscarMarca(),
+    buscarTerrenoLoteamento(id),
   ]);
   const empresa = me.dados.empresas.find((e) => e.id === me.dados.tenantId)?.nome ?? '';
   // visita guiada ao vivo: a consultora conduz pelos links ativos dela (a gestão, por todos)
@@ -91,6 +92,7 @@ export default async function PaginaVitrine({ params, searchParams }: { params: 
         linksParaConduzir={linksAtivos}
         lazer={lazer.status === 200 ? lazer.dados : []}
         lotes={lotes.status === 200 ? lotes.dados.lotes : []}
+        terreno={terreno}
         gerirLazer={ehGestao(me.dados.papel) ? { criar: criarLazer.bind(null, predio.id), remover: removerLazer } : null}
         fotosProjeto={fotosProjeto}
         galeria={galeria}

@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { describe, expect, it } from 'vitest';
 import { localParaLonLat } from './lotes.teste-ajuda';
-import { COR_LOTE, criarLotes, type LoteViewer } from './lotes';
+import { COR_LOTE, criarLotes, DETALHE_VARREDURA, type LoteViewer } from './lotes';
 
 const centro = { lon: -46.65, lat: -23.56 };
 // 3 lotes de 12 × 30 m lado a lado (quadra 01) e 1 na quadra 02
@@ -45,5 +45,48 @@ describe('lotes no chão', () => {
     expect(vermelho).toBeGreaterThan(cor.getZ(0)); // a ficou vermelha
     const apagado = Math.max(cor.getX(18), cor.getY(18), cor.getZ(18));
     expect(apagado).toBeLessThan(0.35); // d (fora do filtro) quase some
+  });
+
+  it('varredura em ciano (Plano 12d, item 4): só os lotes do filtro ganham a marca "aPassou" para acender', () => {
+    const passou = l.preenchimento.geometry.getAttribute('aPassou');
+    // sem filtro: todo mundo passa
+    l.pintar(new Map(), null);
+    expect([passou.getX(0), passou.getX(6), passou.getX(18)]).toEqual([1, 1, 1]);
+    // só "a" e "b" passam: "c" e "d" ficam de fora (não acendem na varredura)
+    l.pintar(new Map(), new Set(['a', 'b']));
+    expect([passou.getX(0), passou.getX(6), passou.getX(12), passou.getX(18)]).toEqual([1, 1, 0, 0]);
+    // liga/avança/desliga sem lançar erro (o uniform em si só é lido pelo WebGL no desenho real)
+    expect(() => {
+      l.definirVarredura(true, 0);
+      l.definirVarredura(true, 0.5);
+      l.definirVarredura(true, 1);
+      l.definirVarredura(false, 1);
+    }).not.toThrow();
+  });
+
+  it('"Ver daqui" (Plano 12d, item 11): ponto 3 m fora do maior lado do lote, olhando para o centro dele', () => {
+    const v = l.vistas.get('b')!;
+    expect(v).toBeDefined();
+    // lote "b": x de 12 a 24, z de 0 a -30 — o lado mais longo (30 m) é o de x = 24; 3 m para fora dele é x ≈ 27
+    expect(v.x).toBeCloseTo(27, 0);
+    expect(v.z).toBeCloseTo(-15, 0);
+    expect(v.alvoX).toBeCloseTo(18, 0);
+    expect(v.alvoZ).toBeCloseTo(-15, 0);
+  });
+
+  it('footprint da casa-modelo (Plano 12d, item 9): o retângulo construtivo do lote, com os recuos', () => {
+    // lote "b": x de 12 a 24, z de 0 a -30; a frente detectada (item 11) é o lado x = 24, normal (1, 0)
+    const f = l.footprint('b');
+    expect(f).not.toBeNull();
+    expect(f!.largura).toBeCloseTo(30 - 2 * 1.5, 0); // lateral = a extensão em z (30 m) menos os recuos laterais
+    expect(f!.profundidade).toBeCloseTo(12 - 5 - 3, 0); // profundidade = a extensão em x (12 m) menos frente/fundo
+    expect(l.footprint('inexistente')).toBeNull();
+  });
+
+  it('DETALHE_VARREDURA é o interruptor da qualidade baixa (objeto único, mutável por fora)', () => {
+    expect(DETALHE_VARREDURA.value).toBe(1);
+    DETALHE_VARREDURA.value = 0;
+    expect(DETALHE_VARREDURA.value).toBe(0);
+    DETALHE_VARREDURA.value = 1; // devolve o padrão para não vazar entre testes
   });
 });

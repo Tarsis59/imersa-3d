@@ -1,7 +1,7 @@
 'use client';
 import { useState } from 'react';
 import { Botao, Campo, Cartao, Selecao } from '@/components/ui';
-import { CATEGORIAS_LAZER, ROTULO_LAZER, type CategoriaLazer, type ItemLazer } from '@/lib/tipos';
+import { CATEGORIAS_LAZER, GRUPOS_LAZER, ROTULO_GRUPO, ROTULO_LAZER, type CategoriaLazer, type GrupoLazer, type ItemLazer } from '@/lib/tipos';
 import type { NovoLazer } from './actions';
 import { Lightbox, MiniaturaFoto, type FotoGaleria } from './galeria';
 
@@ -44,6 +44,7 @@ export function CartaoLazer({
   aoRemover,
   erro,
   fotosDisponiveis = [],
+  aoPasseio3D,
 }: {
   itens: ItemLazer[];
   pronto: boolean;
@@ -58,11 +59,17 @@ export function CartaoLazer({
   erro: string | null;
   /** Fotos já enviadas no projeto, para a gestão escolher as da ficha deste espaço (Plano 12b, item 6). */
   fotosDisponiveis?: FotoGaleria[];
+  /** "Passeio 3D" (Plano 12d, item 7): põe o boneco no chão, em 1ª pessoa, naquele ponto. */
+  aoPasseio3D?: (id: string) => void;
 }) {
   const [categoria, setCategoria] = useState<CategoriaLazer>('piscina');
   const [nome, setNome] = useState('');
   const [descricao, setDescricao] = useState('');
   const [fotosEscolhidas, setFotosEscolhidas] = useState<string[]>([]);
+  // menu por categoria (Plano 12d, item 7): Lazer, Sociais, Gastronomia, Beach Sports, Pet; "Todos" sem filtro
+  const [grupo, setGrupo] = useState<GrupoLazer | null>(null);
+  const gruposComItem = GRUPOS_LAZER.filter((g) => itens.some((l) => l.grupo === g));
+  const itensDoGrupo = grupo ? itens.filter((l) => l.grupo === grupo) : itens;
   if (!itens.length && !gerir) return null;
   return (
     <Cartao titulo="Lazer">
@@ -72,8 +79,20 @@ export function CartaoLazer({
             <Botao type="button" disabled={!pronto || (tour !== null && !tour.completo)} onClick={aoComecarTour}>
               Conheça o lazer em 2 min
             </Botao>
+            {gruposComItem.length > 1 && (
+              <div className="flex flex-wrap gap-1.5" role="group" aria-label="Categorias do lazer" data-testid="categorias-lazer">
+                <button type="button" aria-pressed={grupo === null} onClick={() => setGrupo(null)} className={`min-h-8 rounded-full border px-3 text-xs font-semibold ${grupo === null ? 'border-acento bg-acento text-acento-texto' : 'border-borda hover:bg-fundo'}`}>
+                  Todos
+                </button>
+                {gruposComItem.map((g) => (
+                  <button key={g} type="button" aria-pressed={grupo === g} onClick={() => setGrupo(g)} className={`min-h-8 rounded-full border px-3 text-xs font-semibold ${grupo === g ? 'border-acento bg-acento text-acento-texto' : 'border-borda hover:bg-fundo'}`}>
+                    {ROTULO_GRUPO[g]}
+                  </button>
+                ))}
+              </div>
+            )}
             <ul className="grid gap-1" data-testid="lista-lazer">
-              {itens.map((l) => {
+              {itensDoGrupo.map((l) => {
                 const visto = tour?.vistos.includes(l.id) ?? false;
                 return (
                   <li key={l.id} className="flex items-center gap-2">
@@ -85,6 +104,11 @@ export function CartaoLazer({
                       )}
                       <span>{rotuloDoPonto(l)}</span>
                     </button>
+                    {aoPasseio3D && (
+                      <button type="button" disabled={!pronto} onClick={() => aoPasseio3D(l.id)} className="rounded px-2 py-1 text-xs hover:bg-fundo disabled:opacity-50" data-testid="passeio-3d" aria-label={`Passeio 3D em ${l.nome}`}>
+                        Passeio 3D
+                      </button>
+                    )}
                     {gerir && (
                       <button type="button" onClick={() => aoRemover(l.id)} className="rounded px-2 py-1 text-xs text-perigo hover:bg-fundo" aria-label={`Remover ${l.nome}`}>
                         Remover

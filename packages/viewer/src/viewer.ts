@@ -17,7 +17,9 @@ import { injetarFachada } from './city/fachadaCidade';
 import { entornoParaLocal, type Entorno } from './city/entorno';
 import { criarCidade, fita, paraModelo, terrenoDoRelevo, type CidadeCompleta } from './city/cidade';
 import { criarCarros, pistasDeVias, planejarCarros, CARROS_POR_NIVEL, type Carros } from './city/carros';
-import { criarLotes, type LoteViewer, type LotesNoChao } from './city/lotes';
+import { criarLotes, DETALHE_VARREDURA, type LoteViewer, type LotesNoChao } from './city/lotes';
+import { criarTerreno, type TerrenoLoteamento, type TerrenoLoteamentoLido } from './city/terrenoLoteamento';
+import { construirCasaModelo, type CasaModelo } from './city/casaModelo';
 import { montarDecorado, planejarDecorado, type Decorado, type EstiloDecorado } from './interior/decorado';
 import { criarQuadros, planejarQuadros, type FotoNoLugar, type QuadrosDeFoto } from './ambiente/fotos';
 import { cameraAtrasDoOmbro, CORRETORA, criarBoneco, presetBoneco, type Boneco } from './cameras/boneco';
@@ -90,6 +92,8 @@ export interface EstadoViewer {
   outros: number;
   /** Lotes do loteamento no chão (0 = não é loteamento). */
   lotes: number;
+  /** Varredura em ciano do buscador de lotes em andamento (Plano 12d, item 4). */
+  varredura: boolean;
   /** Rota a pé desenhada no chão (número de pontos; 0 = nenhuma). */
   rota: number;
   /** Etiquetas "Apto 1201" à vista (unidades filtradas). */
@@ -184,6 +188,20 @@ export interface Viewer {
   /** Voa até o lote (lote escolhido na lista). */
   voarParaLote(loteId: string): boolean;
   aoSelecionarLote(cb: (loteId: string | null) => void): void;
+  /**
+   * Vista do lote a 1,60 m (Plano 12d, item 11): câmera fixa na calçada em frente ao lote, olhos na altura de uma
+   * pessoa, olhando para o lote (arrastar olha em volta, como `vistaDaUnidade`). `false` sem esse lote.
+   */
+  verLote(loteId: string): boolean;
+  /** Terreno e infraestrutura do loteamento (Plano 12d, item 8): ruas, calçadas, meio-fio e árvores. `null` tira. */
+  definirTerrenoLoteamento(terreno: TerrenoLoteamentoLido | null): void;
+  /**
+   * Casa-modelo no lote (Plano 12d, item 9): um volume simples nas medidas do lote, com os recuos e virada para a
+   * frente. `null` tira a casa. Devolve `false` se o lote não existir ou for pequeno demais para os recuos.
+   */
+  mostrarCasaModelo(loteId: string | null): boolean;
+  /** "Daqui a 10 anos" (item 10): 0 a 10 anos das árvores do terreno do loteamento (sem efeito sem ele). */
+  definirIdadeArvoresLoteamento(anos: number): void;
   voarPara(unidadeId: string): boolean;
   selecionar(unidadeId: string | null): void;
   definirModo(modo: ModoCamera): void;
@@ -210,6 +228,8 @@ export interface Viewer {
   definirLazer(pontos: readonly PontoLazer[]): void;
   /** Voa até o ponto do lazer, com ele em destaque (tour "Conheça o lazer"). */
   voarParaLazer(id: string): boolean;
+  /** "Passeio 3D" (Plano 12d, item 7): põe o boneco no chão, em 1ª pessoa, naquele ponto do lazer. */
+  passeioLazer(id: string): boolean;
   /**
    * Som ambiente (pássaros, rua, água da piscina), posicionado no espaço. Ligar precisa vir de um gesto da pessoa.
    * Resolve se ficou tocando.
@@ -330,6 +350,8 @@ const DISTANCIA_3A_DENTRO_M = 1.5;
 /** Com a câmera mais perto que isso da cabeça (parede atrás), o boneco tapa a vista: some até ter espaço. */
 const DISTANCIA_MIN_VER_BONECO_M = 0.75;
 const DURACAO_VOO_MS = 1200;
+/** Varredura em ciano do buscador de lotes (Plano 12d, item 4): tempo do anel até cobrir o loteamento todo. */
+const DURACAO_VARREDURA_MS = 900;
 /** Distância a mais entre um andar e o de cima na vista explodida. */
 const ESPACO_EXPLOSAO_M = 3.5;
 /** Até quantas unidades filtradas ganham etiqueta "Apto 1201" (mais que isso polui a fachada). */
@@ -866,11 +888,24 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
     ultimoAviso = 0;
   }
 
+  // terreno e infraestrutura do loteamento (Plano 12d, item 8)
+  let terrenoLote: TerrenoLoteamento | null = null;
+  // casa-modelo no lote (Plano 12d, item 9)
+  let casaModelo: CasaModelo | null = null;
+
   // loteamento (Plano 12d)
   let loteamento: LotesNoChao | null = null;
   const statusLotes = new Map<string, StatusUnidade>();
   let passamLotes: ReadonlySet<string> | null = null;
   let cbLote: ((id: string | null) => void) | null = null;
+  // varredura em ciano (item 4): início em ms (0 = parada); "menos movimento" acende sem animar (anel instantâneo)
+  let varreduraInicio = 0;
+  const duracaoVarredura = menosMovimento ? 1 : DURACAO_VARREDURA_MS;
+  function iniciarVarredura(): void {
+    if (!loteamento) return;
+    varreduraInicio = performance.now();
+    loteamento.definirVarredura(true, 0);
+  }
   const placasLotes = new THREE.Group();
   placasLotes.name = 'numeros-dos-lotes';
   cena.add(placasLotes);
@@ -1285,6 +1320,7 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
   function aplicarQualidade(n: NivelQualidade): void {
     renderer.setPixelRatio(qualidade.pixelRatio(window.devicePixelRatio));
     fachadaCidade.detalhe.value = n.nome === 'baixo' ? 0 : 1; // apartamento falso nas janelas só onde a placa aguenta
+    DETALHE_VARREDURA.value = n.nome === 'baixo' ? 0 : 1; // varredura em ciano dos lotes (Plano 12d, item 4): só médio/alto
     renderer.shadowMap.enabled = n.sombras;
     for (const l of csm.lights) {
       l.castShadow = n.sombras;
@@ -1507,6 +1543,7 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
       etiquetas: rotulos.size,
       rota: rotaDesenhada?.userData.pontos ?? 0,
       lotes: loteamento?.centros.size ?? 0,
+      varredura: varreduraInicio > 0,
       corretora: !corretora || !corretora.objeto.visible ? 'fora' : corretoraFalando ? 'falando' : 'parada',
       terceiraPessoa,
       boneco: presetId,
@@ -1643,6 +1680,11 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
     if (corretora?.objeto.visible) {
       const yaw = Math.atan2(-(camera.position.x - corretoraPos.x), -(camera.position.z - corretoraPos.z));
       corretora.atualizar({ x: corretoraPos.x, y: 0, z: corretoraPos.z, yaw }, { distancia: 0, velocidade: 0, noAr: false, acenando: corretoraFalando ? 1 : 0 }, agora / 1000, menosMovimento);
+    }
+    if (varreduraInicio > 0 && loteamento) {
+      const t = (agora - varreduraInicio) / duracaoVarredura;
+      loteamento.definirVarredura(t < 1, Math.min(1, t));
+      if (t >= 1) varreduraInicio = 0;
     }
     aplicarVerticaisRetas(); // Plano 12a, item 13: depois de qualquer coisa que tenha movido a câmera neste quadro
     // qualidade fixa ou "menos movimento": cena determinística (nuvens do céu, vento, água, carros e nuvens baixas parados)
@@ -1801,6 +1843,11 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
         loteamento.destruir();
         loteamento = null;
       }
+      if (casaModelo) {
+        casaModelo.objeto.removeFromParent();
+        casaModelo.destruir();
+        casaModelo = null;
+      }
       statusLotes.clear();
       nomesLotes.clear();
       if (!lotes.length) return 0;
@@ -1815,6 +1862,7 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
       if (raizPredio) raizPredio.visible = false;
       loteamento.pintar(statusLotes, passamLotes);
       numerarLotes();
+      iniciarVarredura(); // Plano 12d, item 4: o buscador "abre" com os lotes aparecendo com a varredura em ciano
       const c = loteamento.caixa;
       if (modo !== 'orbita') definirModo('orbita');
       orbita.enabled = false;
@@ -1826,6 +1874,8 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
       passamLotes = passam;
       loteamento?.pintar(statusLotes, passam);
       numerarLotes();
+      iniciarVarredura(); // Plano 12d, item 4: os lotes do filtro acendem com a onda em ciano
+      ultimoAviso = 0;
     },
     definirStatusLote(id, status) {
       statusLotes.set(id, status);
@@ -1834,6 +1884,7 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
     voarParaLote(id) {
       const c = loteamento?.centros.get(id);
       if (!c) return false;
+      sairDaVista();
       if (modo !== 'orbita') definirModo('orbita');
       orbita.enabled = false;
       voo = { trajeto: planejarVoo({ posicao: camera.position.clone(), alvo: orbita.target.clone() }, enquadrar({ minX: c.x - 25, maxX: c.x + 25, minY: c.y, maxY: c.y + 4, minZ: c.z - 25, maxZ: c.z + 25 }, camera.fov, camera.aspect || 1, 45, 1.2)), inicio: performance.now() };
@@ -1841,6 +1892,55 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
     },
     aoSelecionarLote(cb) {
       cbLote = cb;
+    },
+    verLote(id) {
+      const v = loteamento?.vistas.get(id);
+      if (!v) return false;
+      sairDaVista();
+      if (modo !== 'orbita') definirModo('orbita');
+      voo = null;
+      orbita.autoRotate = false;
+      const alturaEm = cidadeCompleta?.terreno.altura ?? (() => 0);
+      const olho = new THREE.Vector3(v.x, alturaEm(v.x, v.z) + ALTURA_OLHOS_M, v.z);
+      const alvo = new THREE.Vector3(v.alvoX, alturaEm(v.alvoX, v.alvoZ) + 1.2, v.alvoZ);
+      camera.position.copy(olho);
+      orbita.target.copy(alvo);
+      camera.fov = 60;
+      camera.updateProjectionMatrix();
+      orbita.enableZoom = false;
+      orbita.enablePan = false;
+      const distancia = olho.distanceTo(alvo);
+      orbita.minDistance = orbita.maxDistance = distancia;
+      orbita.enabled = true;
+      emVista = true;
+      return true;
+    },
+    definirTerrenoLoteamento(terreno) {
+      if (terrenoLote) {
+        terrenoLote.objeto.removeFromParent();
+        terrenoLote.destruir();
+        terrenoLote = null;
+      }
+      if (!terreno) return;
+      terrenoLote = criarTerreno(terreno, { lon, lat }, rotacao, cidadeCompleta?.terreno.altura ?? (() => 0), (m) => prepararMaterial(m));
+      cena.add(terrenoLote.objeto);
+    },
+    definirIdadeArvoresLoteamento(anos) {
+      terrenoLote?.definirIdadeArvores(anos);
+    },
+    mostrarCasaModelo(loteId) {
+      if (casaModelo) {
+        casaModelo.objeto.removeFromParent();
+        casaModelo.destruir();
+        casaModelo = null;
+      }
+      if (!loteId) return true;
+      const f = loteamento?.footprint(loteId);
+      if (!f) return false;
+      const alturaEm = terrenoLote?.altura ?? cidadeCompleta?.terreno.altura ?? (() => 0);
+      casaModelo = construirCasaModelo(f, alturaEm, (m) => prepararMaterial(m));
+      cena.add(casaModelo.objeto);
+      return true;
     },
     desenharRota(pontos) {
       apagarRota();
@@ -2051,6 +2151,17 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
     },
     aoSelecionarLazer(cb) {
       cbLazer = cb;
+    },
+    passeioLazer(id) {
+      const p = pontosLazer.find((x) => x.id === id);
+      if (!p) return false;
+      sairDaVista();
+      definirModo('primeira-pessoa');
+      Object.assign(pessoa, { x: p.x, z: p.z, y: solidos.length ? alturaDoPiso(p.x, p.z, p.y + 5) ?? p.y : p.y, yaw: 0, pitch: 0 });
+      posicionarPessoa();
+      ultimoAviso = 0;
+      avisar(performance.now());
+      return true;
     },
     definirTerceiraPessoa(ligada) {
       terceiraPessoa = ligada;

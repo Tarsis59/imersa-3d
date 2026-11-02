@@ -14,6 +14,10 @@ export interface LoteVitrine {
   preco: number | null;
   status: StatusUnidade;
   contorno: Array<[number, number]>;
+  /** Para onde a frente está virada (Plano 12d, item 6). */
+  orientacao: { anguloGraus: number; rotulo: string; dica: string } | null;
+  /** Distância a pé até o clube (ou o ponto de lazer mais perto); `aproximado` = linha reta × 1,3 (sem ruas). */
+  clube: { metros: number; aproximado: boolean } | null;
 }
 export interface FiltroLotes {
   precoMax: number | null;
@@ -52,6 +56,10 @@ export function CartaoLotes({
   selecionado,
   aoSelecionar,
   corretor,
+  vistaLote,
+  aoVerDaqui,
+  casaModeloLote,
+  aoCasaModelo,
 }: {
   lotes: readonly LoteVitrine[];
   filtro: FiltroLotes;
@@ -59,6 +67,12 @@ export function CartaoLotes({
   selecionado: string | null;
   aoSelecionar: (id: string | null) => void;
   corretor: { nome: string; whatsapp: string; empreendimento: string } | null;
+  /** "Ver daqui" (Plano 12d, item 11): qual lote está com a câmera na calçada, se algum. */
+  vistaLote?: string | null;
+  aoVerDaqui?: (id: string) => void;
+  /** Casa-modelo no lote (Plano 12d, item 9): qual lote está com a casa, se algum. */
+  casaModeloLote?: string | null;
+  aoCasaModelo?: (id: string) => void;
 }) {
   const quadras = useMemo(() => [...new Set(lotes.map((l) => l.quadra))], [lotes]);
   const passam = useMemo(() => filtrarLotes(lotes, filtro), [lotes, filtro]);
@@ -88,11 +102,39 @@ export function CartaoLotes({
               </dd>
               <dt className="text-suave">Preço</dt>
               <dd>{brl(lote.preco)}</dd>
+              {lote.orientacao && (
+                <>
+                  <dt className="text-suave">Frente para</dt>
+                  <dd>
+                    {lote.orientacao.rotulo} <span className="text-suave">({lote.orientacao.dica})</span>
+                  </dd>
+                </>
+              )}
+              {lote.clube && (
+                <>
+                  <dt className="text-suave">Até o clube</dt>
+                  <dd>
+                    {lote.clube.metros.toLocaleString('pt-BR')} m a pé{lote.clube.aproximado ? ' (aprox.)' : ''}
+                  </dd>
+                </>
+              )}
             </dl>
             <p className="text-xs text-suave">Medidas calculadas do projeto de parcelamento. Imagens meramente ilustrativas.</p>
-            <Botao type="button" variante="secundario" onClick={() => aoSelecionar(null)}>
-              Fechar o lote
-            </Botao>
+            <div className="flex flex-wrap gap-2">
+              {aoVerDaqui && (
+                <Botao type="button" variante="secundario" data-testid="ver-daqui" aria-pressed={vistaLote === lote.id} onClick={() => aoVerDaqui(lote.id)}>
+                  Ver daqui
+                </Botao>
+              )}
+              {aoCasaModelo && (
+                <Botao type="button" variante="secundario" data-testid="casa-modelo" aria-pressed={casaModeloLote === lote.id} onClick={() => aoCasaModelo(lote.id)}>
+                  {casaModeloLote === lote.id ? 'Tirar a casa-modelo' : 'Casa-modelo'}
+                </Botao>
+              )}
+              <Botao type="button" variante="secundario" onClick={() => aoSelecionar(null)}>
+                Fechar o lote
+              </Botao>
+            </div>
           </div>
         </Cartao>
       )}

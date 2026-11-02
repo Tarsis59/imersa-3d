@@ -12,5 +12,6 @@ CREATE DATABASE imersa_test_api_7 OWNER imersa_owner;
 CREATE DATABASE imersa_test_api_8 OWNER imersa_owner;
 CREATE DATABASE imersa_test_api_9 OWNER imersa_owner;
 CREATE DATABASE imersa_test_api_10 OWNER imersa_owner;
+CREATE DATABASE imersa_test_api_11 OWNER imersa_owner;
 CREATE DATABASE imersa_e2e OWNER imersa_owner;
-GRANT CONNECT ON DATABASE imersa, imersa_test, imersa_test_2, imersa_test_3, imersa_test_api, imersa_test_api_2, imersa_test_api_3, imersa_test_api_4, imersa_test_api_5, imersa_test_api_6, imersa_test_api_7, imersa_test_api_8, imersa_test_api_9, imersa_test_api_10, imersa_e2e TO imersa_app;
+GRANT CONNECT ON DATABASE imersa, imersa_test, imersa_test_2, imersa_test_3, imersa_test_api, imersa_test_api_2, imersa_test_api_3, imersa_test_api_4, imersa_test_api_5, imersa_test_api_6, imersa_test_api_7, imersa_test_api_8, imersa_test_api_9, imersa_test_api_10, imersa_test_api_11, imersa_e2e TO imersa_app;

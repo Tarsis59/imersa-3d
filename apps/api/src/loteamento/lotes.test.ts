@@ -27,7 +27,8 @@ describe('DXF do parcelamento → lotes', () => {
     const antiga = ['0', 'POLYLINE', '8', 'LOTES', '70', '1', '0', 'VERTEX', '8', 'LOTES', '10', '0', '20', '0', '0', 'VERTEX', '8', 'LOTES', '10', '10', '20', '0', '0', 'VERTEX', '8', 'LOTES', '10', '10', '20', '10', '0', 'SEQEND'].join('\n');
     const mtext = ['0', 'MTEXT', '8', 'NUMEROS', '10', '5', '20', '5', '1', '{\\fArial|b0;\\P12}'].join('\n');
     const d = lerDxf(dxf([antiga, mtext, poli('RUAS', [[0, 0], [5, 5]], false)]));
-    expect(d.polilinhas.map((p) => [p.camada, p.fechada, p.pontos.length])).toEqual([['LOTES', true, 3]]);
+    // RUAS (item 8): traço de 2 pontos só, sem fechar — continua lido (ruas e calçadas são linhas abertas)
+    expect(d.polilinhas.map((p) => [p.camada, p.fechada, p.pontos.length])).toEqual([['LOTES', true, 3], ['RUAS', false, 2]]);
     expect(d.textos).toEqual([{ camada: 'NUMEROS', x: 5, y: 5, texto: '12' }]);
     expect(() => lerDxf('isto não é dxf\nnada')).toThrow('dxf_invalido');
   });

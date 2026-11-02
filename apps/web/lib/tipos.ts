@@ -236,9 +236,20 @@ export const ROTULO_LAZER: Record<CategoriaLazer, string> = {
   jardim: 'Jardim',
   outro: 'Outro',
 };
+/** Menu da Vitrine por categoria (Plano 12d, item 7): grupo "guarda-chuva", diferente do tipo exato do espaço. */
+export const GRUPOS_LAZER = ['lazer', 'sociais', 'gastronomia', 'beach_sports', 'pet'] as const;
+export type GrupoLazer = (typeof GRUPOS_LAZER)[number];
+export const ROTULO_GRUPO: Record<GrupoLazer, string> = {
+  lazer: 'Lazer',
+  sociais: 'Sociais',
+  gastronomia: 'Gastronomia',
+  beach_sports: 'Beach Sports',
+  pet: 'Pet',
+};
 export interface ItemLazer {
   id: string;
   categoria: CategoriaLazer;
+  grupo: GrupoLazer;
   nome: string;
   descricao: string | null;
   x: number;
@@ -266,6 +277,8 @@ export interface Portal {
   lazer: ItemLazer[];
   /** Loteamento: os lotes com quadra, medidas, preço e situação (vazio num prédio). */
   lotes: import('@/app/painel/predios/[id]/vitrine/lotes').LoteVitrine[];
+  /** Terreno e infraestrutura do loteamento (Plano 12d, item 8): ruas, calçadas, meio-fio e curvas de nível. */
+  terreno: import('@imersa/viewer').TerrenoLoteamentoLido | null;
   /** Fotos do imóvel com GPS (quadros no 3D). */
   fotos: Array<{ id: string; nome: string; lat: number; lon: number; rumo: number | null }>;
   /** Galeria do empreendimento (Plano 12b, item 7): fotos escolhidas pela gestão, na ordem dela. */

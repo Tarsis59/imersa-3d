@@ -1,8 +1,8 @@
 'use server';
-import type { Entorno } from '@imersa/viewer';
+import type { Entorno, TerrenoLoteamentoLido } from '@imersa/viewer';
 import { api } from '@/lib/api';
 import { tokenParaAcao } from '@/lib/sessao';
-import type { CategoriaLazer, ItemLazer } from '@/lib/tipos';
+import type { CategoriaLazer, GrupoLazer, ItemLazer } from '@/lib/tipos';
 import type { PontoProximo, RotaAPe } from './proximidades';
 
 export type ResultadoEntorno = { entorno: Entorno } | { entorno: null; motivo: 'sem_localizacao' | 'indisponivel' };
@@ -30,7 +30,7 @@ export async function bilheteAoVivo(predioId: string): Promise<string | null> {
   return r.status === 200 ? r.dados.url : null;
 }
 
-export type NovoLazer = { categoria: CategoriaLazer; nome: string; descricao: string | null; x: number; y: number; z: number; fotos?: string[] };
+export type NovoLazer = { categoria: CategoriaLazer; grupo?: GrupoLazer; nome: string; descricao: string | null; x: number; y: number; z: number; fotos?: string[] };
 const ERROS_LAZER: Record<number, string> = {
   400: 'Confira o nome e a posição do ponto.',
   403: 'Só a gestão (com verificação em duas etapas) marca o lazer.',
@@ -77,4 +77,11 @@ export async function rotaAte(projetoId: string, poiId: string): Promise<RotaAPe
   if (!/^[0-9a-f-]{36}$/i.test(poiId)) return null;
   const r = await api<{ rota: RotaAPe | null }>(`/projetos/${encodeURIComponent(projetoId)}/pois/${poiId}/rota`, { token: await tokenParaAcao() });
   return r.status === 200 ? r.dados.rota : null;
+}
+
+/** Terreno e infraestrutura do loteamento, lidos do DXF (Plano 12d, item 8): ruas, calçadas, meio-fio e curvas. */
+export async function buscarTerrenoLoteamento(predioId: string): Promise<TerrenoLoteamentoLido | null> {
+  const r = await api<TerrenoLoteamentoLido>(`/predios/${encodeURIComponent(predioId)}/terreno`, { token: await tokenParaAcao() });
+  if (r.status !== 200) return null;
+  return r.dados.ruas.length || r.dados.calcadas.length || r.dados.meioFio.length || r.dados.curvas.length ? r.dados : null;
 }

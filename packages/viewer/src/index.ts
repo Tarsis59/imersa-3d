@@ -8,6 +8,7 @@ export { NIVEIS, type NivelQualidade } from './quality/adaptativa';
 export { entornoParaLocal, type Entorno, type PredioEntorno } from './city/entorno';
 export { terrenoDoRelevo, type AreaEntorno, type RelevoEntorno, type ViaEntorno } from './city/cidade';
 export { COR_LOTE, type LoteViewer } from './city/lotes';
+export { ALTURA_MUDA_M, type TerrenoLoteamento, type TerrenoLoteamentoLido } from './city/terrenoLoteamento';
 export { abrirInterior, opcoesDeLod, LOD_A_PARTIR_DE, type Interior } from './interior/interior';
 export { tipoDoSplat } from './interior/tipo';
 export { criarCarregadorGltf, type Decodificadores } from './carregador';

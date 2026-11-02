@@ -2,8 +2,10 @@ import { test, expect } from '@playwright/test';
 import { entrarComoAdminComMfa } from './ajuda';
 
 // DXF do parcelamento como o AutoCAD exporta: 2 quadras (layer QUADRAS, "Q-01" dentro) com 3 lotes de 12 × 30 m
-// (layer LOTES, o número dentro), em UTM SIRGAS 2000 fuso 23, perto da Paulista
+// (layer LOTES, o número dentro), em UTM SIRGAS 2000 fuso 23, perto da Paulista; rua, calçada e meio-fio do lado
+// leste da quadra (Plano 12d, item 8), para o terreno e a orientação do sol terem o que ler
 const poli = (camada: string, pts: Array<[number, number]>) => ['0', 'LWPOLYLINE', '8', camada, '90', String(pts.length), '70', '1', ...pts.flatMap(([x, y]) => ['10', String(x), '20', String(y)])];
+const linha = (camada: string, pts: Array<[number, number]>) => ['0', 'LWPOLYLINE', '8', camada, '90', String(pts.length), '70', '0', ...pts.flatMap(([x, y]) => ['10', String(x), '20', String(y)])];
 const texto = (camada: string, x: number, y: number, t: string) => ['0', 'TEXT', '8', camada, '10', String(x), '20', String(y), '40', '1.5', '1', t];
 function dxf(): string {
   const e: string[] = [];
@@ -15,6 +17,10 @@ function dxf(): string {
       e.push(...poli('LOTES', [[x, y0 + dy], [x + 12, y0 + dy], [x + 12, y0 + dy + 30], [x, y0 + dy + 30]]), ...texto('NUMEROS', x + 6, y0 + dy + 15, String(l + 1)));
     }
   }
+  // a leste das duas quadras (x0 + 36 a x0 + 41): a frente dos lotes continua o lado leste, mais perto da rua
+  e.push(...linha('CALCADAS', [[x0 + 37.5, y0 - 5], [x0 + 37.5, y0 + 85]]));
+  e.push(...linha('MEIO_FIO', [[x0 + 39, y0 - 5], [x0 + 39, y0 + 85]]));
+  e.push(...linha('RUAS', [[x0 + 41, y0 - 5], [x0 + 41, y0 + 85]]));
   return ['0', 'SECTION', '2', 'ENTITIES', ...e, '0', 'ENDSEC', '0', 'EOF'].join('\n');
 }
 
@@ -45,12 +51,35 @@ test('loteamento: DXF do parcelamento → prévia → lotes gravados → Vitrine
   await expect(vitrine).toHaveAttribute('data-lotes', '6', { timeout: 30_000 });
   const busca = page.getByTestId('buscador-lotes');
   await expect(busca.getByTestId('contagem-lotes')).toHaveText('6 de 6 lotes');
+  // varredura em ciano (Plano 12d, item 4): os lotes no chão abrem/filtram com o anel; a prova confiável (os
+  // atributos ligam e desligam certo) é o teste unitário de `lotes.ts` — aqui só confere que não quebra a tela e
+  // que, um pouco depois do filtro, a onda já tiver acabado (não fica acesa para sempre)
+  await expect(vitrine).toHaveAttribute('data-varredura', 'nao', { timeout: 5_000 });
   await busca.getByRole('group', { name: 'Quadras' }).getByRole('button', { name: '02' }).click();
   await expect(busca.getByTestId('contagem-lotes')).toHaveText('3 de 6 lotes');
+  await expect(vitrine).toHaveAttribute('data-varredura', 'nao', { timeout: 10_000 });
   await busca.getByTestId('lista-lotes').getByRole('button', { name: /Q02 · L01/ }).click();
   const card = page.getByTestId('lote-selecionado');
   await expect(card).toContainText('360 m²');
   await expect(card).toContainText('12 m × 30 m');
   await expect(card).toContainText('Disponível');
+  // orientação do sol (Plano 12d, item 6): lote de 12 × 30 m com o lado mais longo a leste, sem rua desenhada ainda
+  await expect(card).toContainText('Leste');
+  await expect(card).toContainText('sol da manhã');
+  // "Ver daqui" (Plano 12d, item 11): câmera na calçada do lote, olhos a 1,60 m
+  await card.getByTestId('ver-daqui').click();
+  await expect(vitrine).toHaveAttribute('data-vista-lote', /.+/);
+  // casa-modelo (Plano 12d, item 9): botão no card coloca a casa nas medidas do lote, com os recuos
+  await card.getByTestId('casa-modelo').click();
+  await expect(vitrine).toHaveAttribute('data-casa-modelo', /.+/);
+  await card.getByTestId('casa-modelo').click(); // alterna: tira a casa de novo
+  await expect(vitrine).toHaveAttribute('data-casa-modelo', '');
+  // terreno e infraestrutura (Plano 12d, item 8): o DXF trouxe rua, calçada e meio-fio, então o controle aparece
+  await expect(vitrine).toHaveAttribute('data-anos', '10'); // padrão: árvores adultas
+  const anos = page.getByTestId('daqui-a-10-anos');
+  const controle = anos.getByLabel(/Árvores do loteamento/);
+  await controle.focus();
+  await controle.press('Home'); // o mínimo do range (0 anos, muda recém-plantada)
+  await expect(vitrine).toHaveAttribute('data-anos', '0');
   await vitrine.screenshot({ path: test.info().outputPath('loteamento.png') });
 });

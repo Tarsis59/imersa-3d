@@ -152,9 +152,10 @@ export function rotasPublicas(app: FastifyInstance, { pool, armazenamento, entor
         fotos: await fotosNoLugar(c, base.projeto.id),
         galeria: await galeriaDoPredio(c, l.predioId),
         lotes: await lotesDoPredio(c, l.predioId),
+        terreno: (await c.query<{ terreno: unknown }>('SELECT terreno FROM buildings WHERE id = $1', [l.predioId])).rows[0]?.terreno ?? null,
       };
     });
-    const { base, andares, unidades, arquivos, logo, giro, lazer, fotos, galeria, lotes } = dados;
+    const { base, andares, unidades, arquivos, logo, giro, lazer, fotos, galeria, lotes, terreno } = dados;
     const modelo = arquivos.find((a) => a.id === base.modeloId && a.tipo === 'modelo_3d');
     return {
       empresa: {
@@ -179,6 +180,7 @@ export function rotasPublicas(app: FastifyInstance, { pool, armazenamento, entor
       fotos,
       galeria,
       lotes,
+      terreno,
       // o portal chama o assistente direto na API (resposta em fluxo)
       assistenteUrl: ia.chamar ? `${apiPublica}/publico/links/${(req.params as { token: string }).token}/assistente` : null,
       aoVivoUrl: `${apiPublica}/publico/links/${(req.params as { token: string }).token}/ao-vivo`,

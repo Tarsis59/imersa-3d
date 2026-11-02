@@ -105,3 +105,35 @@ describe('comandos da Vitrine (50 frases)', () => {
     expect(numeros('novecentos mil')).toBe('900 mil');
   });
 });
+
+/** Comandos do buscador de lotes do loteamento (Plano 12d, item 5): "lotes" na frase, nunca o filtro de unidades. */
+describe('comandos do loteamento (Plano 12d, item 5)', () => {
+  const acaoLotes = (f: string) => interpretarComando(f).acoes.find((a) => a.tipo === 'filtro_lotes' || a.tipo === 'limpar_lotes');
+
+  it('lotes de até 300 mil na quadra 4', () => {
+    expect(acaoLotes('lotes de até 300 mil na quadra 4')).toEqual({ tipo: 'filtro_lotes', precoMax: 300_000, quadras: ['04'] });
+  });
+
+  it('lotes com mais de 360 m²', () => {
+    expect(acaoLotes('lotes com mais de 360 m²')).toEqual({ tipo: 'filtro_lotes', areaMin: 360 });
+  });
+
+  it('lotes disponíveis', () => {
+    expect(acaoLotes('lotes disponíveis')).toEqual({ tipo: 'filtro_lotes', status: ['disponivel'] });
+  });
+
+  it('limpar lotes', () => {
+    expect(acaoLotes('limpar lotes')).toEqual({ tipo: 'limpar_lotes' });
+  });
+
+  it('quadras com vários números, e vendidos/reservados', () => {
+    expect(acaoLotes('lotes nas quadras 1 e 2')).toEqual({ tipo: 'filtro_lotes', quadras: ['01', '02'] });
+    expect(acaoLotes('lotes já vendidos')).toEqual({ tipo: 'filtro_lotes', status: ['vendido'] });
+    expect(acaoLotes('lotes reservados na quadra 3')).toEqual({ tipo: 'filtro_lotes', status: ['reservado'], quadras: ['03'] });
+  });
+
+  it('"3 quartos até 900 mil" (sem "lote") continua filtro de unidades, não de lotes', () => {
+    expect(interpretarComando('3 quartos até 900 mil').acoes).toEqual([{ tipo: 'filtro', quartos: [3], precoMax: 900_000 }]);
+    expect(acaoLotes('3 quartos até 900 mil')).toBeUndefined();
+  });
+});

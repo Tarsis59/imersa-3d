@@ -99,6 +99,7 @@ export function PortalVitrine({
         lazer={portal.lazer}
         galeria={portal.galeria}
         lotes={portal.lotes}
+        terreno={portal.terreno}
         giroRenderizado={portal.giro}
         assistenteUrl={portal.assistenteUrl}
         aoPedirContato={(motivo, unidadeId) => setPedidoContato((p) => ({ motivo, unidadeId, vez: (p?.vez ?? 0) + 1 }))}

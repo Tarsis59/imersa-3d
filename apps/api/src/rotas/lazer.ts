@@ -14,6 +14,23 @@ interface Dependencias {
 }
 
 export const CATEGORIAS_LAZER = ['piscina', 'academia', 'salao_festas', 'churrasqueira', 'playground', 'quadra', 'espaco_gourmet', 'brinquedoteca', 'coworking', 'pet', 'jardim', 'outro'] as const;
+/** Menu da Vitrine por categoria (Plano 12d, item 7): grupo "guarda-chuva", diferente do tipo exato do espaço. */
+export const GRUPOS_LAZER = ['lazer', 'sociais', 'gastronomia', 'beach_sports', 'pet'] as const;
+/** Grupo padrão de cada tipo, para quem não escolher um na marcação. */
+export const GRUPO_PADRAO: Record<(typeof CATEGORIAS_LAZER)[number], (typeof GRUPOS_LAZER)[number]> = {
+  piscina: 'lazer',
+  academia: 'lazer',
+  salao_festas: 'sociais',
+  churrasqueira: 'gastronomia',
+  espaco_gourmet: 'gastronomia',
+  playground: 'lazer',
+  quadra: 'beach_sports',
+  brinquedoteca: 'lazer',
+  coworking: 'sociais',
+  pet: 'pet',
+  jardim: 'lazer',
+  outro: 'lazer',
+};
 /** No máximo por prédio: o tour do lazer é curto (~2 min). */
 export const MAX_LAZER = 30;
 const metros = (max: number) => z.number().finite().min(-max).max(max);
@@ -21,6 +38,7 @@ const metros = (max: number) => z.number().finite().min(-max).max(max);
 const FotosFicha = z.array(z.uuid()).max(12).optional();
 const NovoLazer = z.object({
   categoria: z.enum(CATEGORIAS_LAZER),
+  grupo: z.enum(GRUPOS_LAZER).optional(),
   nome: z.string().trim().min(1).max(120),
   descricao: z.string().trim().max(600).nullish(),
   x: metros(2000),
@@ -35,6 +53,7 @@ const ctx = (s: Sessao) => ({ tenantId: s.tenantId, userId: s.userId });
 export interface ItemLazer {
   id: string;
   categoria: (typeof CATEGORIAS_LAZER)[number];
+  grupo: (typeof GRUPOS_LAZER)[number];
   nome: string;
   descricao: string | null;
   x: number;
@@ -48,7 +67,7 @@ export interface ItemLazer {
 export async function lazerDoPredio(c: pg.PoolClient, predioId: string): Promise<ItemLazer[]> {
   return (
     await c.query<ItemLazer>(
-      'SELECT id, categoria, nome, descricao, x_m AS x, y_m AS y, z_m AS z, ordem, coalesce(fotos, array[]::uuid[]) AS fotos FROM lazer WHERE building_id = $1 ORDER BY ordem, criado_em',
+      'SELECT id, categoria, grupo, nome, descricao, x_m AS x, y_m AS y, z_m AS z, ordem, coalesce(fotos, array[]::uuid[]) AS fotos FROM lazer WHERE building_id = $1 ORDER BY ordem, criado_em',
       [predioId],
     )
   ).rows;
@@ -139,9 +158,9 @@ export function rotasLazer(app: FastifyInstance, { pool, exigir }: Dependencias)
       if (n.n >= MAX_LAZER) throw new ErroHttp(409, 'limite_lazer');
       const r = (
         await c.query<ItemLazer>(
-          `INSERT INTO lazer (building_id, categoria, nome, descricao, x_m, y_m, z_m, ordem, fotos) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-           RETURNING id, categoria, nome, descricao, x_m AS x, y_m AS y, z_m AS z, ordem, fotos`,
-          [id, d.categoria, d.nome, d.descricao ?? null, d.x, d.y, d.z, d.ordem ?? Math.min(1000, n.proxima), d.fotos ?? []],
+          `INSERT INTO lazer (building_id, categoria, grupo, nome, descricao, x_m, y_m, z_m, ordem, fotos) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+           RETURNING id, categoria, grupo, nome, descricao, x_m AS x, y_m AS y, z_m AS z, ordem, fotos`,
+          [id, d.categoria, d.grupo ?? GRUPO_PADRAO[d.categoria], d.nome, d.descricao ?? null, d.x, d.y, d.z, d.ordem ?? Math.min(1000, n.proxima), d.fotos ?? []],
         )
       ).rows[0]!;
       await registrarAuditoria(c, { userId: s.userId, acao: 'lazer.criar', entidade: 'lazer', entidadeId: r.id, depois: { predio: id, categoria: r.categoria, nome: r.nome } });
@@ -162,6 +181,7 @@ export function rotasLazer(app: FastifyInstance, { pool, exigir }: Dependencias)
       }
       const campos: Array<[string, unknown]> = [];
       if (d.categoria !== undefined) campos.push(['categoria', d.categoria]);
+      if (d.grupo !== undefined) campos.push(['grupo', d.grupo]);
       if (d.nome !== undefined) campos.push(['nome', d.nome]);
       if (d.descricao !== undefined) campos.push(['descricao', d.descricao]);
       if (d.x !== undefined) campos.push(['x_m', d.x]);
@@ -172,7 +192,7 @@ export function rotasLazer(app: FastifyInstance, { pool, exigir }: Dependencias)
       if (!campos.length) throw new ErroHttp(400, 'nada_para_mudar');
       const r = await c.query<ItemLazer>(
         `UPDATE lazer SET ${campos.map(([k], i) => `${k} = $${i + 2}`).join(', ')} WHERE id = $1
-         RETURNING id, categoria, nome, descricao, x_m AS x, y_m AS y, z_m AS z, ordem, fotos`,
+         RETURNING id, categoria, grupo, nome, descricao, x_m AS x, y_m AS y, z_m AS z, ordem, fotos`,
         [id, ...campos.map(([, v]) => v)],
       );
       if (!r.rowCount) throw new ErroHttp(404, 'nao_encontrado');

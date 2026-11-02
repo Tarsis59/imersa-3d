@@ -1,6 +1,6 @@
 'use client';
 import { useEffect, useMemo, useRef, useState, type PointerEvent as EventoPonteiro } from 'react';
-import { BONECOS, criarViewer, filtrar, suporteImersivo, temWebGpu, type SuporteImersivo, type Caixa, type Clima, type EstudoSolar, type PeriodoDeSol, type Giro, filtroVazio, pontoCardeal, vetorJoystick, type EstadoViewer, type Filtro, type UnidadeViewer, type Viewer } from '@imersa/viewer';
+import { BONECOS, criarViewer, filtrar, suporteImersivo, temWebGpu, type SuporteImersivo, type Caixa, type Clima, type EstudoSolar, type PeriodoDeSol, type Giro, filtroVazio, pontoCardeal, vetorJoystick, type EstadoViewer, type Filtro, type UnidadeViewer, type Viewer, type TerrenoLoteamentoLido } from '@imersa/viewer';
 import type { ItemLazer, StatusUnidade } from '@/lib/tipos';
 import { Botao, Campo, Cartao, Selecao } from '@/components/ui';
 import { alternarFavorito, lerFavoritos, salvarFavoritos } from '@/lib/favoritos';
@@ -88,6 +88,7 @@ export function Vitrine({
   corretor = null,
   proximidades = null,
   lotes = SEM_LOTES,
+  terreno = null,
   lat,
   lon,
   interiores,
@@ -132,6 +133,8 @@ export function Vitrine({
   proximidades?: FonteProximidades | null;
   /** Loteamento (Plano 12d): os lotes no chão do 3D com o buscador de lotes. */
   lotes?: LoteVitrine[];
+  /** Terreno e infraestrutura do loteamento (Plano 12d, item 8): ruas, calçadas, meio-fio e curvas de nível. */
+  terreno?: TerrenoLoteamentoLido | null;
   /** Abrir já na vista de uma unidade e numa hora (foto pedida por texto). */
   inicio?: { unidadeId: string | null; hora: number | null };
   /** Fotos do imóvel com GPS: quadros no 3D onde foram tiradas (Plano 11c). */
@@ -208,18 +211,34 @@ export function Vitrine({
   // loteamento: lotes no 3D, buscador e o lote escolhido (no 3D ou na lista)
   const [filtroLotes, setFiltroLotes] = useState<FiltroLotes>(FILTRO_LOTES_VAZIO);
   const [loteSelecionado, setLoteSelecionado] = useState<string | null>(null);
+  // "Ver daqui" (Plano 12d, item 11): câmera na calçada em frente ao lote, olhos a 1,60 m
+  const [vistaLote, setVistaLote] = useState<string | null>(null);
+  // casa-modelo no lote (Plano 12d, item 9): qual lote está com a casa, se algum
+  const [casaModeloLote, setCasaModeloLote] = useState<string | null>(null);
+  // "Daqui a 10 anos" (Plano 12d, item 10): idade das árvores do terreno do loteamento (0 a 10 anos)
+  const [anosArvores, setAnosArvores] = useState(10);
   useEffect(() => {
     if (estado !== 'pronto' || !lotes.length || lat == null || lon == null) return;
     viewer.current?.definirLotes(lotes, { lon, lat });
     viewer.current?.aoSelecionarLote((id) => setLoteSelecionado(id));
   }, [estado, lotes, lat, lon]);
   useEffect(() => {
+    if (estado !== 'pronto') return;
+    viewer.current?.definirTerrenoLoteamento(terreno);
+  }, [estado, terreno]);
+  useEffect(() => {
+    if (estado === 'pronto' && terreno) viewer.current?.definirIdadeArvoresLoteamento(anosArvores);
+  }, [estado, terreno, anosArvores]);
+  useEffect(() => {
     if (estado !== 'pronto' || !lotes.length) return;
     const vazio = filtroLotes.precoMax === null && filtroLotes.areaMin === null && !filtroLotes.quadras.size && !filtroLotes.status.size;
     viewer.current?.destacarLotes(vazio ? null : filtrarLotes(lotes, filtroLotes));
   }, [estado, lotes, filtroLotes]);
   useEffect(() => {
-    if (loteSelecionado) viewer.current?.voarParaLote(loteSelecionado);
+    if (loteSelecionado) {
+      setVistaLote(null);
+      viewer.current?.voarParaLote(loteSelecionado);
+    }
   }, [loteSelecionado]);
   // andar a pé ou entrar no apartamento junta os andares no 3D: o botão acompanha
   useEffect(() => {
@@ -250,6 +269,8 @@ export function Vitrine({
   // galeria do empreendimento (Plano 12b, item 7): estado local, atualizado depois de a gestão salvar (como o lazer)
   const [galeriaAtual, setGaleriaAtual] = useState<FotoGaleria[]>(galeria);
   const [pontoLazer, setPontoLazer] = useState<string | null>(null);
+  // "Passeio 3D" (Plano 12d, item 7): qual ponto do lazer tem o boneco em 1ª pessoa, se algum
+  const [passeio3D, setPasseio3D] = useState<string | null>(null);
   const [tour, setTour] = useState<EstadoTour | null>(null);
   const [marcandoLazer, setMarcandoLazer] = useState<Omit<NovoLazer, 'x' | 'y' | 'z'> | null>(null);
   const [erroLazer, setErroLazer] = useState<string | null>(null);
@@ -916,6 +937,18 @@ export function Vitrine({
         case 'som':
           void viewer.current?.definirSom(a.ligado);
           break;
+        case 'limpar_lotes':
+          setFiltroLotes(FILTRO_LOTES_VAZIO);
+          break;
+        case 'filtro_lotes':
+          setFiltroLotes((f) => ({
+            ...f,
+            ...(a.precoMax !== undefined ? { precoMax: a.precoMax } : {}),
+            ...(a.areaMin !== undefined ? { areaMin: a.areaMin } : {}),
+            ...(a.quadras ? { quadras: new Set(a.quadras) } : {}),
+            ...(a.status ? { status: new Set(a.status) } : {}),
+          }));
+          break;
       }
     }
     return problemas;
@@ -931,9 +964,19 @@ export function Vitrine({
   function visaoGeral() {
     sairDosModosDeAndar();
     setVista(null);
+    setVistaLote(null);
+    setPasseio3D(null);
+    setCasaModeloLote(null);
     setInterior(null);
     viewer.current?.visaoGeral();
   }
+  const verLote = (id: string) => {
+    if (viewer.current?.verLote(id)) setVistaLote(id);
+  };
+  const alternarCasaModelo = (id: string) => {
+    const ligar = casaModeloLote !== id;
+    if (viewer.current?.mostrarCasaModelo(ligar ? id : null)) setCasaModeloLote(ligar ? id : null);
+  };
   const irPara = (id: string) => document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
 
   // casa de bonecas (Plano 12c, item 1): liga/desliga no andar do corte (ou no `andar` do comando por voz/texto)
@@ -1014,6 +1057,11 @@ export function Vitrine({
         data-etiquetas={telemetria?.etiquetas ?? 0}
         data-rota={telemetria?.rota ?? 0}
         data-lotes={telemetria?.lotes ?? 0}
+        data-varredura={telemetria?.varredura ? 'sim' : 'nao'}
+        data-vista-lote={vistaLote ?? ''}
+        data-passeio-3d={passeio3D ?? ''}
+        data-anos={terreno ? anosArvores : ''}
+        data-casa-modelo={casaModeloLote ?? ''}
         data-carros={telemetria?.carros ?? 0}
         data-nuvens={telemetria?.nuvens ? 'sim' : 'nao'}
         data-verticais={telemetria?.verticaisRetas ? 'sim' : 'nao'}
@@ -1338,7 +1386,31 @@ export function Vitrine({
             <VisitaEmGrupo url={salaUrl} viewer={viewer} pronto={estado === 'pronto'} />
           </Cartao>
         )}
-        {lotes.length > 0 && <CartaoLotes lotes={lotes} filtro={filtroLotes} aoFiltrar={setFiltroLotes} selecionado={loteSelecionado} aoSelecionar={setLoteSelecionado} corretor={corretor} />}
+        {lotes.length > 0 && (
+          <CartaoLotes
+            lotes={lotes}
+            filtro={filtroLotes}
+            aoFiltrar={setFiltroLotes}
+            selecionado={loteSelecionado}
+            aoSelecionar={setLoteSelecionado}
+            corretor={corretor}
+            vistaLote={vistaLote}
+            aoVerDaqui={verLote}
+            casaModeloLote={casaModeloLote}
+            aoCasaModelo={alternarCasaModelo}
+          />
+        )}
+        {terreno && (
+          <Cartao titulo="Daqui a 10 anos">
+            <div className="grid gap-2 text-sm" data-testid="daqui-a-10-anos">
+              <label className="grid gap-1" htmlFor="anos-arvores">
+                <span className="font-medium">Árvores do loteamento: {anosArvores === 0 ? 'recém-plantadas' : `${anosArvores} ano${anosArvores > 1 ? 's' : ''}`}</span>
+                <input id="anos-arvores" type="range" min={0} max={10} step={1} value={anosArvores} onChange={(e) => setAnosArvores(Number(e.target.value))} />
+              </label>
+              <p className="text-xs text-suave">Simula o crescimento das árvores das calçadas, da muda até a altura adulta da espécie.</p>
+            </div>
+          </Cartao>
+        )}
         <nav aria-label="Seções da Vitrine" data-testid="secoes" className="flex flex-wrap gap-2">
           {[
             ...(lotes.length ? [['secao-lotes', 'Lotes']] : []),
@@ -1555,6 +1627,9 @@ export function Vitrine({
           aoRemover={(id) => void removerPontoLazer(id)}
           erro={erroLazer}
           fotosDisponiveis={fotosProjeto}
+          aoPasseio3D={(id) => {
+            if (viewer.current?.passeioLazer(id)) setPasseio3D(id);
+          }}
         />
         {galeriaAtual.length === 0 && gerirGaleria && <div id="secao-galeria" className="scroll-mt-4" />}
         <CartaoGaleria fotos={galeriaAtual} resolverUrl={linkDoArquivo} />

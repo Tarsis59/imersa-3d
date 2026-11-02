@@ -4,6 +4,7 @@ import type { ItemLazer } from './tipos';
 
 const item = (p: Partial<ItemLazer> & { id: string; nome: string }): ItemLazer => ({
   categoria: 'outro',
+  grupo: 'lazer',
   descricao: null,
   x: 0,
   y: 0,
