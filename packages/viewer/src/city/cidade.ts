@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { balancarComVento } from '../ambiente/vegetacao';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { lonLatToLocal, type LonLat } from '../geo/project';
 import type { Caixa } from '../units/tipos';
@@ -408,7 +409,9 @@ export function criarCidade(
     const copa = new THREE.IcosahedronGeometry(1, 1);
     geos.push(tronco, copa);
     const troncos = new THREE.InstancedMesh(tronco, material(0x5b4636, 0.95, { polygonOffset: false }), arvores.length);
-    const copas = new THREE.InstancedMesh(copa, material(0xffffff, 0.9, { polygonOffset: false, flatShading: true }), arvores.length);
+    const matCopa = material(0xffffff, 0.9, { polygonOffset: false, flatShading: true });
+    balancarComVento(matCopa);
+    const copas = new THREE.InstancedMesh(copa, matCopa, arvores.length);
     const m4 = new THREE.Matrix4();
     const q = new THREE.Quaternion();
     const eixo = new THREE.Vector3(0, 1, 0);

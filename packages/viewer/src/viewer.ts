@@ -6,7 +6,7 @@ import { sunDirection, horaSaoPauloParaUtc } from './sun/sun';
 import { criarCeu, type Clima } from './ambiente/ceu';
 import type { PosProcessamento } from './ambiente/pos';
 import { planejarPaisagismo } from './ambiente/paisagismo';
-import { criarPaisagismo, type Paisagismo } from './ambiente/vegetacao';
+import { criarPaisagismo, VENTO, type Paisagismo } from './ambiente/vegetacao';
 import { rumoDaCamera, paraReferenciaDoProjeto } from './sun/bussola';
 import { massaDoPredio } from './units/massa';
 import { ladoExterno, planejarFachada } from './units/fachada';
@@ -1339,6 +1339,7 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
       corretora.atualizar({ x: corretoraPos.x, y: 0, z: corretoraPos.z, yaw }, { distancia: 0, velocidade: 0, noAr: false, acenando: corretoraFalando ? 1 : 0 }, agora / 1000, menosMovimento);
     }
     atmosfera.quadro(camera, config.qualidadeFixa || menosMovimento ? 0 : agora / 1000); // qualidade fixa = cena determinística (nuvens paradas)
+    VENTO.tempo.value = config.qualidadeFixa || menosMovimento ? 0 : agora / 1000; // copas com vento (paradas na cena de teste)
     pessoas?.quadro(agora / 1000);
     som.quadro(camera, agora / 1000, luzNoturna < 0.5);
     csm.update();

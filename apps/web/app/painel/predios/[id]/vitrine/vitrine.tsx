@@ -175,7 +175,8 @@ export function Vitrine({
   const [andarCorte, setAndarCorte] = useState('');
   const [comCorte, setComCorte] = useState<number[]>([]);
   const [dataSol, setDataSol] = useState(hoje);
-  const [horaSol, setHoraSol] = useState(10);
+  // abre no fim de tarde: sol baixo e sombras longas são a imagem mais bonita do dia (Plano 12a, item 7)
+  const [horaSol, setHoraSol] = useState(16.5);
   const [clima, setClima] = useState<Clima>('limpo');
   const [entorno, setEntorno] = useState<EstadoEntorno>({ tipo: 'carregando' });
   const [interiorAberto, setInteriorAberto] = useState<{ id: string; nome: string } | null>(null);
