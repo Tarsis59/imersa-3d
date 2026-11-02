@@ -96,6 +96,8 @@ export interface EstadoViewer {
   boneco: string;
   /** No ar (pulando). */
   noAr: boolean;
+  /** Pulos dados desde que abriu (num quadro lento o pulo inteiro cabe nele, então só noAr não basta para conferir). */
+  pulos: number;
   correndo: boolean;
 }
 
@@ -667,6 +669,7 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
   let velocidadeVertical = 0;
   let noAr = false;
   let pedidoPulo = false;
+  let pulos = 0;
   let acenarAte = 0;
   /** Andado no último quadro (anima o passo do boneco). */
   let andadoQuadro = 0;
@@ -1376,6 +1379,7 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
       terceiraPessoa,
       boneco: presetId,
       noAr,
+      pulos,
       correndo,
       direcao: { x: direcaoCamera.x / (Math.hypot(direcaoCamera.x, direcaoCamera.z) || 1), z: direcaoCamera.z / (Math.hypot(direcaoCamera.x, direcaoCamera.z) || 1) },
     });
@@ -1453,6 +1457,7 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
         }
         if (pedidoPulo && !noAr) {
           noAr = true;
+          pulos++;
           velocidadeVertical = PULO_M_S;
         }
         pedidoPulo = false;

@@ -91,7 +91,7 @@ export async function construirApp({ pool, config, logger = false, reportarErro,
   await app.register(helmet);
   // Métodos explícitos: o padrão do @fastify/cors é só GET/HEAD/POST, e o envio direto de arquivo (PUT) vem do navegador.
   await app.register(cors, { origin: config.CORS_ORIGIN, credentials: true, methods: ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE'] });
-  await app.register(rateLimit, { max: 300, timeWindow: '1 minute' });
+  await app.register(rateLimit, { max: config.RATE_LIMIT_GERAL, timeWindow: '1 minute' });
   const limiteAuth = { config: { rateLimit: { max: config.RATE_LIMIT_AUTH, timeWindow: '1 minute' } } };
 
   app.setErrorHandler((erro, req, reply) => {

@@ -113,8 +113,9 @@ test('criar com tudo: foto com GPS + planta + texto → montagem ao vivo → Vit
   await jogo.getByRole('combobox', { name: 'Boneco' }).selectOption('beto');
   await expect(vitrine).toHaveAttribute('data-boneco', 'beto');
   await jogo.getByRole('button', { name: 'Pular' }).click();
-  await expect(vitrine).toHaveAttribute('data-no-ar', 'sim');
-  await expect(vitrine).toHaveAttribute('data-no-ar', 'nao', { timeout: 10_000 }); // a gravidade traz de volta ao chão
+  // no 3D por software (CI) um quadro passa de 5 s e o pulo inteiro cabe nele: conta o pulo, depois confere o chão
+  await expect(vitrine).toHaveAttribute('data-pulos', '1', { timeout: 30_000 });
+  await expect(vitrine).toHaveAttribute('data-no-ar', 'nao', { timeout: 30_000 }); // a gravidade traz de volta ao chão
   await jogo.getByRole('button', { name: 'Correr' }).click();
   await expect(jogo.getByRole('button', { name: 'Andar' })).toBeVisible();
   const antes = await vitrine.getAttribute('data-posicao');

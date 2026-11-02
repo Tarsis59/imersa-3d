@@ -17,6 +17,7 @@ const config: Config = {
   CORS_ORIGIN: 'http://localhost:3000',
   WEB_URL: 'http://localhost:3000',
   RATE_LIMIT_AUTH: 1000,
+  RATE_LIMIT_GERAL: 300,
   TRUST_PROXY: false,
   AMBIENTE: 'teste',
   WEBHOOK_PERMITIR_LOCAL: false,

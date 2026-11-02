@@ -945,6 +945,7 @@ export function Vitrine({
         data-terceira={telemetria?.terceiraPessoa ? 'sim' : 'nao'}
         data-boneco={telemetria?.boneco ?? ''}
         data-no-ar={telemetria?.noAr ? 'sim' : 'nao'}
+        data-pulos={telemetria?.pulos ?? 0}
         data-nivel={telemetria?.nivel ?? ''}
         data-som={telemetria?.som ? 'ligado' : 'desligado'}
         data-marcando-lazer={marcandoLazer ? 'sim' : ''}

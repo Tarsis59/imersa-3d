@@ -12,6 +12,8 @@ const Esquema = z.object({
   CORS_ORIGIN: z.string().default('http://localhost:3000'),
   WEB_URL: z.string().default('http://localhost:3000'),
   RATE_LIMIT_AUTH: z.coerce.number().int().positive().default(10),
+  /** Pedidos por minuto por IP no resto da API. Nos E2E tudo sai do mesmo IP (o servidor do site), então lá é maior. */
+  RATE_LIMIT_GERAL: z.coerce.number().int().positive().default(300),
   /** Só `true` atrás de um proxy confiável (produção); senão, qualquer um falsifica o IP. */
   TRUST_PROXY: z
     .enum(['true', 'false'])

@@ -71,7 +71,7 @@ test('vitrine 3D: volumes do prédio, filtros, favoritos, voo até a unidade, co
   await page.getByLabel('3 quartos').check();
   await expect(page.getByTestId('contagem-filtro')).toHaveText('2 de 6 unidades');
   // etiquetas "Apto 102" em cima das unidades filtradas (Plano 12b); sem filtro, nenhuma
-  await expect(vitrine).toHaveAttribute('data-etiquetas', '2');
+  await expect(vitrine).toHaveAttribute('data-etiquetas', '2', { timeout: 30_000 });
   // busca pelo número na lista (não mexe no 3D)
   await page.getByLabel('Buscar unidade pelo número').fill('10');
   await expect(page.getByTestId('contagem-filtro')).toHaveText('1 de 6 unidades');
@@ -80,7 +80,7 @@ test('vitrine 3D: volumes do prédio, filtros, favoritos, voo até a unidade, co
   await expect(page.getByTestId('contagem-filtro')).toHaveText('1 de 6 unidades');
   await page.getByRole('button', { name: 'Limpar filtros' }).click();
   await expect(page.getByTestId('contagem-filtro')).toHaveText('6 de 6 unidades');
-  await expect(vitrine).toHaveAttribute('data-etiquetas', '0');
+  await expect(vitrine).toHaveAttribute('data-etiquetas', '0', { timeout: 30_000 });
 
   // favoritos (sobrevivem a recarregar a página)
   await page.getByRole('button', { name: 'Favoritar 202' }).click();
