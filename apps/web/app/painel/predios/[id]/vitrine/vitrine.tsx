@@ -1008,12 +1008,13 @@ export function Vitrine({
           </div>
         )}
         {estado === 'pronto' && modo !== 'primeira-pessoa' && !mostrarGiro && (
-          <div className="absolute bottom-2 left-2 grid justify-items-start gap-1">
-            <button type="button" onClick={visaoGeral} className="min-h-9 rounded-full bg-white/90 px-3 text-xs font-semibold text-slate-900 shadow hover:bg-white">
+          <>
+            {/* embaixo da bússola: o canto de baixo fica livre para tocar no chão (andar, marcar o lazer) */}
+            <button type="button" onClick={visaoGeral} className="absolute right-3 top-16 min-h-9 rounded-full bg-white/90 px-3 text-xs font-semibold text-slate-900 shadow hover:bg-white">
               Visão geral
             </button>
-            <span className="rounded bg-black/45 px-1.5 py-0.5 text-[10px] text-white/90">Imagens meramente ilustrativas</span>
-          </div>
+            <span className="pointer-events-none absolute bottom-2 left-2 rounded bg-black/45 px-1.5 py-0.5 text-[10px] text-white/90">Imagens meramente ilustrativas</span>
+          </>
         )}
         {apresentando && <Apresentacao unidade={unidadesAtuais.find((u) => u.id === vitrineDaVez) ?? null} nomeAndar={(n) => nomeAndar.get(n) ?? `${n}º andar`} />}
         {estado === 'erro' && <p className="absolute inset-0 grid place-items-center text-perigo">Não foi possível carregar o modelo 3D.</p>}
