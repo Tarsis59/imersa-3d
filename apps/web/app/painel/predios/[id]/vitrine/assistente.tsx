@@ -2,9 +2,14 @@
 import { useEffect, useRef, useState } from 'react';
 import { Botao } from '@/components/ui';
 import { lerEventos } from '@/lib/sse';
+import type { AcaoComando } from '@/lib/comandos';
 
 /** O que a resposta pede para a tela fazer (vem da API: a IA só sugere, a tela executa). */
-export type AcaoAssistente = { tipo: 'mostrar'; unidades: string[]; focar: string | null } | { tipo: 'contato'; motivo: 'contato' | 'visita'; unidade: string | null };
+export type AcaoAssistente =
+  | { tipo: 'mostrar'; unidades: string[]; focar: string | null }
+  | { tipo: 'contato'; motivo: 'contato' | 'visita'; unidade: string | null }
+  // a IA pede à tela o mesmo que a barra de comandos (filtros, hora, clima, lazer, entrar na unidade...)
+  | { tipo: 'comandos'; acoes: AcaoComando[] };
 type Mensagem = { papel: 'cliente' | 'assistente'; texto: string };
 
 const SUGESTOES = ['Quais unidades de 3 quartos estão disponíveis?', 'O que tem perto do prédio?', 'Quero agendar uma visita'];
@@ -20,7 +25,20 @@ const erroDe = (codigo: unknown) => ERROS[String(codigo)] ?? 'Não consegui resp
  * Chat com o assistente da Vitrine: resposta aparecendo aos poucos; quando ele fala de unidades, a tela destaca e
  * voa até elas. Conversa só nesta página (nada fica guardado no navegador).
  */
-export function Assistente({ url, aoAcao }: { url: string; aoAcao: (a: AcaoAssistente) => void }) {
+export function Assistente({
+  url,
+  aoAcao,
+  pergunta,
+  voz = false,
+  aoFalar,
+}: {
+  url: string;
+  aoAcao: (a: AcaoAssistente) => void;
+  pergunta?: { texto: string; vez: number } | null;
+  /** Corretora virtual: lê cada resposta em voz alta (voz do navegador, grátis). */
+  voz?: boolean;
+  aoFalar?: (falando: boolean) => void;
+}) {
   const [mensagens, setMensagens] = useState<Mensagem[]>([]);
   const [entrada, setEntrada] = useState('');
   const [ocupado, setOcupado] = useState(false);
@@ -30,6 +48,30 @@ export function Assistente({ url, aoAcao }: { url: string; aoAcao: (a: AcaoAssis
   useEffect(() => {
     if (lista.current) lista.current.scrollTop = lista.current.scrollHeight;
   }, [mensagens]);
+
+  // pergunta vinda da barra de comandos (o que não era comando de tela)
+  const ultimaVez = useRef(0);
+  useEffect(() => {
+    if (pergunta && pergunta.vez !== ultimaVez.current) {
+      ultimaVez.current = pergunta.vez;
+      void perguntar(pergunta.texto);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- dispara só quando chega uma pergunta nova
+  }, [pergunta]);
+
+  function falar(texto: string) {
+    if (typeof window === 'undefined' || !('speechSynthesis' in window)) return;
+    window.speechSynthesis.cancel();
+    const f = new SpeechSynthesisUtterance(texto);
+    f.lang = 'pt-BR';
+    const v = window.speechSynthesis.getVoices().find((x) => x.lang.toLowerCase().startsWith('pt-br'));
+    if (v) f.voice = v;
+    f.onstart = () => aoFalar?.(true);
+    f.onend = f.onerror = () => aoFalar?.(false);
+    aoFalar?.(true);
+    window.speechSynthesis.speak(f);
+  }
+  useEffect(() => () => void (typeof window !== 'undefined' && 'speechSynthesis' in window && window.speechSynthesis.cancel()), []);
 
   async function perguntar(texto: string) {
     const pergunta = texto.trim();
@@ -50,7 +92,10 @@ export function Assistente({ url, aoAcao }: { url: string; aoAcao: (a: AcaoAssis
       await lerEventos(r.body, ({ evento, dados }) => {
         const d = dados as { t?: string; texto?: string; codigo?: string };
         if (evento === 'texto') escrever((t) => t + (d.t ?? ''));
-        else if (evento === 'substituir' || evento === 'fim') escrever(() => d.texto ?? '');
+        else if (evento === 'substituir' || evento === 'fim') {
+          escrever(() => d.texto ?? '');
+          if (evento === 'fim' && voz && d.texto) falar(d.texto);
+        }
         else if (evento === 'acao') aoAcao(dados as AcaoAssistente);
         else if (evento === 'erro') throw new Error(erroDe(d.codigo));
       });

@@ -57,6 +57,7 @@ export interface DetalheProjeto {
     lon: number | null;
     altitudeM: number | null;
     rotacaoGraus: number;
+    estiloDecorado: 'moderno' | 'classico' | 'jovem';
     status: StatusProjeto;
   };
   predios: Array<{ id: string; nome: string; andares: number; unidades: number }>;
@@ -249,7 +250,7 @@ export interface ItemLazer {
 export interface Portal {
   empresa: { nome: string };
   consultora: { nome: string };
-  projeto: { id: string; nome: string; descricao: string | null; cidade: string | null; uf: string | null; lat: number | null; lon: number | null; rotacaoGraus: number };
+  projeto: { id: string; nome: string; descricao: string | null; cidade: string | null; uf: string | null; lat: number | null; lon: number | null; rotacaoGraus: number; estiloDecorado: 'moderno' | 'classico' | 'jovem' };
   predio: { id: string; nome: string };
   andares: Array<{ numero: number; nome: string }>;
   unidades: Array<{ id: string; codigo: string; andar: number; status: StatusUnidade; preco: number | null; meshNodeId: string | null; tipologia: string | null; areaM2: number | null; quartos: number | null }>;
@@ -259,6 +260,8 @@ export interface Portal {
   giro: { arquivoId: string; unidades: string[] } | null;
   /** Lazer do empreendimento marcado no 3D, na ordem do tour. */
   lazer: ItemLazer[];
+  /** Fotos do imóvel com GPS (quadros no 3D). */
+  fotos: Array<{ id: string; nome: string; lat: number; lon: number; rumo: number | null }>;
   /** Assistente com IA (direto na API), ou null se desligado. */
   assistenteUrl: string | null;
   /** Transmissão do status das unidades ao vivo (EventSource direto na API). */
@@ -335,4 +338,60 @@ export interface Estande {
 export interface VideosDoPredio {
   temModelo: boolean;
   videos: VideoPredio[];
+}
+
+// ------------------------------------------------------------------ criação integrada (Plano 11a)
+export interface TipologiaLida {
+  nome: string;
+  quartos: number;
+  suites: number;
+  areaM2: number | null;
+}
+export interface Descricao {
+  nome: string | null;
+  andares: number | null;
+  unidadesPorAndar: number | null;
+  totalUnidades: number | null;
+  subsolos: number | null;
+  torres: number | null;
+  tipologias: TipologiaLida[];
+  vagas: number | null;
+  lazer: Array<{ categoria: CategoriaLazer; nome: string }>;
+  endereco: string | null;
+  bairro: string | null;
+  cidade: string | null;
+  uf: string | null;
+  cep: string | null;
+  precoAPartirDe: number | null;
+  avisos: string[];
+}
+export interface PlanoCriacao {
+  unidades: number;
+  andares: number;
+  porAndar: number;
+  predios: string[];
+  tipologias: Array<TipologiaLida & { unidades: number }>;
+  lazer: Array<{ categoria: CategoriaLazer; nome: string; noTerraco: boolean }>;
+  avisos: string[];
+}
+export type EstadoEtapa = 'pendente' | 'rodando' | 'feita' | 'pulada' | 'aviso' | 'falhou';
+export type IdEtapa = 'texto' | 'local' | 'predio' | 'lazer' | 'cidade' | 'pontos' | 'arquivos';
+export const ROTULO_ETAPA: Record<IdEtapa, string> = {
+  texto: 'Lendo o texto',
+  local: 'Achando o lugar',
+  predio: 'Gerando o prédio e as unidades',
+  lazer: 'Montando o lazer e o tour',
+  cidade: 'Buscando a cidade em volta',
+  pontos: 'Escolas, mercados e transporte perto',
+  arquivos: 'Mandando cada arquivo para o caminho certo',
+};
+export interface Montagem {
+  id: string;
+  projetoId: string;
+  predioId: string | null;
+  estado: 'aguardando_arquivos' | 'montando' | 'pronta' | 'pronta_com_avisos' | 'falhou';
+  etapas: Array<{ id: IdEtapa; estado: EstadoEtapa; detalhe: string | null; ms: number | null }>;
+  descricao: Descricao;
+  iniciadaEm: string | null;
+  concluidaEm: string | null;
 }

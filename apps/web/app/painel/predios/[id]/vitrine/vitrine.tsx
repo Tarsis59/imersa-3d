@@ -1,6 +1,6 @@
 'use client';
 import { useEffect, useMemo, useRef, useState, type PointerEvent as EventoPonteiro } from 'react';
-import { criarViewer, filtrar, suporteImersivo, temWebGpu, type SuporteImersivo, type Caixa, type Clima, type EstudoSolar, type PeriodoDeSol, type Giro, filtroVazio, pontoCardeal, vetorJoystick, type EstadoViewer, type Filtro, type UnidadeViewer, type Viewer } from '@imersa/viewer';
+import { BONECOS, criarViewer, filtrar, suporteImersivo, temWebGpu, type SuporteImersivo, type Caixa, type Clima, type EstudoSolar, type PeriodoDeSol, type Giro, filtroVazio, pontoCardeal, vetorJoystick, type EstadoViewer, type Filtro, type UnidadeViewer, type Viewer } from '@imersa/viewer';
 import type { ItemLazer, StatusUnidade } from '@/lib/tipos';
 import { Botao, Campo, Cartao, Selecao } from '@/components/ui';
 import { alternarFavorito, lerFavoritos, salvarFavoritos } from '@/lib/favoritos';
@@ -11,6 +11,10 @@ import type { ResultadoEntorno } from './actions';
 import { InteriorSplat } from './interior';
 import { Giro360 } from './giro';
 import { Assistente, type AcaoAssistente } from './assistente';
+import { ComandoVitrine } from './comando';
+import { VisitaEmGrupo } from './visita-grupo';
+import type { AcaoComando } from '@/lib/comandos';
+import { ehPorDoSol, MISSOES, PASSEIO_M, progressoTipologias, somarCaminhada, type IdMissao } from '@/lib/missoes';
 import { SimuladorFinanciamento } from './simulador';
 import { CartaoLazer, PainelDoPonto, passoDoTourMs, rotuloDoPonto, type EstadoTour } from './lazer';
 import type { NovoLazer } from './actions';
@@ -52,9 +56,11 @@ function alternar<T>(lista: T[], x: T): T[] {
 }
 
 /** O que o visitante fez, para os números de vendas (portal público). */
-export type EventoVitrine = { tipo: 'unidade' | 'favorito'; unidadeId: string } | { tipo: 'interior' } | { tipo: 'tour_lazer' };
+export type EventoVitrine = { tipo: 'unidade' | 'favorito'; unidadeId: string } | { tipo: 'interior' } | { tipo: 'tour_lazer' } | { tipo: 'missao'; missao: IdMissao };
 
 type EstadoEntorno = { tipo: 'carregando' } | { tipo: 'pronto'; predios: number; atribuicao: string } | { tipo: 'sem_localizacao' } | { tipo: 'indisponivel' };
+
+const SEM_FOTOS: NonNullable<Parameters<typeof Vitrine>[0]['fotos']> = [];
 
 export function Vitrine({
   predioId,
@@ -66,6 +72,10 @@ export function Vitrine({
   unidades,
   andares,
   rotacaoGraus,
+  estiloDecorado,
+  fotos = SEM_FOTOS,
+  inicio,
+  salaUrl = null,
   lat,
   lon,
   interiores,
@@ -97,6 +107,14 @@ export function Vitrine({
   rotacaoGraus: number;
   lat: number | null;
   lon: number | null;
+  /** Estilo do apartamento decorado gerado ao entrar numa unidade do prédio desenhado. */
+  estiloDecorado?: 'moderno' | 'classico' | 'jovem';
+  /** Visita em grupo (só no link do cliente): endereço da sala na API. */
+  salaUrl?: string | null;
+  /** Abrir já na vista de uma unidade e numa hora (foto pedida por texto). */
+  inicio?: { unidadeId: string | null; hora: number | null };
+  /** Fotos do imóvel com GPS: quadros no 3D onde foram tiradas (Plano 11c). */
+  fotos?: Array<{ id: string; nome: string; lat: number; lon: number; rumo: number | null }>;
   /** Splats prontos do projeto (interiores reais). */
   interiores: Array<{ id: string; nome: string }>;
   /** Índice do nível de qualidade a manter fixo; `null` = automático. */
@@ -132,8 +150,8 @@ export function Vitrine({
   const canvas = useRef<HTMLCanvasElement>(null);
   const coluna = useRef<HTMLDivElement>(null);
   const viewer = useRef<Viewer | null>(null);
-  const inicial = useRef({ modeloUrl, unidades, rotacaoGraus, lat, lon, projetoId, predioId, qualidadeFixa, carregarEntorno, comTelemetria });
-  inicial.current = { modeloUrl, unidades, rotacaoGraus, lat, lon, projetoId, predioId, qualidadeFixa, carregarEntorno, comTelemetria };
+  const inicial = useRef({ modeloUrl, unidades, rotacaoGraus, estiloDecorado, lat, lon, projetoId, predioId, qualidadeFixa, carregarEntorno, comTelemetria });
+  inicial.current = { modeloUrl, unidades, rotacaoGraus, estiloDecorado, lat, lon, projetoId, predioId, qualidadeFixa, carregarEntorno, comTelemetria };
   const evento = useRef(aoEvento);
   evento.current = aoEvento;
   const fonteAoVivo = useRef(aoVivo);
@@ -209,6 +227,38 @@ export function Vitrine({
   useEffect(() => {
     if (emImersivo !== 'ar' && sobreposicaoAr.current) sobreposicaoAr.current.hidden = true;
   }, [emImersivo]);
+  // fotos com GPS: quadros no 3D; a imagem chega pelo link assinado; tocar abre em tela cheia
+  const [qtdFotos, setQtdFotos] = useState(0);
+  const [fotoAberta, setFotoAberta] = useState<{ nome: string; url: string } | null>(null);
+  const urlsFotos = useRef(new Map<string, string>());
+  useEffect(() => {
+    const v = viewer.current;
+    if (estado !== 'pronto' || !v) return;
+    setQtdFotos(v.definirFotos(fotos));
+    let vivo = true;
+    for (const f of fotos) {
+      void linkDoArquivo(f.id).then((url) => {
+        if (!vivo || !url) return;
+        urlsFotos.current.set(f.id, url);
+        void v.mostrarFoto(f.id, url);
+      });
+    }
+    v.aoSelecionarFoto((id) => {
+      const f = fotos.find((x) => x.id === id);
+      const url = urlsFotos.current.get(id);
+      if (f && url) setFotoAberta({ nome: f.nome, url });
+    });
+    return () => {
+      vivo = false;
+      v.aoSelecionarFoto(null);
+    };
+  }, [estado, fotos, linkDoArquivo]);
+  useEffect(() => {
+    if (!fotoAberta) return;
+    const fechar = (e: KeyboardEvent) => e.key === 'Escape' && setFotoAberta(null);
+    window.addEventListener('keydown', fechar);
+    return () => window.removeEventListener('keydown', fechar);
+  }, [fotoAberta]);
   // lazer no 3D: marcadores com o nome; tocar num marcador voa até ele
   useEffect(() => {
     if (estado !== 'pronto') return;
@@ -298,7 +348,7 @@ export function Vitrine({
     if (!el) return;
     const c = inicial.current;
     setEstado('carregando');
-    const v = criarViewer(el, { unidades: c.unidades, modeloUrl: c.modeloUrl, rotacaoGraus: c.rotacaoGraus, lat: c.lat ?? undefined, lon: c.lon ?? undefined, decodificadores: DECODIFICADORES,
+    const v = criarViewer(el, { unidades: c.unidades, modeloUrl: c.modeloUrl, rotacaoGraus: c.rotacaoGraus, estiloDecorado: c.estiloDecorado, lat: c.lat ?? undefined, lon: c.lon ?? undefined, decodificadores: DECODIFICADORES,
       ...(c.qualidadeFixa !== null ? { qualidadeInicial: c.qualidadeFixa, qualidadeFixa: true } : {}),
     });
     viewer.current = v;
@@ -649,8 +699,158 @@ export function Vitrine({
     setSelecionada(id);
     viewer.current?.voarPara(id);
   };
+  // pedido por texto da gestão ("foto do pôr do sol da 1201"): abre na vista da unidade, na hora pedida
+  const inicioFeito = useRef(false);
+  useEffect(() => {
+    if (estado !== 'pronto' || inicioFeito.current || !inicio) return;
+    inicioFeito.current = true;
+    if (inicio.hora !== null) setHoraSol(inicio.hora);
+    if (inicio.unidadeId) {
+      setSelecionada(inicio.unidadeId);
+      if (viewer.current?.vistaDaUnidade(inicio.unidadeId)) setVista(inicio.unidadeId);
+    }
+  }, [estado, inicio]);
+  // corretora virtual: personagem na frente da unidade de que o assistente fala, acenando enquanto fala
+  const [corretoraLigada, setCorretoraLigada] = useState(false);
+  const [corretoraFalando, setCorretoraFalando] = useState(false);
+  useEffect(() => {
+    if (estado !== 'pronto') return;
+    viewer.current?.mostrarCorretora(corretoraLigada ? { unidadeId: selecionada, falando: corretoraFalando } : null);
+  }, [estado, corretoraLigada, corretoraFalando, selecionada]);
+  // missões e conquistas: cada uma conta uma vez por visita, vira evento e mostra o selo
+  const [missoes, setMissoes] = useState<ReadonlySet<IdMissao>>(() => new Set());
+  const [conquista, setConquista] = useState<string | null>(null);
+  // fora do atualizador de estado: o modo estrito do React roda o atualizador duas vezes (evento em dobro)
+  const feitas = useRef(new Set<IdMissao>());
+  const completar = (id: IdMissao) => {
+    if (feitas.current.has(id)) return;
+    feitas.current.add(id);
+    aoEvento?.({ tipo: 'missao', missao: id });
+    setConquista(MISSOES.find((x) => x.id === id)!.titulo);
+    setMissoes(new Set(feitas.current));
+  };
+  useEffect(() => {
+    if (!conquista) return;
+    const t = setTimeout(() => setConquista(null), 4000);
+    return () => clearTimeout(t);
+  }, [conquista]);
+  const [vistasParaMissao, setVistasParaMissao] = useState<ReadonlySet<string>>(() => new Set());
+  useEffect(() => {
+    if (selecionada) setVistasParaMissao((v) => (v.has(selecionada) ? v : new Set([...v, selecionada])));
+  }, [selecionada]);
+  const tipologias = progressoTipologias(vistasParaMissao, unidades);
+  useEffect(() => {
+    if (tipologias.meta > 0 && tipologias.vistos >= tipologias.meta) completar('tipologias');
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- completar só muda o estado das missões
+  }, [tipologias.vistos, tipologias.meta]);
+  useEffect(() => {
+    if (interior) completar('por_dentro');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [interior]);
+  useEffect(() => {
+    if (ehPorDoSol(horaSol, vista !== null || interior !== null)) completar('por_do_sol');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [horaSol, vista, interior]);
+  useEffect(() => {
+    if (tour?.completo) completar('lazer');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tour?.completo]);
+  const caminhada = useRef<{ total: number; ultimo: { x: number; z: number } | null }>({ total: 0, ultimo: null });
+  useEffect(() => {
+    if (!telemetria || telemetria.modo !== 'primeira-pessoa') {
+      caminhada.current.ultimo = null;
+      return;
+    }
+    const c = caminhada.current;
+    c.total = somarCaminhada(c.total, c.ultimo, telemetria.posicao);
+    c.ultimo = { x: telemetria.posicao.x, z: telemetria.posicao.z };
+    if (c.total >= PASSEIO_M) completar('a_pe');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [telemetria]);
+
+  // comandos por texto/voz (e os que a IA pede): cada ação mexe só na tela; devolve o que não deu para fazer
+  const [perguntaAssistente, setPerguntaAssistente] = useState<{ texto: string; vez: number } | null>(null);
+  const executarComandos = (acoes: AcaoComando[]): string[] => {
+    const problemas: string[] = [];
+    for (const a of acoes) {
+      switch (a.tipo) {
+        case 'limpar':
+          setFiltro(filtroVazio());
+          setFiltroSol([]);
+          setDestaqueIA(null);
+          break;
+        case 'filtro':
+          setDestaqueIA(null);
+          setFiltro((f) => ({
+            ...f,
+            ...(a.quartos ? { quartos: a.quartos } : {}),
+            ...(a.precoMax !== undefined ? { precoMax: a.precoMax } : {}),
+            ...(a.areaMin !== undefined ? { areaMin: a.areaMin } : {}),
+            ...(a.status ? { status: a.status } : {}),
+            ...(a.favoritos ? { somenteFavoritos: true } : {}),
+          }));
+          if (a.sol) setFiltroSol(a.sol);
+          break;
+        case 'hora':
+          setHoraSol(a.hora);
+          break;
+        case 'estacao':
+          setDataSol(`${new Date().getFullYear()}-${a.estacao === 'inverno' ? '06' : '12'}-21`);
+          break;
+        case 'clima':
+          setClima(a.clima);
+          break;
+        case 'tour_lazer':
+          if (!itensLazer.length) problemas.push('Este empreendimento ainda não tem o lazer marcado.');
+          else {
+            setTour({ indice: 0, vistos: [], completo: false });
+            irAoPontoLazer(0, true);
+          }
+          break;
+        case 'lazer': {
+          const alvo = (x: string) => x.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+          const i = itensLazer.findIndex((l) => (a.categoria && l.categoria === a.categoria) || (a.nome && alvo(l.nome).includes(alvo(a.nome))));
+          if (i < 0) problemas.push(`${a.nome || 'Esse espaço'} não está no lazer deste empreendimento.`);
+          else irAoPontoLazer(i, false);
+          break;
+        }
+        case 'unidade': {
+          const u = unidadesAtuais.find((x) => x.codigo.toUpperCase() === a.codigo.toUpperCase());
+          if (!u) {
+            problemas.push(`Não há unidade ${a.codigo} neste prédio.`);
+            break;
+          }
+          if (a.acao === 'entrar') {
+            setSelecionada(u.id);
+            entrar(u);
+          } else if (a.acao === 'vista') {
+            setSelecionada(u.id);
+            if (viewer.current?.vistaDaUnidade(u.id)) setVista(u.id);
+            else problemas.push(`A ${u.codigo} não tem janela para fora no 3D.`);
+          } else voar(u.id);
+          break;
+        }
+        case 'corte':
+          setAndarCorte(a.andar === null ? '' : String(a.andar));
+          break;
+        case 'modo':
+          viewer.current?.definirModo(a.modo);
+          break;
+        case 'visao_geral':
+          setVista(null);
+          setInterior(null);
+          viewer.current?.visaoGeral();
+          break;
+        case 'som':
+          void viewer.current?.definirSom(a.ligado);
+          break;
+      }
+    }
+    return problemas;
+  };
   const aoAcaoIA = (a: AcaoAssistente) => {
     if (a.tipo === 'contato') return aoPedirContato?.(a.motivo, a.unidade);
+    if (a.tipo === 'comandos') return void executarComandos(a.acoes);
     setDestaqueIA(a.unidades.length ? new Set(a.unidades) : null);
     if (a.focar) voar(a.focar);
   };
@@ -683,6 +883,14 @@ export function Vitrine({
         data-imersivo={emImersivo ?? ''}
         data-lazer={itensLazer.length}
         data-moradores={telemetria?.moradores ?? 0}
+        data-decorado={telemetria?.decorado ?? 0}
+        data-fotos={qtdFotos}
+        data-missoes={missoes.size}
+        data-corretora={telemetria?.corretora ?? 'fora'}
+        data-outros={telemetria?.outros ?? 0}
+        data-terceira={telemetria?.terceiraPessoa ? 'sim' : 'nao'}
+        data-boneco={telemetria?.boneco ?? ''}
+        data-no-ar={telemetria?.noAr ? 'sim' : 'nao'}
         data-nivel={telemetria?.nivel ?? ''}
         data-som={telemetria?.som ? 'ligado' : 'desligado'}
         data-marcando-lazer={marcandoLazer ? 'sim' : ''}
@@ -772,6 +980,20 @@ export function Vitrine({
           />
         )}
         {progressoGiro && <p className="absolute inset-x-0 bottom-12 mx-auto w-fit rounded-md bg-black/70 px-3 py-1 text-sm text-white">{progressoGiro}</p>}
+        {conquista && (
+          <p role="status" data-testid="conquista" className="pointer-events-none absolute inset-x-0 top-14 mx-auto w-fit rounded-full bg-amber-400 px-4 py-2 text-sm font-bold text-slate-900 shadow-lg">
+            🏅 Conquista: {conquista}
+          </p>
+        )}
+        {fotoAberta && (
+          <div role="dialog" aria-modal="true" aria-label={`Foto: ${fotoAberta.nome}`} data-testid="foto-aberta" className="fixed inset-0 z-50 grid place-items-center bg-black/85 p-4" onClick={() => setFotoAberta(null)}>
+            {/* eslint-disable-next-line @next/next/no-img-element -- link assinado temporário, fora do otimizador de imagens */}
+            <img src={fotoAberta.url} alt={fotoAberta.nome} className="max-h-[85vh] max-w-full rounded-lg object-contain shadow-2xl" />
+            <button type="button" className="absolute right-4 top-4 rounded-full bg-white/90 px-4 py-2 text-sm font-semibold text-black" onClick={() => setFotoAberta(null)}>
+              Fechar
+            </button>
+          </div>
+        )}
         {interiorAberto && <InteriorSplat arquivo={interiorAberto} linkDoArquivo={linkDoArquivo} aoFechar={() => setInteriorAberto(null)} />}
         {modo === 'primeira-pessoa' && <Joystick aoMover={(e) => viewer.current?.definirEntrada(e)} />}
       </div>
@@ -927,9 +1149,41 @@ export function Vitrine({
             </div>
           </Cartao>
         )}
+        {salaUrl && (
+          <Cartao titulo="Visita em grupo">
+            <VisitaEmGrupo url={salaUrl} viewer={viewer} pronto={estado === 'pronto'} />
+          </Cartao>
+        )}
+        <Cartao titulo={`Missões · ${missoes.size} de ${MISSOES.length}`}>
+          <ul className="grid gap-2 text-sm" data-testid="missoes" data-feitas={missoes.size}>
+            {MISSOES.map((m) => (
+              <li key={m.id} className="flex items-start gap-2" data-missao={m.id} data-feita={missoes.has(m.id) ? 'sim' : 'nao'}>
+                <span aria-hidden className={missoes.has(m.id) ? 'text-amber-500' : 'text-suave'}>
+                  {missoes.has(m.id) ? '🏅' : '○'}
+                </span>
+                <span>
+                  <span className={missoes.has(m.id) ? 'font-semibold' : ''}>{m.titulo}</span>
+                  {m.id === 'tipologias' && !missoes.has(m.id) && tipologias.meta > 0 && <span className="text-suave"> ({tipologias.vistos} de {tipologias.meta})</span>}
+                  {!missoes.has(m.id) && <span className="block text-xs text-suave">{m.dica}</span>}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </Cartao>
+        <Cartao titulo="Peça o que quiser ver">
+          <ComandoVitrine
+            pronto={estado === 'pronto'}
+            aoExecutar={executarComandos}
+            aoPerguntar={assistenteUrl ? (texto) => setPerguntaAssistente((p) => ({ texto, vez: (p?.vez ?? 0) + 1 })) : null}
+          />
+        </Cartao>
         {assistenteUrl && (
           <Cartao titulo="Pergunte ao assistente">
-            <Assistente url={assistenteUrl} aoAcao={aoAcaoIA} />
+            <label className="mb-3 flex items-center gap-2 text-sm">
+              <input type="checkbox" checked={corretoraLigada} onChange={(e) => setCorretoraLigada(e.target.checked)} />
+              Corretora virtual (aparece no 3D e fala as respostas)
+            </label>
+            <Assistente url={assistenteUrl} aoAcao={aoAcaoIA} pergunta={perguntaAssistente} voz={corretoraLigada} aoFalar={setCorretoraFalando} />
           </Cartao>
         )}
         <Cartao titulo="Filtros">
@@ -1162,7 +1416,45 @@ export function Vitrine({
               </Botao>
             ) : (
               <>
-                <p className="text-suave">WASD ou setas para andar, arraste para olhar. No celular, use o controle no canto da tela.</p>
+                <p className="text-suave">WASD ou setas para andar, arraste para olhar, espaço pula, Shift corre, V troca a vista. No celular, use o controle no canto da tela.</p>
+                <div className="grid gap-2 rounded-lg border border-borda p-3" data-testid="modo-jogo">
+                  <label className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      checked={telemetria?.terceiraPessoa ?? false}
+                      onChange={(e) => viewer.current?.definirTerceiraPessoa(e.target.checked)}
+                    />
+                    Ver o boneco (3ª pessoa)
+                  </label>
+                  <label className="grid gap-1">
+                    <span>Boneco</span>
+                    <select
+                      className="rounded-lg border border-borda bg-superficie px-2 py-1"
+                      value={telemetria?.boneco ?? 'ana'}
+                      onChange={(e) => {
+                        viewer.current?.definirBoneco(e.target.value);
+                        viewer.current?.definirTerceiraPessoa(true);
+                      }}
+                    >
+                      {BONECOS.map((b) => (
+                        <option key={b.id} value={b.id}>
+                          {b.nome}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <div className="flex flex-wrap gap-2">
+                    <Botao type="button" variante="secundario" onClick={() => viewer.current?.pular()}>
+                      Pular
+                    </Botao>
+                    <Botao type="button" variante="secundario" aria-pressed={telemetria?.correndo ?? false} onClick={() => viewer.current?.definirCorrida(!(telemetria?.correndo ?? false))}>
+                      {telemetria?.correndo ? 'Andar' : 'Correr'}
+                    </Botao>
+                    <Botao type="button" variante="secundario" onClick={() => viewer.current?.acenar()}>
+                      Acenar
+                    </Botao>
+                  </div>
+                </div>
                 <Botao type="button" variante="secundario" onClick={() => {
                   setVista(null);
                   setInterior(null);

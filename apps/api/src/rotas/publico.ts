@@ -2,7 +2,8 @@ import { randomUUID } from 'node:crypto';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import type pg from 'pg';
 import { z } from 'zod';
-import { lazerDoPredio } from './lazer';
+import { fotosNoLugar, lazerDoPredio } from './lazer';
+import { transmitirSala, type CanalSala } from '../tempo-real/sala';
 import { withTenant } from '@imersa/db';
 import { ErroHttp } from '../erros';
 import { hashToken } from '../auth/hash';
@@ -16,6 +17,8 @@ interface Dependencias {
   pool: pg.Pool;
   armazenamento: Armazenamento;
   entorno: ReturnType<typeof criarEntorno>;
+  /** Visita em grupo: presença, posição dos bonecos e combinação da voz (Plano 11d). */
+  sala?: CanalSala;
   canal: CanalUnidades;
   /** Endereço da API visto pelo navegador (status ao vivo). */
   apiPublica: string;
@@ -26,13 +29,25 @@ interface Dependencias {
 const DOWNLOAD_S = 60 * 60;
 const TokenLink = z.object({ token: z.string().regex(/^[\w-]{43}$/) });
 const TokenArquivo = TokenLink.extend({ id: z.uuid() });
-const TIPOS_EVENTO = ['abriu', 'unidade', 'favorito', 'interior', 'tempo', 'tour_lazer'] as const;
+const TIPOS_EVENTO = ['abriu', 'unidade', 'favorito', 'interior', 'tempo', 'tour_lazer', 'missao'] as const;
+export const MISSOES = ['lazer', 'tipologias', 'por_dentro', 'por_do_sol', 'a_pe'] as const;
 const Eventos = z.object({
   sessao: z.uuid(),
   eventos: z
-    .array(z.object({ tipo: z.enum(TIPOS_EVENTO), unidadeId: z.uuid().optional(), duracaoS: z.number().int().min(0).max(86_400).optional() }))
+    .array(
+      z
+        .object({ tipo: z.enum(TIPOS_EVENTO), unidadeId: z.uuid().optional(), duracaoS: z.number().int().min(0).max(86_400).optional(), missao: z.enum(MISSOES).optional() })
+        .refine((e) => (e.tipo === 'missao') === (e.missao !== undefined), { message: 'missão só no evento de missão', path: ['missao'] }),
+    )
     .min(1)
     .max(50),
+});
+const NomeNaSala = z.object({ nome: z.string().trim().min(1).max(40).default('Visitante') });
+const SinalSala = z.object({
+  de: z.uuid(),
+  para: z.uuid().nullable(),
+  tipo: z.enum(['posicao', 'oferta', 'resposta', 'ice']),
+  dados: z.unknown(),
 });
 const NovoLead = z.object({
   nome: z.string().trim().min(2).max(120),
@@ -57,7 +72,7 @@ interface Link {
   consultoraId: string;
 }
 
-export function rotasPublicas(app: FastifyInstance, { pool, armazenamento, entorno, canal, apiPublica, ia }: Dependencias): void {
+export function rotasPublicas(app: FastifyInstance, { pool, armazenamento, entorno, canal, sala, apiPublica, ia }: Dependencias): void {
   /** Token → link válido. Desconhecido: 404; revogado ou vencido: 410 (o cliente pede um link novo à consultora). */
   async function resolver(req: FastifyRequest): Promise<Link> {
     const p = TokenLink.safeParse({ token: (req.params as { token?: string }).token });
@@ -85,13 +100,13 @@ export function rotasPublicas(app: FastifyInstance, { pool, armazenamento, entor
         await c.query<{
           predio: { id: string; nome: string };
           modeloId: string | null;
-          projeto: { id: string; nome: string; descricao: string | null; cidade: string | null; uf: string | null; lat: number | null; lon: number | null; rotacaoGraus: number };
+          projeto: { id: string; nome: string; descricao: string | null; cidade: string | null; uf: string | null; lat: number | null; lon: number | null; rotacaoGraus: number; estiloDecorado: string };
           empresa: string;
           consultora: string;
         }>(
           `SELECT json_build_object('id', b.id, 'nome', b.nome) AS predio, b.modelo_asset_id AS "modeloId",
                   json_build_object('id', p.id, 'nome', p.nome, 'descricao', p.descricao, 'cidade', p.cidade, 'uf', p.uf,
-                                    'lat', ST_Y(p.geom), 'lon', ST_X(p.geom), 'rotacaoGraus', p.rotacao_graus::float8) AS projeto,
+                                    'lat', ST_Y(p.geom), 'lon', ST_X(p.geom), 'rotacaoGraus', p.rotacao_graus::float8, 'estiloDecorado', p.estilo_decorado) AS projeto,
                   t.nome AS empresa, u.nome AS consultora
              FROM buildings b JOIN projects p ON p.id = b.project_id JOIN tenants t ON t.id = b.tenant_id, users u
             WHERE b.id = $1 AND u.id = $2`,
@@ -114,9 +129,9 @@ export function rotasPublicas(app: FastifyInstance, { pool, armazenamento, entor
           [base.projeto.id, base.modeloId],
         )
       ).rows;
-      return { base, andares, unidades, arquivos, giro: await giroDaVitrine(c, l.predioId), lazer: await lazerDoPredio(c, l.predioId) };
+      return { base, andares, unidades, arquivos, giro: await giroDaVitrine(c, l.predioId), lazer: await lazerDoPredio(c, l.predioId), fotos: await fotosNoLugar(c, base.projeto.id) };
     });
-    const { base, andares, unidades, arquivos, giro, lazer } = dados;
+    const { base, andares, unidades, arquivos, giro, lazer, fotos } = dados;
     const modelo = arquivos.find((a) => a.id === base.modeloId && a.tipo === 'modelo_3d');
     return {
       empresa: { nome: base.empresa },
@@ -131,6 +146,7 @@ export function rotasPublicas(app: FastifyInstance, { pool, armazenamento, entor
       interiores: arquivos.filter((a) => a.tipo === 'splat').map((a) => ({ id: a.id, nome: a.nome })),
       giro,
       lazer,
+      fotos,
       // o portal chama o assistente direto na API (resposta em fluxo)
       assistenteUrl: ia.chamar ? `${apiPublica}/publico/links/${(req.params as { token: string }).token}/assistente` : null,
       aoVivoUrl: `${apiPublica}/publico/links/${(req.params as { token: string }).token}/ao-vivo`,
@@ -141,6 +157,25 @@ export function rotasPublicas(app: FastifyInstance, { pool, armazenamento, entor
   app.get('/publico/links/:token/ao-vivo', limite(30, '1 minute'), async (req, reply) => {
     const l = await resolver(req);
     await transmitirPredio(req, reply, canal, { tenantId: l.tenantId, predioId: l.predioId, linkId: l.linkId });
+  });
+
+  // visita em grupo: a sala é o link (quem tem o link da família entra junto)
+  app.get('/publico/links/:token/sala', limite(30, '1 minute'), async (req, reply) => {
+    if (!sala) throw new ErroHttp(503, 'sala_indisponivel');
+    const l = await resolver(req);
+    const { nome } = NomeNaSala.parse(req.query);
+    await transmitirSala(req, reply, sala, { t: l.tenantId, l: l.linkId, nome });
+  });
+  app.post('/publico/links/:token/sala/sinal', limite(900, '1 minute', 16 * 1024), async (req, reply) => {
+    if (!sala) throw new ErroHttp(503, 'sala_indisponivel');
+    const l = await resolver(req);
+    const s = SinalSala.parse(req.body);
+    try {
+      await sala.enviar({ t: l.tenantId, l: l.linkId, de: s.de, para: s.para, tipo: s.tipo, dados: s.dados });
+    } catch {
+      throw new ErroHttp(413, 'sinal_grande_demais');
+    }
+    return reply.status(204).send();
   });
 
   app.get('/publico/links/:token/entorno', limite(60, '1 minute'), async (req) => {
@@ -158,7 +193,8 @@ export function rotasPublicas(app: FastifyInstance, { pool, armazenamento, entor
         await c.query<{ chave: string; nome: string }>(
           `SELECT a.chave, a.nome FROM assets a JOIN buildings b ON b.project_id = a.project_id
             WHERE a.id = $1 AND b.id = $2 AND a.status = 'pronto'
-              AND (a.tipo IN ('splat', 'modelo_3d') OR EXISTS (SELECT 1 FROM giros g WHERE g.zip_asset_id = a.id AND g.building_id = b.id))`,
+              AND (a.tipo IN ('splat', 'modelo_3d') OR EXISTS (SELECT 1 FROM giros g WHERE g.zip_asset_id = a.id AND g.building_id = b.id)
+                   OR (a.tipo = 'imagem' AND a.lat IS NOT NULL AND a.papel IN ('foto', 'fachada', 'render')))`,
           [id, l.predioId],
         )
       ).rows[0],
@@ -174,14 +210,14 @@ export function rotasPublicas(app: FastifyInstance, { pool, armazenamento, entor
     await withTenant(pool, daEmpresa(l), async (c) => {
       const validas = await unidadesDoPredio(c, l, d.eventos.flatMap((e) => (e.unidadeId ? [e.unidadeId] : [])));
       await c.query(
-        `INSERT INTO view_events (link_id, sessao, tipo, unit_id, duracao_s, ip, navegador)
-         SELECT $1, $2, e.tipo, e.unidade, e.duracao, $3, $4 FROM jsonb_to_recordset($5::jsonb) AS e(tipo text, unidade uuid, duracao integer)`,
+        `INSERT INTO view_events (link_id, sessao, tipo, unit_id, duracao_s, missao, ip, navegador)
+         SELECT $1, $2, e.tipo, e.unidade, e.duracao, e.missao, $3, $4 FROM jsonb_to_recordset($5::jsonb) AS e(tipo text, unidade uuid, duracao integer, missao text)`,
         [
           l.linkId,
           d.sessao,
           req.ip,
           navegador,
-          JSON.stringify(d.eventos.map((e) => ({ tipo: e.tipo, unidade: e.unidadeId && validas.has(e.unidadeId) ? e.unidadeId : null, duracao: e.duracaoS ?? null }))),
+          JSON.stringify(d.eventos.map((e) => ({ tipo: e.tipo, unidade: e.unidadeId && validas.has(e.unidadeId) ? e.unidadeId : null, duracao: e.duracaoS ?? null, missao: e.missao ?? null }))),
         ],
       );
     });

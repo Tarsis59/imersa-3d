@@ -18,7 +18,7 @@ const linhas = ['predio;andar;codigo;tipologia;area_m2;quartos;preco;status'];
 for (let a = 1; a <= 10; a++) for (let f = 1; f <= 4; f++) linhas.push(`Torre A;${a};${a}0${f};Tipo ${f % 2 ? 2 : 3}Q;${f % 2 ? 70 : 98};${f % 2 ? 2 : 3};${600 + a * 10 + f}.000,00;${ST[(a + f) % 5]}`);
 
 test('aparência da Vitrine 3D em celular, tablet e computador', async ({ page, request }) => {
-  test.setTimeout(480_000); // 5 imagens, duas com acabamento de imagem: no CI o 3D é desenhado por software
+  test.setTimeout(900_000); // 5 imagens com a cidade completa, duas com acabamento de imagem: no CI o 3D é desenhado por software
   await entrarComoAdminComMfa(page, request, 'visual');
   await page.getByLabel('Nome do projeto').fill('Residencial Paulista');
   await page.getByRole('button', { name: 'Criar projeto' }).click();
@@ -59,7 +59,7 @@ test('aparência da Vitrine 3D em celular, tablet e computador', async ({ page, 
     }
     await expect(vitrine).toHaveScreenshot(`vitrine-${tela.nome}.png`, {
       maxDiffPixelRatio: 0.02,
-      timeout: 30_000, // desenho por software no navegador de teste: cada captura é lenta
+      timeout: 90_000, // desenho por software no navegador de teste: cada captura é lenta (a cidade completa pesa)
       mask: [page.getByTestId('qualidade')], // o número de FPS muda a cada rodada
     });
   }
@@ -76,9 +76,9 @@ test('aparência da Vitrine 3D em celular, tablet e computador', async ({ page, 
   await page.getByLabel(/^Hora/).fill('15');
   await page.evaluate(() => window.scrollTo(0, 0));
   await page.waitForTimeout(1500);
-  await expect(vitrine).toHaveScreenshot('vitrine-computador-alta.png', { maxDiffPixelRatio: 0.02, timeout: 60_000, mask: [page.getByTestId('qualidade')] });
+  await expect(vitrine).toHaveScreenshot('vitrine-computador-alta.png', { maxDiffPixelRatio: 0.02, timeout: 90_000, mask: [page.getByTestId('qualidade')] });
   // noite: céu escuro com estrelas e janelas acesas (as disponíveis sempre acesas)
   await page.getByLabel(/^Hora/).fill('21');
   await page.waitForTimeout(1500);
-  await expect(vitrine).toHaveScreenshot('vitrine-computador-noite.png', { maxDiffPixelRatio: 0.02, timeout: 60_000, mask: [page.getByTestId('qualidade')] });
+  await expect(vitrine).toHaveScreenshot('vitrine-computador-noite.png', { maxDiffPixelRatio: 0.02, timeout: 90_000, mask: [page.getByTestId('qualidade')] });
 });

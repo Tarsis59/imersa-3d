@@ -34,14 +34,17 @@ import { rotasGiros } from './rotas/giros';
 import { rotasVideos } from './rotas/videos';
 import { rotasEstandes } from './rotas/estandes';
 import { rotasLazer } from './rotas/lazer';
+import { rotasCriacao } from './rotas/criacao';
+import { rotasComandosGestao } from './rotas/comandos-gestao';
 import Anthropic from '@anthropic-ai/sdk';
 import { rotasAssistente, type ConfigIA } from './rotas/assistente';
 import { chamadaReal, type ChamarModelo } from './ia/assistente';
 import { chamadaSimulada } from './ia/simulada';
 import { CanalUnidades } from './tempo-real/canal';
+import { CanalSala } from './tempo-real/sala';
 import { ArmazenamentoLocal, ArmazenamentoS3, type Armazenamento } from './arquivos/armazenamento';
 import { clamav, semAntivirus, type Antivirus } from './arquivos/antivirus';
-import { comPrediosDeArquivo, servicosMapaReais, type ServicosMapa } from './mapa/osm';
+import { comPrediosDeArquivo, comRelevoDePasta, servicosMapaReais, type ServicosMapa } from './mapa/osm';
 
 export interface Deps {
   pool: pg.Pool;
@@ -372,7 +375,8 @@ export async function construirApp({ pool, config, logger = false, reportarErro,
     limiteBytes: (config.LIMITE_ARMAZENAMENTO_GB ?? 50) * 1024 ** 3,
   });
   const mapaReal = servicosMapaReais(config.OSM_USER_AGENT ?? 'Imersa3D-dev/0.1 (ambiente de desenvolvimento)');
-  const servicosMapa = mapa ?? (config.MAPA_ARQUIVO_PREDIOS ? comPrediosDeArquivo(mapaReal, config.MAPA_ARQUIVO_PREDIOS) : mapaReal);
+  const doArquivo = config.MAPA_ARQUIVO_PREDIOS ? comPrediosDeArquivo(mapaReal, config.MAPA_ARQUIVO_PREDIOS) : mapaReal;
+  const servicosMapa = mapa ?? (config.MAPA_PASTA_RELEVO ? comRelevoDePasta(doArquivo, config.MAPA_PASTA_RELEVO) : doArquivo);
   rotasMapa(app, { pool, exigir, mapa: servicosMapa });
   rotasTelemetria(app, { pool, exigir });
   rotasCapturas(app, { pool, exigir, armazenamento: arm });
@@ -394,11 +398,15 @@ export async function construirApp({ pool, config, logger = false, reportarErro,
   // status ao vivo: uma conexão LISTEN por instância; as transmissões abertas fecham antes de a API parar
   const canal = new CanalUnidades(config.DATABASE_URL);
   app.addHook('preClose', async () => canal.fechar());
+  const sala = new CanalSala(config.DATABASE_URL, pool);
+  app.addHook('preClose', async () => sala.fechar());
   const apiPublica = config.API_URL_PUBLICA ?? `http://localhost:${config.PORT}`;
   rotasAoVivo(app, { pool, exigir, canal, segredo: config.JWT_SECRET, apiPublica });
-  rotasPublicas(app, { pool, armazenamento: arm, entorno: criarEntorno(pool, servicosMapa), canal, apiPublica, ia });
+  rotasPublicas(app, { pool, armazenamento: arm, entorno: criarEntorno(pool, servicosMapa), canal, sala, apiPublica, ia });
   rotasIntegracoes(app, { pool, exigir, chaveCifra: config.TOTP_KEY, permitirLocal: config.WEBHOOK_PERMITIR_LOCAL });
   rotasLazer(app, { pool, exigir });
+  rotasCriacao(app, { pool, exigir, mapa: servicosMapa });
+  rotasComandosGestao(app, { pool, exigir });
   rotasEstandes(app, { pool, exigir, armazenamento: arm, webUrl: config.WEB_URL, apiPublica, segredo: config.JWT_SECRET });
 
   return app;

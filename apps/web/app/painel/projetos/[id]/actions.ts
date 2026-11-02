@@ -33,6 +33,7 @@ export async function salvarDados(projetoId: string, _: EstadoForm, form: FormDa
     cidade: opcional(form, 'cidade'),
     uf: opcional(form, 'uf')?.toUpperCase() ?? null,
     status: texto(form, 'status'),
+    ...(form.get('estiloDecorado') ? { estiloDecorado: texto(form, 'estiloDecorado') } : {}),
     ...(lat !== null && lon !== null ? { lat, lon } : {}),
   };
   const r = await api(`/projetos/${projetoId}`, { metodo: 'PATCH', corpo, token: await tokenParaAcao() });

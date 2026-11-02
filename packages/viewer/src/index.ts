@@ -6,6 +6,7 @@ export { vetorJoystick, type Entrada } from './cameras/primeiraPessoa';
 export { pontoCardeal, rumoDaCamera } from './sun/bussola';
 export { NIVEIS, type NivelQualidade } from './quality/adaptativa';
 export { entornoParaLocal, type Entorno, type PredioEntorno } from './city/entorno';
+export { terrenoDoRelevo, type AreaEntorno, type RelevoEntorno, type ViaEntorno } from './city/cidade';
 export { abrirInterior, opcoesDeLod, LOD_A_PARTIR_DE, type Interior } from './interior/interior';
 export { tipoDoSplat } from './interior/tipo';
 export { criarCarregadorGltf, type Decodificadores } from './carregador';
@@ -21,5 +22,8 @@ export { estudoSolar, type EstudoSolar, type PeriodoDeSol } from './sun/insolaca
 export { suporteImersivo, type SuporteImersivo } from './xr/suporte';
 export { escalaDaMaquete, gestoDeDoisDedos, pontoDeEntrada, TAMANHO_MAQUETE_M } from './xr/maquete';
 export { poseParaLazer, type PontoLazer } from './ambiente/lazer';
+export { planejarQuadros, type FotoNoLugar } from './ambiente/fotos';
+export { PALETA, type EstiloDecorado } from './interior/decorado';
 export { volumeDaRua, cantoDePassaro } from './ambiente/som';
 export { temWebGpu } from './quality/webgpu';
+export { BONECOS, type PresetBoneco } from './cameras/boneco';

@@ -27,6 +27,8 @@ const GIRO: Record<string, string> = BLENDER
   ? { GIRO_RENDERIZADOR: 'python', GIRO_BLENDER: BLENDER, GIRO_QUADROS: '24', GIRO_LARGURA: '640', GIRO_ALTURA: '360', GIRO_AMOSTRAS: '16', VIDEO_SEGUNDOS: '2', VIDEO_FPS: '12', VIDEO_AMOSTRAS: '16', VIDEO_ESCALA: '30' }
   : { GIRO_RENDERIZADOR: 'simulado', GIRO_SIMULADO_ZIP: GIRO_SIMULADO, GIRO_SIMULADO_QUADROS: '8', VIDEO_PROVEDOR: 'simulado', VIDEO_SIMULADO_MP4: VIDEO_SIMULADO, VIDEO_SIMULADO_CAPA: VIDEO_CAPA };
 const PREDIOS_PAULISTA = fileURLToPath(new URL('../../exemplos/cidade-real/sao-paulo-paulista-osm.json', import.meta.url));
+// relevo da Paulista já baixado: o 3D sai sempre igual (testes visuais) e o CI não depende da AWS
+const RELEVO_PAULISTA = fileURLToPath(new URL('../../exemplos/cidade-real/relevo', import.meta.url));
 
 export default defineConfig({
   testDir: './e2e',
@@ -52,7 +54,7 @@ export default defineConfig({
       url: 'http://localhost:3334/health',
       reuseExistingServer: false,
       timeout: 60_000,
-      env: { DATABASE_URL: DB_APP, PORT: '3334', WEB_URL: 'http://localhost:3100', CORS_ORIGIN: 'http://localhost:3100', RATE_LIMIT_AUTH: '1000', API_URL_PUBLICA: 'http://localhost:3334', ARMAZENAMENTO_PASTA: 'armazenamento-e2e', MAPA_ARQUIVO_PREDIOS: PREDIOS_PAULISTA, WEBHOOK_PERMITIR_LOCAL: 'true', IA_SIMULADA: 'true' },
+      env: { DATABASE_URL: DB_APP, PORT: '3334', WEB_URL: 'http://localhost:3100', CORS_ORIGIN: 'http://localhost:3100', RATE_LIMIT_AUTH: '1000', API_URL_PUBLICA: 'http://localhost:3334', ARMAZENAMENTO_PASTA: 'armazenamento-e2e', MAPA_ARQUIVO_PREDIOS: PREDIOS_PAULISTA, MAPA_PASTA_RELEVO: RELEVO_PAULISTA, WEBHOOK_PERMITIR_LOCAL: 'true', IA_SIMULADA: 'true' },
     },
     {
       command: 'pnpm --filter @imersa/api worker',

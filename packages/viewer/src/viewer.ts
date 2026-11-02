@@ -14,6 +14,10 @@ import { estudoSolar, type EstudoSolar, type FaceSolar } from './sun/insolacao';
 import { malhasDaFachada, materiaisDaFachada, texturaDeJanelas } from './units/janelas';
 import { buildCityMesh } from './city/cityMesh';
 import { entornoParaLocal, type Entorno } from './city/entorno';
+import { criarCidade, terrenoDoRelevo, type CidadeCompleta } from './city/cidade';
+import { montarDecorado, planejarDecorado, type Decorado, type EstiloDecorado } from './interior/decorado';
+import { criarQuadros, planejarQuadros, type FotoNoLugar, type QuadrosDeFoto } from './ambiente/fotos';
+import { cameraAtrasDoOmbro, CORRETORA, criarBoneco, presetBoneco, type Boneco } from './cameras/boneco';
 import { alturaDoCorte, planoDeCorte } from './units/corte';
 import { COR_UNIDADE, type Caixa, type StatusUnidade, type UnidadeViewer } from './units/tipos';
 import { planejarVoo, enquadrar, type Pose } from './cameras/voo';
@@ -46,6 +50,8 @@ export interface ConfigViewer {
   qualidadeInicial?: number;
   /** Mantém o nível inicial (só mede o FPS). Para testes visuais. */
   qualidadeFixa?: boolean;
+  /** Estilo do apartamento decorado gerado ao entrar numa unidade do prédio desenhado (sem modelo). */
+  estiloDecorado?: EstiloDecorado;
   /** Pastas dos decodificadores Draco/KTX2 (Meshopt já vem embutido). */
   decodificadores?: Decodificadores;
   /** Liga o configurador (acabamentos por superfície e móveis). Só com modelo GLB. */
@@ -68,6 +74,19 @@ export interface EstadoViewer {
   moradores: number;
   /** Som ambiente tocando. */
   som: boolean;
+  /** Móveis do apartamento decorado em que a pessoa está (0 = fora, ou unidade sem decorado). */
+  decorado: number;
+  /** Pessoas da visita em grupo desenhadas no 3D. */
+  outros: number;
+  /** Corretora virtual na tela (e se está falando). */
+  corretora: 'fora' | 'parada' | 'falando';
+  /** Modo jogo: câmera atrás do boneco (terceira pessoa). */
+  terceiraPessoa: boolean;
+  /** Boneco escolhido. */
+  boneco: string;
+  /** No ar (pulando). */
+  noAr: boolean;
+  correndo: boolean;
 }
 
 /** Resumo da visita para a telemetria. */
@@ -133,6 +152,31 @@ export interface Viewer {
   definirSom(ligado: boolean): Promise<boolean>;
   /** Toque num marcador do lazer. */
   aoSelecionarLazer(cb: ((id: string) => void) | null): void;
+  /** Modo jogo (a pé): câmera atrás do boneco (`true`) ou nos olhos (`false`), sem recarregar. */
+  definirTerceiraPessoa(ligada: boolean): void;
+  /** Troca o boneco (ana, beto, carla, davi). */
+  definirBoneco(id: string): void;
+  /** Pula (a pé, no chão). Devolve `false` se já está no ar ou fora do modo a pé. */
+  pular(): boolean;
+  /** Correr em vez de andar. */
+  definirCorrida(ligada: boolean): void;
+  /** O boneco acena por 2 s (visita em grupo, corretora virtual). */
+  acenar(): void;
+  /**
+   * Corretora virtual: personagem na calçada em frente à unidade (ou à entrada do prédio, sem unidade), virada para
+   * a câmera; acena enquanto `falando`. `null` tira a corretora.
+   */
+  mostrarCorretora(c: { unidadeId: string | null; falando: boolean } | null): void;
+  /** Visita em grupo: os bonecos das outras pessoas na sala, nas posições que elas mandaram (andam suave até lá). */
+  definirOutros(pessoas: ReadonlyArray<{ id: string; x: number; y: number; z: number; yaw: number; boneco: string }>): void;
+  /** Minha posição a pé (para mandar à sala), ou `null` fora do modo a pé. */
+  minhaPosicao(): { x: number; y: number; z: number; yaw: number; boneco: string } | null;
+  /** Fotos do imóvel com GPS: quadros no 3D onde foram tiradas. Devolve quantos quadros ficaram (perto do prédio). */
+  definirFotos(fotos: readonly FotoNoLugar[]): number;
+  /** Põe a imagem (link assinado) no quadro da foto. */
+  mostrarFoto(id: string, url: string): Promise<boolean>;
+  /** Toque num quadro de foto (a tela abre a foto em tela cheia). */
+  aoSelecionarFoto(cb: ((id: string) => void) | null): void;
   /** Segue a câmera de outra pessoa (cliente no tour guiado), suave; `null` devolve o controle. */
   seguirPose(pose: { posicao: [number, number, number]; alvo: [number, number, number] } | null): void;
   /**
@@ -205,6 +249,14 @@ interface PecaUnidade {
 
 const ALTURA_OLHOS_M = 1.6;
 const VELOCIDADE_M_S = 2.2;
+/** Correndo (modo jogo). */
+const CORRIDA_M_S = 4.5;
+/** Impulso do pulo (~0,9 m de altura) e gravidade. */
+const PULO_M_S = 4.2;
+const GRAVIDADE = 9.8;
+/** Distância da câmera atrás do boneco (na rua; dentro do apartamento, mais perto). */
+const DISTANCIA_3A_M = 3.2;
+const DISTANCIA_3A_DENTRO_M = 1.5;
 const DURACAO_VOO_MS = 1200;
 const OPACIDADE_ESMAECIDA = 0.12;
 const OPACIDADE_AMBIENTE = 0.45;
@@ -289,6 +341,8 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
   let bloqueado: OpcoesPasso['bloqueado'] = () => false;
   let bloqueadoCidade: OpcoesPasso['bloqueado'] = () => false;
   let cidade: THREE.Mesh | null = null;
+  /** Chão com relevo, ruas, verde, água e árvores de rua (Plano 11b). */
+  let cidadeCompleta: CidadeCompleta | null = null;
   let atribuicaoEntorno: string | null = null;
   const materialCidade = new THREE.MeshStandardMaterial({ color: 0xd8d5ce, roughness: 0.9 });
   prepararMaterial(materialCidade);
@@ -516,6 +570,19 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
   let poseSeguida: { posicao: THREE.Vector3; alvo: THREE.Vector3 } | null = null;
   /** Unidade onde a pessoa entrou (vidro claro por dentro). */
   let interior: string | null = null;
+  /** Apartamento decorado gerado (prédio desenhado, sem modelo): móveis e paredes internas da unidade. */
+  let decorado: Decorado | null = null;
+  let bloqueadoDecorado: OpcoesPasso['bloqueado'] = () => false;
+  function tirarDecorado(): void {
+    if (!decorado) return;
+    cena.remove(decorado.objeto);
+    decorado.objeto.traverse((o) => {
+      if (o instanceof THREE.Mesh) materiais.delete(o.material as THREE.MeshStandardMaterial);
+    });
+    decorado.destruir();
+    decorado = null;
+    bloqueadoDecorado = () => false;
+  }
   const raioPiso = new THREE.Raycaster();
   const baixo = new THREE.Vector3(0, -1, 0);
   /** Altura do piso sob (x, z), procurando de `deY` para baixo (peças sólidas, lajes e chão). */
@@ -551,9 +618,60 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
   }
 
   /** Câmera nos olhos da pessoa (a tela recebe a posição certa já no aviso, sem esperar o quadro). */
+  // modo jogo: boneco em terceira pessoa, pulo e corrida
+  let terceiraPessoa = false;
+  let boneco: Boneco | null = null;
+  let presetId = 'ana';
+  let correndo = false;
+  let velocidadeVertical = 0;
+  let noAr = false;
+  let pedidoPulo = false;
+  let acenarAte = 0;
+  /** Andado no último quadro (anima o passo do boneco). */
+  let andadoQuadro = 0;
+  let tempoQuadro = 0;
+  const raioCamera = new THREE.Raycaster();
+  const outros = new Map<string, { b: Boneco; alvo: { x: number; y: number; z: number; yaw: number }; atual: { x: number; y: number; z: number; yaw: number } }>();
+  let corretora: Boneco | null = null;
+  let corretoraFalando = false;
+  let corretoraPos = { x: 0, z: 0 };
+  function garantirBoneco(): Boneco {
+    if (!boneco) {
+      boneco = criarBoneco(presetBoneco(presetId), (m) => prepararMaterial(m));
+      cena.add(boneco.objeto);
+    }
+    return boneco;
+  }
   function posicionarPessoa(): void {
-    camera.position.set(pessoa.x, pessoa.y + ALTURA_OLHOS_M, pessoa.z);
-    camera.rotation.set(pessoa.pitch, pessoa.yaw, 0, 'YXZ');
+    if (!terceiraPessoa || modo !== 'primeira-pessoa') {
+      if (boneco) boneco.objeto.visible = false;
+      camera.position.set(pessoa.x, pessoa.y + ALTURA_OLHOS_M, pessoa.z);
+      camera.rotation.set(pessoa.pitch, pessoa.yaw, 0, 'YXZ');
+      return;
+    }
+    const b = garantirBoneco();
+    b.objeto.visible = true;
+    const agora = performance.now();
+    b.atualizar(
+      { x: pessoa.x, y: pessoa.y, z: pessoa.z, yaw: pessoa.yaw },
+      { distancia: andadoQuadro, velocidade: tempoQuadro > 0 ? andadoQuadro / tempoQuadro : 0, noAr, acenando: agora < acenarAte ? 1 : 0 },
+      agora / 1000,
+      menosMovimento,
+    );
+    andadoQuadro = 0;
+    tempoQuadro = 0;
+    const desejo = interior ? DISTANCIA_3A_DENTRO_M : DISTANCIA_3A_M;
+    const c = cameraAtrasDoOmbro(pessoa, desejo);
+    // parede entre a cabeça e a câmera: a câmera encosta (não atravessa prédio nem parede do apartamento)
+    const dir = c.posicao.clone().sub(c.cabeca);
+    const dist = dir.length();
+    raioCamera.set(c.cabeca, dir.normalize());
+    raioCamera.far = dist;
+    const barreiras = [...solidos, ...(cidade ? [cidade] : []), ...(decorado ? decorado.paredes : []), ...(interior ? [pecas.get(interior)?.malha].filter((x): x is THREE.Mesh => !!x) : [])];
+    const bate = raioCamera.intersectObjects(barreiras, false)[0];
+    if (bate) c.posicao.copy(c.cabeca).addScaledVector(dir, Math.max(0.3, bate.distance - 0.2));
+    camera.position.copy(c.posicao);
+    camera.lookAt(c.alvo);
   }
 
   function definirModo(novo: ModoCamera): void {
@@ -561,9 +679,13 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
     modo = novo;
     voo = null;
     orbita.enabled = novo === 'orbita';
+    if (boneco) boneco.objeto.visible = novo === 'primeira-pessoa' && terceiraPessoa;
+    noAr = false;
+    velocidadeVertical = 0;
     alvoCaminhada = null;
     if (interior) {
       interior = null;
+      tirarDecorado();
       pintar();
     }
     if (novo === 'primeira-pessoa') {
@@ -594,11 +716,24 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
   const aoTeclar = (e: KeyboardEvent) => {
     if (modo !== 'primeira-pessoa' || ehCampoDeTexto(e)) return;
     const k = e.key.toLowerCase();
+    if (k === ' ') {
+      e.preventDefault();
+      pedidoPulo = true;
+      return;
+    }
+    if (k === 'shift') correndo = true;
+    if (k === 'v' && !e.repeat) {
+      terceiraPessoa = !terceiraPessoa;
+      ultimoAviso = 0;
+    }
     if (!['w', 'a', 's', 'd', 'arrowup', 'arrowdown', 'arrowleft', 'arrowright'].includes(k)) return;
     e.preventDefault();
     teclas.add(k);
   };
-  const aoSoltarTecla = (e: KeyboardEvent) => teclas.delete(e.key.toLowerCase());
+  const aoSoltarTecla = (e: KeyboardEvent) => {
+    if (e.key === 'Shift') correndo = false;
+    teclas.delete(e.key.toLowerCase());
+  };
   const aoPerderFoco = () => teclas.clear();
 
   // olhar arrastando (primeira pessoa) e clique em unidade (qualquer modo)
@@ -615,6 +750,26 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
   let cbPiso: ((p: { x: number; y: number; z: number }) => void) | null = null;
   let cbMovel: ((id: string) => void) | null = null;
   let cbLazer: ((id: string) => void) | null = null;
+  let cbFoto: ((id: string) => void) | null = null;
+  /** Fotos com GPS (quadrosFoto); refeitos quando o relevo chega (o poste fica no chão de verdade). */
+  let fotosNoLugar: FotoNoLugar[] = [];
+  let quadrosFoto: QuadrosDeFoto | null = null;
+  const imagensDosQuadros = new Map<string, string>();
+  function montarQuadros(): number {
+    if (quadrosFoto) {
+      cena.remove(quadrosFoto.objeto);
+      quadrosFoto.destruir();
+      quadrosFoto = null;
+    }
+    if (!fotosNoLugar.length || config.lat === undefined || config.lon === undefined) return 0;
+    const planos = planejarQuadros(fotosNoLugar, { lat: config.lat, lon: config.lon }, rotacao, caixaDoPredio());
+    if (!planos.length) return 0;
+    const altura = cidadeCompleta ? cidadeCompleta.terreno.altura : () => 0;
+    quadrosFoto = criarQuadros(planos, altura, (m) => prepararMaterial(m));
+    cena.add(quadrosFoto.objeto);
+    for (const [id, url] of imagensDosQuadros) void quadrosFoto.definirImagem(id, url);
+    return quadrosFoto.quantos;
+  }
   /** Lazer do empreendimento (marcadores no 3D). */
   let marcadores: MarcadoresLazer | null = null;
   let pontosLazer: readonly PontoLazer[] = [];
@@ -641,6 +796,13 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
         if (normalMundo.y > 0.7) cbPiso({ x: acerto.point.x, y: acerto.point.y, z: acerto.point.z });
       }
       return;
+    }
+    if (quadrosFoto && cbFoto) {
+      const foto = quadrosFoto.idDe(raycaster.intersectObjects(quadrosFoto.clicaveis(), false)[0]?.object ?? null);
+      if (foto) {
+        cbFoto(foto);
+        return;
+      }
     }
     if (marcadores && cbLazer) {
       const lazer = marcadores.idDe(raycaster.intersectObjects(marcadores.clicaveis(), false)[0]?.object ?? null);
@@ -846,6 +1008,7 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
     }
     for (const m of materiais) m.needsUpdate = true;
     pessoas?.definirQuantidade(MORADORES_POR_NIVEL[n.nome]);
+    cidadeCompleta?.definirNivel(n.nome);
     ajustarPos(n);
   }
 
@@ -1038,6 +1201,13 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
       imersivo: imersiva?.tipo ?? null,
       moradores: pessoas?.objeto.visible ? (pessoas.objeto.children[0] as THREE.InstancedMesh).count : 0,
       som: som.ligado(),
+      decorado: decorado?.moveis ?? 0,
+      outros: outros.size,
+      corretora: !corretora || !corretora.objeto.visible ? 'fora' : corretoraFalando ? 'falando' : 'parada',
+      terceiraPessoa,
+      boneco: presetId,
+      noAr,
+      correndo,
       direcao: { x: direcaoCamera.x / (Math.hypot(direcaoCamera.x, direcaoCamera.z) || 1), z: direcaoCamera.z / (Math.hypot(direcaoCamera.x, direcaoCamera.z) || 1) },
     });
   };
@@ -1112,22 +1282,52 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
           entrada = r.entrada;
           if (r.chegou) alvoCaminhada = null;
         }
-        if (entrada.frente === 0 && entrada.lado === 0 && passo > 0) break; // parado: nada mais a simular
+        if (pedidoPulo && !noAr) {
+          noAr = true;
+          velocidadeVertical = PULO_M_S;
+        }
+        pedidoPulo = false;
+        if (entrada.frente === 0 && entrada.lado === 0 && passo > 0 && !noAr) break; // parado: nada mais a simular
         const antes = { x: pessoa.x, z: pessoa.z };
-        Object.assign(pessoa, passoPrimeiraPessoa(pessoa, entrada, dt, { velocidade: VELOCIDADE_M_S, bloqueado: (de, para) => bloqueado(de, para) || bloqueadoCidade(de, para) }));
+        Object.assign(pessoa, passoPrimeiraPessoa(pessoa, entrada, dt, { velocidade: correndo ? CORRIDA_M_S : VELOCIDADE_M_S, bloqueado: (de, para) => bloqueado(de, para) || bloqueadoCidade(de, para) || bloqueadoDecorado(de, para) }));
+        andadoQuadro += Math.hypot(pessoa.x - antes.x, pessoa.z - antes.z);
         // preso (parede no caminho do toque): desiste em 0,6 s
         if (alvoCaminhada && entrada.frente > 0) {
           paradoMs = pessoa.x === antes.x && pessoa.z === antes.z ? paradoMs + dt * 1000 : 0;
           if (paradoMs > 600) alvoCaminhada = null;
         }
-        // os pés seguem o piso: sobe escada e rampa, desce suave
+        // os pés seguem o piso: sobe escada e rampa, desce suave; no pulo, a gravidade manda
         const piso = seguirPiso(pessoa.y, pessoa.x, pessoa.z, alturaDoPiso);
-        pessoa.y = piso > pessoa.y ? piso : pessoa.y + (piso - pessoa.y) * Math.min(1, dt * 10);
+        if (noAr) {
+          pessoa.y += velocidadeVertical * dt;
+          velocidadeVertical -= GRAVIDADE * dt;
+          if (velocidadeVertical < 0 && pessoa.y <= piso) {
+            pessoa.y = piso;
+            noAr = false;
+            velocidadeVertical = 0;
+          }
+        } else pessoa.y = piso > pessoa.y ? piso : pessoa.y + (piso - pessoa.y) * Math.min(1, dt * 10);
       }
+      tempoQuadro += total;
       posicionarPessoa();
     }
 
     atualizarRaioX(modo === 'orbita' && !emVista ? orbita.target : null);
+    // pessoas da visita em grupo: andam suave até a última posição recebida (chega a cada ~0,5 s)
+    for (const o of outros.values()) {
+      const k = 1 - Math.exp(-dtMs / 160);
+      const antes = { ...o.atual };
+      o.atual.x += (o.alvo.x - o.atual.x) * k;
+      o.atual.y += (o.alvo.y - o.atual.y) * k;
+      o.atual.z += (o.alvo.z - o.atual.z) * k;
+      o.atual.yaw += Math.atan2(Math.sin(o.alvo.yaw - o.atual.yaw), Math.cos(o.alvo.yaw - o.atual.yaw)) * k;
+      const d = Math.hypot(o.atual.x - antes.x, o.atual.z - antes.z);
+      o.b.atualizar(o.atual, { distancia: d, velocidade: dtMs > 0 ? (d * 1000) / dtMs : 0, noAr: false, acenando: 0 }, agora / 1000, menosMovimento);
+    }
+    if (corretora?.objeto.visible) {
+      const yaw = Math.atan2(-(camera.position.x - corretoraPos.x), -(camera.position.z - corretoraPos.z));
+      corretora.atualizar({ x: corretoraPos.x, y: 0, z: corretoraPos.z, yaw }, { distancia: 0, velocidade: 0, noAr: false, acenando: corretoraFalando ? 1 : 0 }, agora / 1000, menosMovimento);
+    }
     atmosfera.quadro(camera, config.qualidadeFixa || menosMovimento ? 0 : agora / 1000); // qualidade fixa = cena determinística (nuvens paradas)
     pessoas?.quadro(agora / 1000);
     som.quadro(camera, agora / 1000, luzNoturna < 0.5);
@@ -1249,6 +1449,85 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
     aoSelecionarLazer(cb) {
       cbLazer = cb;
     },
+    definirTerceiraPessoa(ligada) {
+      terceiraPessoa = ligada;
+      if (modo === 'primeira-pessoa') posicionarPessoa();
+      ultimoAviso = 0;
+      avisar(performance.now());
+    },
+    definirBoneco(id) {
+      presetId = presetBoneco(id).id;
+      boneco?.trocar(presetBoneco(presetId));
+      ultimoAviso = 0;
+    },
+    pular() {
+      if (modo !== 'primeira-pessoa' || noAr) return false;
+      pedidoPulo = true;
+      return true;
+    },
+    definirCorrida(ligada) {
+      correndo = ligada;
+      ultimoAviso = 0;
+    },
+    acenar() {
+      acenarAte = performance.now() + 2000;
+    },
+    definirOutros(lista) {
+      const ids = new Set(lista.map((p) => p.id));
+      for (const [id, o] of outros) {
+        if (ids.has(id)) continue;
+        cena.remove(o.b.objeto);
+        o.b.destruir();
+        outros.delete(id);
+      }
+      for (const p of lista) {
+        const alvo = { x: p.x, y: p.y, z: p.z, yaw: p.yaw };
+        const o = outros.get(p.id);
+        if (!o) {
+          const b = criarBoneco(presetBoneco(p.boneco), (m) => prepararMaterial(m));
+          cena.add(b.objeto);
+          outros.set(p.id, { b, alvo, atual: { ...alvo } });
+        } else {
+          o.alvo = alvo;
+          if (o.b.preset.id !== presetBoneco(p.boneco).id) o.b.trocar(presetBoneco(p.boneco));
+        }
+      }
+      ultimoAviso = 0;
+    },
+    minhaPosicao() {
+      return modo === 'primeira-pessoa' ? { x: pessoa.x, y: pessoa.y, z: pessoa.z, yaw: pessoa.yaw, boneco: presetId } : null;
+    },
+    mostrarCorretora(c) {
+      if (!c) {
+        if (corretora) corretora.objeto.visible = false;
+        corretoraFalando = false;
+        ultimoAviso = 0;
+        return;
+      }
+      if (!corretora) {
+        corretora = criarBoneco(CORRETORA, (m) => prepararMaterial(m));
+        cena.add(corretora.objeto);
+      }
+      corretora.objeto.visible = true;
+      corretoraFalando = c.falando;
+      // na calçada da frente (+z, a entrada), alinhada com a unidade de que se fala
+      const lote = caixaDoPredio();
+      const u = c.unidadeId ? pecas.get(c.unidadeId)?.caixa : null;
+      const x = u ? THREE.MathUtils.clamp((u.minX + u.maxX) / 2, lote.minX + 1, lote.maxX - 1) : (lote.minX + lote.maxX) / 2 + 1.5;
+      corretoraPos = { x, z: lote.maxZ + 3.5 };
+      ultimoAviso = 0;
+    },
+    definirFotos(fotos) {
+      fotosNoLugar = [...fotos];
+      return montarQuadros();
+    },
+    async mostrarFoto(id, url) {
+      imagensDosQuadros.set(id, url);
+      return quadrosFoto ? quadrosFoto.definirImagem(id, url) : false;
+    },
+    aoSelecionarFoto(cb) {
+      cbFoto = cb;
+    },
     poseCamera() {
       const alvo = modo === 'orbita' ? orbita.target.clone() : camera.getWorldDirection(new THREE.Vector3()).multiplyScalar(5).add(camera.position);
       const r = (v: THREE.Vector3): [number, number, number] => [Math.round(v.x * 100) / 100, Math.round(v.y * 100) / 100, Math.round(v.z * 100) / 100];
@@ -1281,6 +1560,16 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
       const recuo = face ? 1.2 : 0;
       const y = solidos.length ? (alturaDoPiso(x, z, c.maxY - 0.2) ?? c.minY) : c.minY;
       Object.assign(pessoa, { x: x - (face?.normal.x ?? 0) * recuo, z: z - (face?.normal.z ?? 0) * recuo, y, yaw, pitch: -0.2 });
+      tirarDecorado();
+      if (!config.modeloUrl) {
+        // prédio desenhado: a unidade vira apartamento decorado (sala, cozinha e quartos da tipologia)
+        const plano = planejarDecorado(c, p.unidade.quartos, face ? { x: face.normal.x, z: face.normal.z } : null, config.estiloDecorado ?? 'moderno');
+        decorado = montarDecorado(plano, (m) => prepararMaterial(m));
+        cena.add(decorado.objeto);
+        bloqueadoDecorado = bloqueioPorCaixas(plano.paredes, 0.25, ALTURA_OLHOS_M);
+        // atrás do sofá, de frente para a janela: a sala, o jantar e a cozinha na frente
+        Object.assign(pessoa, plano.entrada);
+      }
       posicionarPessoa();
       interior = id;
       selecionada = id;
@@ -1331,22 +1620,52 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
         cidade.geometry.dispose();
         cidade = null;
       }
+      if (cidadeCompleta) {
+        cena.remove(cidadeCompleta.objeto);
+        for (const m of cidadeCompleta.materiais) materiais.delete(m);
+        for (const p of cidadeCompleta.pisos) pisosExtras.splice(pisosExtras.indexOf(p), 1);
+        cidadeCompleta.destruir();
+        cidadeCompleta = null;
+      }
+      chao.position.y = 0;
       bloqueadoCidade = () => false;
       atribuicaoEntorno = null;
       obstaculos = [];
       estudo = null;
       if (!entorno) return 0;
-      const predios = entornoParaLocal(entorno.predios, entorno.centro, rotacao, caixaDoPredio());
-      if (predios.length === 0) return 0;
+      const lote = caixaDoPredio();
+      const predios = entornoParaLocal(entorno.predios, entorno.centro, rotacao, lote);
+      // prédios no chão de verdade: a base de cada um é a altura do terreno no meio dele
+      const terrenoDe = terrenoDoRelevo(entorno.relevo, entorno.centro, rotacao, lote);
+      for (const b of predios) {
+        const cx = b.footprint.reduce((s, q) => s + q.x, 0) / b.footprint.length;
+        const cz = b.footprint.reduce((s, q) => s + q.z, 0) / b.footprint.length;
+        const base = terrenoDe.altura(cx, cz);
+        if (Math.abs(base) > 0.05) b.base = base;
+      }
       obstaculos = predios.map((b) => ({
         minX: Math.min(...b.footprint.map((q) => q.x)),
         maxX: Math.max(...b.footprint.map((q) => q.x)),
-        minY: 0,
-        maxY: b.height,
+        minY: b.base ?? 0,
+        maxY: (b.base ?? 0) + b.height,
         minZ: Math.min(...b.footprint.map((q) => q.z)),
         maxZ: Math.max(...b.footprint.map((q) => q.z)),
       }));
       montarPaisagismo(); // sem árvores dentro dos prédios vizinhos
+      if (entorno.vias?.length || entorno.areas?.length || entorno.relevo) {
+        cidadeCompleta = criarCidade(entorno, rotacao, lote, obstaculos, (m) => prepararMaterial(m));
+        cidadeCompleta.definirNivel(qualidade.nivel.nome);
+        cena.add(cidadeCompleta.objeto);
+        pisosExtras.push(...cidadeCompleta.pisos);
+        // além do relevo, o chão do horizonte fica embaixo de tudo (sem cobrir os vales)
+        if (cidadeCompleta.terreno.meioLado > 0) chao.position.y = cidadeCompleta.terreno.horizonte;
+      }
+      if (predios.length === 0) {
+        atribuicaoEntorno = entorno.atribuicao;
+        montarQuadros();
+        return 0;
+      }
+      montarQuadros(); // os postes das fotos no chão de verdade
       cidade = buildCityMesh(predios, materialCidade);
       cidade.castShadow = true;
       cidade.receiveShadow = true;
@@ -1428,7 +1747,7 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
         zenite: atmosfera.horizonte.clone().lerp(new THREE.Color(noite > 0.5 ? 0x050a1a : 0x2f6fc4), 0.6),
         ceu: THREE.MathUtils.lerp(clima === 'limpo' ? 0.9 : 1.3, 0.12, noite),
       };
-      const objetos = [raizPredio, paisagismo?.objeto, cidade, chao, pessoas?.objeto.visible ? pessoas.objeto : null].filter((o): o is THREE.Object3D => o != null);
+      const objetos = [raizPredio, paisagismo?.objeto, cidade, cidadeCompleta?.objeto, chao, pessoas?.objeto.visible ? pessoas.objeto : null].filter((o): o is THREE.Object3D => o != null);
       pausado = true; // o 3D normal para: o canvas mostra a foto "revelando"
       let png: Promise<Blob> | null = null;
       try {
@@ -1460,6 +1779,7 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
       return exportarUsdz(montarMaquete([raizPredio, paisagismo?.objeto].filter((o): o is THREE.Object3D => o != null)));
     },
     destruir() {
+      boneco?.destruir();
       destruido = true;
       void imersiva?.encerrar();
       pos?.destruir();

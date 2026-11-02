@@ -25,6 +25,16 @@ export default async function Painel() {
           </Link>
         </Aviso>
       )}
+      {gestao && me.mfa && (
+        <Link
+          href="/painel/criar"
+          data-testid="ir-criar"
+          className="grid gap-1 rounded-2xl border border-acento/40 bg-acento/10 p-6 shadow-sm transition hover:bg-acento/15 focus-visible:outline-2 focus-visible:outline-acento"
+        >
+          <span className="text-lg font-semibold">Criar com tudo →</span>
+          <span className="text-sm text-suave">Largue fotos, vídeo, planta, BIM ou planilha e um texto: o empreendimento sai em 3D, na cidade real, com unidades, lazer e Vitrine.</span>
+        </Link>
+      )}
       <Cartao titulo="Projetos">
         {projetos.length === 0 ? (
           <p className="text-suave">Nenhum projeto ainda.</p>

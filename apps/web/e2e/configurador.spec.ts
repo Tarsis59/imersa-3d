@@ -101,6 +101,11 @@ test('configurador: catálogo → acabamentos trocados em < 200 ms → móvel �
   await expect(page.getByTestId('tempo-troca')).toBeVisible();
 
   // decoração com um toque: todas as superfícies de uma vez, com o catálogo da empresa
+  // pedido por texto: escolhe no catálogo e troca as superfícies certas
+  const porTexto = page.getByTestId('acabamento-por-texto');
+  await porTexto.getByLabel('Peça por texto').fill('piso de madeira, parede branca');
+  await porTexto.getByRole('button', { name: 'Trocar' }).click();
+  await expect(page.getByTestId('retorno-acabamento')).toContainText('Troquei:');
   const estilos = page.getByTestId('estilos');
   await estilos.getByRole('button', { name: 'Moderno' }).click();
   await expect(estilos.getByRole('button', { name: 'Moderno' })).toHaveAttribute('aria-pressed', 'true');

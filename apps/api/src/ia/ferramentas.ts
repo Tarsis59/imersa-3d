@@ -9,7 +9,25 @@ export interface ContextoIA {
 }
 
 /** O que a resposta pede para a tela fazer (a IA não mexe em nada sozinha: só sugere à tela). */
-export type AcaoTela = { tipo: 'mostrar'; unidades: string[]; focar: string | null } | { tipo: 'contato'; motivo: 'contato' | 'visita'; unidade: string | null };
+export type AcaoTela =
+  | { tipo: 'mostrar'; unidades: string[]; focar: string | null }
+  | { tipo: 'contato'; motivo: 'contato' | 'visita'; unidade: string | null }
+  | { tipo: 'comandos'; acoes: AcaoVitrine[] };
+
+/** O mesmo formato dos comandos por texto da Vitrine (apps/web/lib/comandos.ts): a tela executa igual. */
+export type AcaoVitrine =
+  | { tipo: 'filtro'; quartos?: number[]; areaMin?: number; precoMax?: number; status?: Array<'disponivel' | 'reservado' | 'vendido'>; sol?: Array<'manha' | 'tarde' | 'dia-todo' | 'pouco-sol'> }
+  | { tipo: 'limpar' }
+  | { tipo: 'hora'; hora: number }
+  | { tipo: 'estacao'; estacao: 'verao' | 'inverno' }
+  | { tipo: 'clima'; clima: 'limpo' | 'nublado' }
+  | { tipo: 'lazer'; categoria: string | null; nome: string }
+  | { tipo: 'tour_lazer' }
+  | { tipo: 'unidade'; codigo: string; acao: 'mostrar' | 'entrar' | 'vista' }
+  | { tipo: 'corte'; andar: number | null }
+  | { tipo: 'modo'; modo: 'orbita' | 'primeira-pessoa' }
+  | { tipo: 'visao_geral' }
+  | { tipo: 'som'; ligado: boolean };
 
 export interface ResultadoFerramenta {
   /** Vai para a IA (JSON). */
@@ -87,6 +105,44 @@ export const FERRAMENTAS: Anthropic.Beta.BetaTool[] = [
     },
   },
   {
+    name: 'comandar_vitrine',
+    description:
+      'Mexe na tela 3D que o cliente está vendo, quando ele pede para VER algo: filtrar (quartos, preço máximo em reais, área mínima, sol da manhã/tarde/dia todo/pouco sol, só disponíveis), mudar a hora do dia (0 a 23), a estação (verao, inverno) ou o clima (limpo, nublado), ir a um espaço do lazer (pelo nome, ex.: "Piscina"), fazer o tour do lazer, mostrar/entrar/ver a vista de uma unidade pelo código, cortar o prédio num andar, andar a pé ou voltar à visão geral, ligar ou desligar o som. Cada item de acoes é uma ação; use null no que não se aplica. Nunca use para responder sobre preço ou situação: isso vem de buscar_unidades.',
+    strict: true,
+    input_schema: {
+      type: 'object',
+      properties: {
+        acoes: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              tipo: { type: 'string', enum: ['filtro', 'limpar', 'hora', 'estacao', 'clima', 'lazer', 'tour_lazer', 'unidade', 'corte', 'modo', 'visao_geral', 'som'] },
+              quartos: { type: ['array', 'null'], items: { type: 'integer' } },
+              preco_max: numeroOuNulo,
+              area_min_m2: numeroOuNulo,
+              situacao: { type: ['string', 'null'], enum: ['disponivel', 'reservado', 'vendido', null] },
+              sol: { type: ['string', 'null'], enum: ['manha', 'tarde', 'dia-todo', 'pouco-sol', null] },
+              hora: inteiroOuNulo,
+              estacao: { type: ['string', 'null'], enum: ['verao', 'inverno', null] },
+              clima: { type: ['string', 'null'], enum: ['limpo', 'nublado', null] },
+              lazer: { type: ['string', 'null'], description: 'nome do espaço do lazer' },
+              codigo: { type: ['string', 'null'], description: 'código da unidade' },
+              acao_unidade: { type: ['string', 'null'], enum: ['mostrar', 'entrar', 'vista', null] },
+              andar: inteiroOuNulo,
+              modo: { type: ['string', 'null'], enum: ['orbita', 'primeira-pessoa', null] },
+              ligado: { type: ['boolean', 'null'] },
+            },
+            required: ['tipo', 'quartos', 'preco_max', 'area_min_m2', 'situacao', 'sol', 'hora', 'estacao', 'clima', 'lazer', 'codigo', 'acao_unidade', 'andar', 'modo', 'ligado'],
+            additionalProperties: false,
+          },
+        },
+      },
+      required: ['acoes'],
+      additionalProperties: false,
+    },
+  },
+  {
     name: 'pedir_contato',
     description:
       'Abre na tela o formulário de contato da consultora (o cliente preenche nome e telefone e autoriza o contato). Use quando o cliente quiser falar com alguém, negociar, saber condições de pagamento ou agendar uma visita. Nunca peça nem anote dados pessoais na conversa.',
@@ -113,6 +169,58 @@ const Busca = z.object({
 const Codigo = z.object({ codigo: z.string().trim().min(1).max(20) });
 const Pontos = z.object({ categoria: z.enum(CATEGORIAS).nullable() });
 const Mostrar = z.object({ codigos: z.array(z.string().trim().min(1).max(20)).max(200), focar: z.string().trim().min(1).max(20).nullable() });
+const ItemComando = z.object({
+  tipo: z.enum(['filtro', 'limpar', 'hora', 'estacao', 'clima', 'lazer', 'tour_lazer', 'unidade', 'corte', 'modo', 'visao_geral', 'som']),
+  quartos: z.array(z.number().int().min(0).max(10)).max(6).nullable(),
+  preco_max: z.number().positive().max(1e9).nullable(),
+  area_min_m2: z.number().positive().max(5000).nullable(),
+  situacao: z.enum(['disponivel', 'reservado', 'vendido']).nullable(),
+  sol: z.enum(['manha', 'tarde', 'dia-todo', 'pouco-sol']).nullable(),
+  hora: z.number().int().min(0).max(23).nullable(),
+  estacao: z.enum(['verao', 'inverno']).nullable(),
+  clima: z.enum(['limpo', 'nublado']).nullable(),
+  lazer: z.string().trim().min(1).max(60).nullable(),
+  codigo: z.string().trim().min(1).max(20).nullable(),
+  acao_unidade: z.enum(['mostrar', 'entrar', 'vista']).nullable(),
+  andar: z.number().int().min(-10).max(300).nullable(),
+  modo: z.enum(['orbita', 'primeira-pessoa']).nullable(),
+  ligado: z.boolean().nullable(),
+});
+const Comandos = z.object({ acoes: z.array(ItemComando).min(1).max(6) });
+
+/** Item da IA (schema estrito, tudo explícito) → ação da tela. Item sem o dado de que precisa fica de fora. */
+function paraAcao(i: z.infer<typeof ItemComando>): AcaoVitrine | null {
+  switch (i.tipo) {
+    case 'filtro': {
+      const f: Extract<AcaoVitrine, { tipo: 'filtro' }> = { tipo: 'filtro' };
+      if (i.quartos?.length) f.quartos = i.quartos;
+      if (i.preco_max !== null) f.precoMax = i.preco_max;
+      if (i.area_min_m2 !== null) f.areaMin = i.area_min_m2;
+      if (i.situacao) f.status = [i.situacao];
+      if (i.sol) f.sol = [i.sol];
+      return Object.keys(f).length > 1 ? f : null;
+    }
+    case 'hora':
+      return i.hora === null ? null : { tipo: 'hora', hora: i.hora };
+    case 'estacao':
+      return i.estacao ? { tipo: 'estacao', estacao: i.estacao } : null;
+    case 'clima':
+      return i.clima ? { tipo: 'clima', clima: i.clima } : null;
+    case 'lazer':
+      return i.lazer ? { tipo: 'lazer', categoria: null, nome: i.lazer } : null;
+    case 'unidade':
+      return i.codigo ? { tipo: 'unidade', codigo: i.codigo, acao: i.acao_unidade ?? 'mostrar' } : null;
+    case 'corte':
+      return { tipo: 'corte', andar: i.andar };
+    case 'modo':
+      return i.modo ? { tipo: 'modo', modo: i.modo } : null;
+    case 'som':
+      return i.ligado === null ? null : { tipo: 'som', ligado: i.ligado };
+    default:
+      return { tipo: i.tipo };
+  }
+}
+
 const Contato = z.object({ motivo: z.enum(['contato', 'visita']), codigo: z.string().trim().min(1).max(20).nullable() });
 
 interface LinhaUnidade {
@@ -224,8 +332,9 @@ export async function executarFerramenta(c: pg.PoolClient, ctx: ContextoIA, nome
     }
     case 'pontos_proximos': {
       const { categoria } = Pontos.parse(entrada);
+      // distância a pé pelas ruas quando calculada (Plano 11b); senão, em linha reta
       const r = await c.query<{ categoria: string; nome: string; distanciaM: number }>(
-        `SELECT p.categoria, p.nome, round(ST_Distance(p.geom::geography, pr.geom::geography))::int AS "distanciaM"
+        `SELECT p.categoria, p.nome, coalesce(p.caminho_m, round(ST_Distance(p.geom::geography, pr.geom::geography))::int) AS "distanciaM"
            FROM pois p JOIN projects pr ON pr.id = p.project_id
           WHERE p.project_id = $1 AND pr.geom IS NOT NULL AND ($2::text IS NULL OR p.categoria = $2) ORDER BY 3, 2 LIMIT 15`,
         [ctx.projetoId, categoria],
@@ -241,6 +350,20 @@ export async function executarFerramenta(c: pg.PoolClient, ctx: ContextoIA, nome
       return {
         conteudo: { mostrando: ids.length, focando: foco !== null, ...(faltando.length ? { naoEncontradas: faltando } : {}) },
         acao: { tipo: 'mostrar', unidades: ids, focar: foco },
+        precos: [],
+      };
+    }
+    case 'comandar_vitrine': {
+      const { acoes } = Comandos.parse(entrada);
+      const validas = acoes.map(paraAcao).filter((a): a is AcaoVitrine => a !== null);
+      // unidade que não existe no prédio não vai para a tela (a IA fica sabendo)
+      const codigos = validas.flatMap((a) => (a.tipo === 'unidade' ? [a.codigo] : []));
+      const achadas = await porCodigos(c, ctx, codigos);
+      const naoEncontradas = codigos.filter((x) => !achadas.has(x.toLowerCase()));
+      const finais = validas.filter((a) => a.tipo !== 'unidade' || achadas.has(a.codigo.toLowerCase()));
+      return {
+        conteudo: { feito: finais.length, ...(naoEncontradas.length ? { naoEncontradas } : {}) },
+        ...(finais.length ? { acao: { tipo: 'comandos' as const, acoes: finais } } : {}),
         precos: [],
       };
     }

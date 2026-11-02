@@ -7,7 +7,7 @@ import type { ResultadoEntorno } from '@/app/painel/predios/[id]/vitrine/actions
 import type { Portal } from '@/lib/tipos';
 import type { DadosLead } from './actions';
 
-type EventoApi = { tipo: 'abriu' | 'unidade' | 'favorito' | 'interior' | 'tempo' | 'tour_lazer'; unidadeId?: string; duracaoS?: number };
+type EventoApi = { tipo: 'abriu' | 'unidade' | 'favorito' | 'interior' | 'tempo' | 'tour_lazer' | 'missao'; unidadeId?: string; duracaoS?: number; missao?: string };
 const ENVIO_S = 15;
 
 /** Eventos da visita em lotes (a cada 15 s e ao sair da página), sem atrasar o 3D. */
@@ -86,6 +86,9 @@ export function PortalVitrine({
         unidades={unidades}
         andares={portal.andares}
         rotacaoGraus={portal.projeto.rotacaoGraus}
+        estiloDecorado={portal.projeto.estiloDecorado}
+        fotos={portal.fotos}
+        salaUrl={portal.aoVivoUrl ? portal.aoVivoUrl.replace(/\/ao-vivo$/, '/sala') : null}
         lat={portal.projeto.lat}
         lon={portal.projeto.lon}
         interiores={portal.interiores}

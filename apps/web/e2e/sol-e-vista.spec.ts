@@ -78,6 +78,8 @@ test('sol e vista: horas de sol por unidade (com a sombra dos prédios reais), f
   await expect(vitrine).toHaveAttribute('data-interior', id!, { timeout: 15_000 });
   await expect(page.getByTestId('elevador')).toHaveCount(0);
   await expect(vitrine).toHaveAttribute('data-modo', 'primeira-pessoa');
+  // prédio desenhado (sem planta): o apartamento já vem decorado, com sala, cozinha e quartos
+  await expect(vitrine).toHaveAttribute('data-decorado', /^[1-9]\d*$/);
   await expect(page.getByTestId('minimapa')).toBeVisible(); // você está aqui, com o prédio e os vizinhos reais
   await page.waitForTimeout(1200);
   await vitrine.screenshot({ path: test.info().outputPath('dentro-601.png') });
@@ -90,4 +92,5 @@ test('sol e vista: horas de sol por unidade (com a sombra dos prédios reais), f
   await page.getByRole('button', { name: 'Sair do apartamento' }).click();
   await expect(vitrine).toHaveAttribute('data-interior', '');
   await expect(vitrine).toHaveAttribute('data-modo', 'orbita');
+  await expect(vitrine).toHaveAttribute('data-decorado', '0');
 });

@@ -46,6 +46,7 @@ export const AtualizarProjeto = z
     lon: z.number().min(-180).max(180).optional(),
     altitudeM: z.number().min(-500).max(9000).nullable().optional(),
     rotacaoGraus: z.number().min(-360).max(360).optional(),
+    estiloDecorado: z.enum(['moderno', 'classico', 'jovem']).optional(),
     status: z.enum(['rascunho', 'lancamento', 'em_obra', 'pronto', 'arquivado']).optional(),
   })
   .refine((d) => (d.lat === undefined) === (d.lon === undefined), { message: 'informe lat e lon juntos', path: ['lat'] });
