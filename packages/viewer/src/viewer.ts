@@ -1450,11 +1450,24 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
     avisar(agora);
   });
 
+  /**
+   * Compila os materiais da cena antes de eles aparecerem (Plano 12a, item 14): sem isso, o 1º giro que mostra a
+   * cidade ou o paisagismo engasga compilando shader. Em paralelo quando a placa permite; nunca atrasa a 1ª imagem.
+   */
+  function aquecerMateriais(): void {
+    try {
+      void renderer.compileAsync(cena, camera).catch(() => undefined);
+    } catch {
+      // sem compilação antecipada: compila no 1º quadro, como antes
+    }
+  }
+
   const pronto = (config.modeloUrl ? montarModelo(config.modeloUrl) : Promise.resolve(montarVolumes())).then(() => {
     pintar();
     enquadrarPredio();
     montarPaisagismo();
     ajustarPos(qualidade.nivel);
+    aquecerMateriais();
   });
   pronto.then(
     () => (cargaMs = Math.round(performance.now() - criadoEm)),
@@ -1830,6 +1843,7 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
       bloqueadoCidade = bloqueioPorRaio([cidade]);
       atribuicaoEntorno = entorno.atribuicao;
       qualidade.ignorarCarga(3_000); // o 1º quadro com a cidade compila o material dela
+      aquecerMateriais(); // e compila já, em paralelo, para o 1º giro não engasgar
       return predios.length;
     },
     gerarGiro,
