@@ -54,7 +54,7 @@ export default defineConfig({
       url: 'http://localhost:3334/health',
       reuseExistingServer: false,
       timeout: 60_000,
-      env: { DATABASE_URL: DB_APP, PORT: '3334', WEB_URL: 'http://localhost:3100', CORS_ORIGIN: 'http://localhost:3100', RATE_LIMIT_AUTH: '1000', API_URL_PUBLICA: 'http://localhost:3334', ARMAZENAMENTO_PASTA: 'armazenamento-e2e', MAPA_ARQUIVO_PREDIOS: PREDIOS_PAULISTA, MAPA_PASTA_RELEVO: RELEVO_PAULISTA, WEBHOOK_PERMITIR_LOCAL: 'true', IA_SIMULADA: 'true' },
+      env: { DATABASE_URL: DB_APP, PORT: '3334', WEB_URL: 'http://localhost:3100', CORS_ORIGIN: 'http://localhost:3100', RATE_LIMIT_AUTH: '1000', RATE_LIMIT_GERAL: '5000', API_URL_PUBLICA: 'http://localhost:3334', ARMAZENAMENTO_PASTA: 'armazenamento-e2e', MAPA_ARQUIVO_PREDIOS: PREDIOS_PAULISTA, MAPA_PASTA_RELEVO: RELEVO_PAULISTA, WEBHOOK_PERMITIR_LOCAL: 'true', IA_SIMULADA: 'true' },
     },
     {
       command: 'pnpm --filter @imersa/api worker',
