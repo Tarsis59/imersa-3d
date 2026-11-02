@@ -34,7 +34,7 @@ import { exportarUsdz, montarMaquete } from './xr/maquete';
 import type { LuzDaFoto } from './captura/fotorrealista';
 import { caminhoRetangular, criarPessoas, MORADORES_POR_NIVEL, planejarMoradores, type Pessoas } from './ambiente/pessoas';
 import { criarAmbienteSonoro } from './ambiente/som';
-import { criarMarcadoresLazer, poseParaLazer, type MarcadoresLazer, type PontoLazer } from './ambiente/lazer';
+import { criarMarcadoresLazer, placa, poseParaLazer, type MarcadoresLazer, type PontoLazer } from './ambiente/lazer';
 import { iniciarAr, iniciarVr, type ContextoXr, type SessaoXr, type TipoXr } from './xr/sessao';
 
 export type ModoCamera = 'orbita' | 'primeira-pessoa';
@@ -79,6 +79,8 @@ export interface EstadoViewer {
   decorado: number;
   /** Pessoas da visita em grupo desenhadas no 3D. */
   outros: number;
+  /** Etiquetas "Apto 1201" à vista (unidades filtradas). */
+  etiquetas: number;
   /** Vista explodida: 0 = andares juntos, 1 = separados (no meio da animação, entre os dois). */
   explosao: number;
   /** Corretora virtual na tela (e se está falando). */
@@ -270,6 +272,8 @@ const DISTANCIA_MIN_VER_BONECO_M = 0.75;
 const DURACAO_VOO_MS = 1200;
 /** Distância a mais entre um andar e o de cima na vista explodida. */
 const ESPACO_EXPLOSAO_M = 3.5;
+/** Até quantas unidades filtradas ganham etiqueta "Apto 1201" (mais que isso polui a fachada). */
+const MAX_ETIQUETAS = 24;
 const OPACIDADE_ESMAECIDA = 0.12;
 const OPACIDADE_AMBIENTE = 0.45;
 /** Tipo IFC que o conversor BIM grava em cada peça (extras do glTF → userData). */
@@ -690,6 +694,32 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
     b.objeto.visible = livre >= DISTANCIA_MIN_VER_BONECO_M;
     camera.position.copy(c.posicao);
     camera.lookAt(c.alvo);
+  }
+
+  /**
+   * Etiquetas "Apto 1201" em cima das unidades que passaram no filtro (Plano 12b, como no buscador do vídeo de Milão).
+   * Presas à malha da unidade: acompanham a vista explodida. Com muitas unidades no filtro, nenhuma (viraria ruído).
+   */
+  const rotulos = new Map<string, THREE.Sprite>();
+  function rotularUnidades(passam: ReadonlySet<string> | null): void {
+    for (const s of rotulos.values()) {
+      s.removeFromParent();
+      (s.material as THREE.SpriteMaterial).map?.dispose();
+      s.material.dispose();
+    }
+    rotulos.clear();
+    if (!passam || passam.size === 0 || passam.size > MAX_ETIQUETAS) return;
+    for (const id of passam) {
+      const p = pecas.get(id);
+      if (!p) continue;
+      const s = placa(`Apto ${p.unidade.codigo}`);
+      s.scale.multiplyScalar(0.8);
+      p.malha.updateMatrixWorld();
+      s.position.copy(p.malha.worldToLocal(new THREE.Vector3((p.caixa.minX + p.caixa.maxX) / 2, p.caixa.maxY + 0.6, (p.caixa.minZ + p.caixa.maxZ) / 2)));
+      p.malha.add(s);
+      rotulos.set(id, s);
+    }
+    ultimoAviso = 0;
   }
 
   /** Vista explodida: `atual` anda até `alvo` a cada quadro. */
@@ -1253,6 +1283,7 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
       decorado: decorado?.moveis ?? 0,
       outros: outros.size,
       explosao: Math.round(explosao.atual * 100) / 100,
+      etiquetas: rotulos.size,
       corretora: !corretora || !corretora.objeto.visible ? 'fora' : corretoraFalando ? 'falando' : 'parada',
       terceiraPessoa,
       boneco: presetId,
@@ -1413,6 +1444,7 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
       destaque = passam;
       favoritos = favs;
       pintar();
+      rotularUnidades(passam);
     },
     definirStatus(id, status) {
       const p = pecas.get(id);

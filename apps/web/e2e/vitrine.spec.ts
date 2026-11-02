@@ -63,10 +63,17 @@ test('vitrine 3D: volumes do prédio, filtros, favoritos, voo até a unidade, co
   // filtros
   await page.getByLabel('3 quartos').check();
   await expect(page.getByTestId('contagem-filtro')).toHaveText('2 de 6 unidades');
+  // etiquetas "Apto 102" em cima das unidades filtradas (Plano 12b); sem filtro, nenhuma
+  await expect(vitrine).toHaveAttribute('data-etiquetas', '2');
+  // busca pelo número na lista (não mexe no 3D)
+  await page.getByLabel('Buscar unidade pelo número').fill('10');
+  await expect(page.getByTestId('contagem-filtro')).toHaveText('1 de 6 unidades');
+  await page.getByLabel('Buscar unidade pelo número').fill('');
   await page.getByLabel('Preço máximo (R$)').fill('895000');
   await expect(page.getByTestId('contagem-filtro')).toHaveText('1 de 6 unidades');
   await page.getByRole('button', { name: 'Limpar filtros' }).click();
   await expect(page.getByTestId('contagem-filtro')).toHaveText('6 de 6 unidades');
+  await expect(vitrine).toHaveAttribute('data-etiquetas', '0');
 
   // favoritos (sobrevivem a recarregar a página)
   await page.getByRole('button', { name: 'Favoritar 202' }).click();
@@ -91,6 +98,12 @@ test('vitrine 3D: volumes do prédio, filtros, favoritos, voo até a unidade, co
   await expect(vitrine).toHaveAttribute('data-corte', '1');
   await page.getByLabel('Ver até o andar (corte)').selectOption({ label: 'Prédio inteiro' });
   await expect(vitrine).toHaveAttribute('data-corte', 'nenhum');
+
+  // vista explodida (Plano 12c): os andares se separam e juntam de novo; andar a pé junta sozinho
+  await page.getByRole('button', { name: 'Separar os andares' }).click();
+  await expect(vitrine).toHaveAttribute('data-explosao', '1', { timeout: 15_000 });
+  await page.getByRole('button', { name: 'Juntar os andares' }).click();
+  await expect(vitrine).toHaveAttribute('data-explosao', '0', { timeout: 15_000 });
 
   // primeira pessoa: anda com o teclado e mostra o joystick de toque
   await page.getByRole('button', { name: 'Andar a pé (1ª pessoa)' }).click();

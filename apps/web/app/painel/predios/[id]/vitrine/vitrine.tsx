@@ -599,7 +599,10 @@ export function Vitrine({
 
   const nomeAndar = new Map(andares.map((a) => [a.numero, a.nome]));
   const quartosDisponiveis = [...new Set(unidades.map((u) => u.quartos).filter((q): q is number => q !== null))].sort((a, b) => a - b);
-  const lista = unidadesAtuais.filter((u) => passam.has(u.id));
+  // busca pelo código na lista ("1201", "12"), como no painel de unidades do vídeo 3; não mexe no 3D
+  const [buscaUnidade, setBuscaUnidade] = useState('');
+  const termoBusca = buscaUnidade.trim().toLowerCase();
+  const lista = unidadesAtuais.filter((u) => passam.has(u.id) && (!termoBusca || u.codigo.toLowerCase().includes(termoBusca)));
   const unidade = selecionada ? unidadesAtuais.find((u) => u.id === selecionada) : undefined;
   const modo = telemetria?.modo ?? 'orbita';
 
@@ -899,6 +902,7 @@ export function Vitrine({
         data-corretora={telemetria?.corretora ?? 'fora'}
         data-outros={telemetria?.outros ?? 0}
         data-explosao={telemetria?.explosao ?? 0}
+        data-etiquetas={telemetria?.etiquetas ?? 0}
         data-terceira={telemetria?.terceiraPessoa ? 'sim' : 'nao'}
         data-boneco={telemetria?.boneco ?? ''}
         data-no-ar={telemetria?.noAr ? 'sim' : 'nao'}
@@ -1260,6 +1264,18 @@ export function Vitrine({
         </Cartao>
 
         <Cartao titulo="Unidades">
+          <label htmlFor="busca-unidade" className="mb-2 grid gap-1 text-sm">
+            <span className="sr-only">Buscar unidade pelo número</span>
+            <input
+              id="busca-unidade"
+              type="search"
+              inputMode="numeric"
+              value={buscaUnidade}
+              onChange={(e) => setBuscaUnidade(e.target.value)}
+              placeholder="Buscar pelo número (ex.: 1201)"
+              className="rounded-lg border border-borda bg-superficie px-3 py-2"
+            />
+          </label>
           <p data-testid="contagem-filtro" className="mb-3 text-sm text-suave">
             {lista.length} de {unidades.length} unidades
           </p>
