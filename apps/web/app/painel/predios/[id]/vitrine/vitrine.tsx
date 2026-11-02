@@ -174,6 +174,11 @@ export function Vitrine({
   const [selecionada, setSelecionada] = useState<string | null>(null);
   const [andarCorte, setAndarCorte] = useState('');
   const [comCorte, setComCorte] = useState<number[]>([]);
+  const [separados, setSeparados] = useState(false);
+  // andar a pé ou entrar no apartamento junta os andares no 3D: o botão acompanha
+  useEffect(() => {
+    if (separados && telemetria && telemetria.modo !== 'orbita') setSeparados(false);
+  }, [separados, telemetria]);
   const [dataSol, setDataSol] = useState(hoje);
   // abre no fim de tarde: sol baixo e sombras longas são a imagem mais bonita do dia (Plano 12a, item 7)
   const [horaSol, setHoraSol] = useState(16.5);
@@ -837,6 +842,10 @@ export function Vitrine({
         case 'modo':
           viewer.current?.definirModo(a.modo);
           break;
+        case 'separar_andares':
+          viewer.current?.separarAndares(a.ligado);
+          setSeparados(a.ligado);
+          break;
         case 'visao_geral':
           setVista(null);
           setInterior(null);
@@ -889,6 +898,7 @@ export function Vitrine({
         data-missoes={missoes.size}
         data-corretora={telemetria?.corretora ?? 'fora'}
         data-outros={telemetria?.outros ?? 0}
+        data-explosao={telemetria?.explosao ?? 0}
         data-terceira={telemetria?.terceiraPessoa ? 'sim' : 'nao'}
         data-boneco={telemetria?.boneco ?? ''}
         data-no-ar={telemetria?.noAr ? 'sim' : 'nao'}
@@ -1336,6 +1346,18 @@ export function Vitrine({
                 </option>
               ))}
             </Selecao>
+            <Botao
+              type="button"
+              variante="secundario"
+              aria-pressed={separados}
+              disabled={estado !== 'pronto' || comCorte.length < 2}
+              onClick={() => {
+                viewer.current?.separarAndares(!separados);
+                setSeparados(!separados);
+              }}
+            >
+              {separados ? 'Juntar os andares' : 'Separar os andares'}
+            </Botao>
             <div className="grid grid-cols-2 gap-3">
               <Campo id="data-sol" rotulo="Dia do sol" type="date" value={dataSol} onChange={(e) => e.target.value && setDataSol(e.target.value)} />
               <label htmlFor="hora-sol" className="grid gap-1">

@@ -22,7 +22,8 @@ export type AcaoComando =
   | { tipo: 'corte'; andar: number | null }
   | { tipo: 'modo'; modo: 'orbita' | 'primeira-pessoa' }
   | { tipo: 'visao_geral' }
-  | { tipo: 'som'; ligado: boolean };
+  | { tipo: 'som'; ligado: boolean }
+  | { tipo: 'separar_andares'; ligado: boolean };
 
 export interface Interpretacao {
   acoes: AcaoComando[];
@@ -229,6 +230,14 @@ export function interpretarComando(texto: string): Interpretacao {
   } else if (/\b(vista de cima|visao geral|volta(r)? (para|pro|ao) (o )?predio|mostra(r)? o predio( todo)?|de cima)\b/.test(n)) {
     acoes.push({ tipo: 'visao_geral' });
     partes.push('visão geral');
+  }
+  // vista explodida (os andares separados no alto)
+  if (/\b(junta(r)?|une|unir|fecha(r)?) (os )?andares\b/.test(n)) {
+    acoes.push({ tipo: 'separar_andares', ligado: false });
+    partes.push('andares juntos');
+  } else if (/\bexplodid[ao]\b|\bexplod(e|ir)\b|\b(separa(r)?|separe|abre|abrir|abra) (os )?andares\b|\bandares separados\b/.test(n)) {
+    acoes.push({ tipo: 'separar_andares', ligado: true });
+    partes.push('andares separados');
   }
   if (/\b(desliga(r)?|sem|tira(r)?|para(r)?) (o )?(som|barulho|audio)\b|\bsilencio\b|\bmudo\b/.test(n)) {
     acoes.push({ tipo: 'som', ligado: false });

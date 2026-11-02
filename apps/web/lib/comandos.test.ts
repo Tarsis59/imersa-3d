@@ -83,6 +83,14 @@ describe('comandos da Vitrine (50 frases)', () => {
     expect(hora('mostre de manhã')).toEqual({ tipo: 'hora', hora: 9 });
   });
 
+  it('vista explodida: separar e juntar os andares', () => {
+    const acao = (f: string) => interpretarComando(f).acoes.find((x) => x.tipo === 'separar_andares');
+    expect(acao('separe os andares')).toEqual({ tipo: 'separar_andares', ligado: true });
+    expect(acao('mostre a vista explodida')).toEqual({ tipo: 'separar_andares', ligado: true });
+    expect(acao('junta os andares de novo')).toEqual({ tipo: 'separar_andares', ligado: false });
+    expect(acao('mostre o 5 andar')).toBeUndefined();
+  });
+
   it('números por extenso', () => {
     expect(numeros('vinte e um andares')).toBe('21 andares');
     expect(numeros('novecentos mil')).toBe('900 mil');

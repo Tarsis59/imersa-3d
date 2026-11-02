@@ -79,6 +79,8 @@ export interface EstadoViewer {
   decorado: number;
   /** Pessoas da visita em grupo desenhadas no 3D. */
   outros: number;
+  /** Vista explodida: 0 = andares juntos, 1 = separados (no meio da animação, entre os dois). */
+  explosao: number;
   /** Corretora virtual na tela (e se está falando). */
   corretora: 'fora' | 'parada' | 'falando';
   /** Modo jogo: câmera atrás do boneco (terceira pessoa). */
@@ -120,6 +122,11 @@ export interface Viewer {
   /** Esconde o que está acima do andar. Devolve `false` se o andar não tem unidade no 3D. */
   cortarNoAndar(andar: number | null): boolean;
   andaresComCorte(): number[];
+  /**
+   * Vista explodida (Plano 12c): separa os andares no alto, com animação; a casca do prédio sai e ficam as fatias
+   * com as unidades pintadas pela situação. `false` junta de novo.
+   */
+  separarAndares(ligado: boolean): void;
   voarPara(unidadeId: string): boolean;
   selecionar(unidadeId: string | null): void;
   definirModo(modo: ModoCamera): void;
@@ -261,6 +268,8 @@ const DISTANCIA_3A_DENTRO_M = 1.5;
 /** Com a câmera mais perto que isso da cabeça (parede atrás), o boneco tapa a vista: some até ter espaço. */
 const DISTANCIA_MIN_VER_BONECO_M = 0.75;
 const DURACAO_VOO_MS = 1200;
+/** Distância a mais entre um andar e o de cima na vista explodida. */
+const ESPACO_EXPLOSAO_M = 3.5;
 const OPACIDADE_ESMAECIDA = 0.12;
 const OPACIDADE_AMBIENTE = 0.45;
 /** Tipo IFC que o conversor BIM grava em cada peça (extras do glTF → userData). */
@@ -683,7 +692,37 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
     camera.lookAt(c.alvo);
   }
 
+  /** Vista explodida: `atual` anda até `alvo` a cada quadro. */
+  const explosao = { atual: 0, alvo: 0 };
+  function aplicarExplosao(f: number): void {
+    const andares = [...new Set([...pecas.values()].map((p) => p.unidade.andar))].sort((a, b) => a - b);
+    const ordem = new Map(andares.map((a, i) => [a, i]));
+    const unidades = new Set<THREE.Object3D>();
+    for (const p of pecas.values()) {
+      unidades.add(p.malha);
+      const base = (p.malha.userData.ySemExplosao ??= p.malha.position.y) as number;
+      p.malha.position.y = base + (ordem.get(p.unidade.andar) ?? 0) * ESPACO_EXPLOSAO_M * f;
+    }
+    // a casca (lajes, pilares, varandas, paredes do modelo) sai enquanto os andares estão separados
+    raizPredio?.traverse((o) => {
+      if (!(o instanceof THREE.Mesh) || unidades.has(o)) return;
+      if (f > 0.001) {
+        o.userData.visivelSemExplosao ??= o.visible;
+        o.visible = false;
+      } else if (o.userData.visivelSemExplosao !== undefined) {
+        o.visible = o.userData.visivelSemExplosao as boolean;
+        delete o.userData.visivelSemExplosao;
+      }
+    });
+    ultimoAviso = 0;
+  }
+
   function definirModo(novo: ModoCamera): void {
+    if (novo !== 'orbita' && explosao.atual > 0) {
+      // andar a pé ou entrar no apartamento pede o prédio inteiro
+      explosao.alvo = explosao.atual = 0;
+      aplicarExplosao(0);
+    }
     sairDaVista();
     modo = novo;
     voo = null;
@@ -1213,6 +1252,7 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
       som: som.ligado(),
       decorado: decorado?.moveis ?? 0,
       outros: outros.size,
+      explosao: Math.round(explosao.atual * 100) / 100,
       corretora: !corretora || !corretora.objeto.visible ? 'fora' : corretoraFalando ? 'falando' : 'parada',
       terceiraPessoa,
       boneco: presetId,
@@ -1334,6 +1374,12 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
       const d = Math.hypot(o.atual.x - antes.x, o.atual.z - antes.z);
       o.b.atualizar(o.atual, { distancia: d, velocidade: dtMs > 0 ? (d * 1000) / dtMs : 0, noAr: false, acenando: 0 }, agora / 1000, menosMovimento);
     }
+    if (explosao.atual !== explosao.alvo) {
+      const passo = menosMovimento ? 1 : Math.min(1, dtMs / 350);
+      explosao.atual += (explosao.alvo - explosao.atual) * passo;
+      if (Math.abs(explosao.alvo - explosao.atual) < 0.005) explosao.atual = explosao.alvo;
+      aplicarExplosao(explosao.atual);
+    }
     if (corretora?.objeto.visible) {
       const yaw = Math.atan2(-(camera.position.x - corretoraPos.x), -(camera.position.z - corretoraPos.z));
       corretora.atualizar({ x: corretoraPos.x, y: 0, z: corretoraPos.z, yaw }, { distancia: 0, velocidade: 0, noAr: false, acenando: corretoraFalando ? 1 : 0 }, agora / 1000, menosMovimento);
@@ -1385,6 +1431,10 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
         m.needsUpdate = true;
       }
       return andar === null || y !== null;
+    },
+    separarAndares(ligado) {
+      if (ligado && modo !== 'orbita') definirModo('orbita');
+      explosao.alvo = ligado ? 1 : 0;
     },
     andaresComCorte() {
       return [...new Set([...pecas.values()].map((p) => p.unidade.andar))].sort((a, b) => a - b);
