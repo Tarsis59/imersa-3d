@@ -249,7 +249,8 @@ export interface ItemLazer {
 
 export interface Portal {
   empresa: { nome: string };
-  consultora: { nome: string };
+  /** `whatsapp`: só dígitos com o 55 (o corretor informa ao gerar o link); null = sem botão de WhatsApp. */
+  consultora: { nome: string; whatsapp: string | null };
   projeto: { id: string; nome: string; descricao: string | null; cidade: string | null; uf: string | null; lat: number | null; lon: number | null; rotacaoGraus: number; estiloDecorado: 'moderno' | 'classico' | 'jovem' };
   predio: { id: string; nome: string };
   andares: Array<{ numero: number; nome: string }>;

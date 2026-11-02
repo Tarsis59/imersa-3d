@@ -48,10 +48,10 @@ export async function vincularPeca(predioId: string, unidadeId: string, meshNode
 }
 
 /** Link novo para o cliente. O endereço completo só aparece agora (o banco guarda só o hash do token). */
-export async function criarLink(predioId: string, titulo: string, dias: number): Promise<{ url: string; expiraEm: string } | { erro: string }> {
+export async function criarLink(predioId: string, titulo: string, dias: number, whatsapp = ''): Promise<{ url: string; expiraEm: string } | { erro: string }> {
   const r = await api<{ url: string; expiraEm: string }>(`/predios/${encodeURIComponent(predioId)}/links`, {
     metodo: 'POST',
-    corpo: { ...(titulo.trim() ? { titulo: titulo.trim() } : {}), dias },
+    corpo: { ...(titulo.trim() ? { titulo: titulo.trim() } : {}), dias, ...(whatsapp.trim() ? { whatsapp: whatsapp.trim() } : {}) },
     token: await tokenParaAcao(),
   });
   if (r.status !== 201) return { erro: mensagem(r.status, r.dados) };

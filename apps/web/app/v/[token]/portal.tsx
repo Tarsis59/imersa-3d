@@ -89,6 +89,7 @@ export function PortalVitrine({
         estiloDecorado={portal.projeto.estiloDecorado}
         fotos={portal.fotos}
         salaUrl={portal.aoVivoUrl ? portal.aoVivoUrl.replace(/\/ao-vivo$/, '/sala') : null}
+        corretor={portal.consultora.whatsapp ? { nome: portal.consultora.nome, whatsapp: portal.consultora.whatsapp, empreendimento: portal.projeto.nome } : null}
         lat={portal.projeto.lat}
         lon={portal.projeto.lon}
         interiores={portal.interiores}

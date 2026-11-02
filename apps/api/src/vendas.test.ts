@@ -139,6 +139,20 @@ describe('links para clientes', () => {
     expect((await novoLink(ana, torreA, { dias: 0 })).status).toBe(400);
   });
 
+  it('WhatsApp do corretor no link: aceita com máscara, guarda só dígitos com o 55 e o portal entrega para o card', async () => {
+    const r = await novoLink(ana, torreA, { whatsapp: '(11) 98888-7777' });
+    expect(r.status).toBe(201);
+    const salvo = (await owner.query<{ whatsapp: string }>('SELECT whatsapp FROM share_links WHERE id = $1', [r.json.id])).rows[0]!;
+    expect(salvo.whatsapp).toBe('5511988887777');
+    const portal = (await req('GET', `/publico/links/${tokenDe(r.json.url)}`)).json;
+    expect(portal.consultora).toEqual({ nome: 'Ana Corretora', whatsapp: '5511988887777' });
+    // sem WhatsApp, o card não ganha o botão
+    expect((await req('GET', `/publico/links/${tokenDe((await novoLink(ana)).json.url)}`)).json.consultora.whatsapp).toBeNull();
+    // número sem DDD ou com letras: recusado
+    expect((await novoLink(ana, torreA, { whatsapp: '98888-777' })).status).toBe(400);
+    expect((await novoLink(ana, torreA, { whatsapp: '+1 202 555 0100' })).status).toBe(400);
+  });
+
   it('consultora vê e revoga só os próprios links; gestão vê e revoga todos', async () => {
     const daBia = (await novoLink(bia, torreA, { titulo: 'Cliente da Bia' })).json;
     const listaAna = (await req('GET', `/predios/${torreA}/links`, undefined, ana)).json;

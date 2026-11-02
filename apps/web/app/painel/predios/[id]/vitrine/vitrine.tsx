@@ -13,6 +13,7 @@ import { Giro360 } from './giro';
 import { Assistente, type AcaoAssistente } from './assistente';
 import { ComandoVitrine } from './comando';
 import { VisitaEmGrupo } from './visita-grupo';
+import { FalarComCorretor } from './falar-corretor';
 import type { AcaoComando } from '@/lib/comandos';
 import { ehPorDoSol, MISSOES, PASSEIO_M, progressoTipologias, somarCaminhada, type IdMissao } from '@/lib/missoes';
 import { SimuladorFinanciamento } from './simulador';
@@ -76,6 +77,7 @@ export function Vitrine({
   fotos = SEM_FOTOS,
   inicio,
   salaUrl = null,
+  corretor = null,
   lat,
   lon,
   interiores,
@@ -111,6 +113,8 @@ export function Vitrine({
   estiloDecorado?: 'moderno' | 'classico' | 'jovem';
   /** Visita em grupo (só no link do cliente): endereço da sala na API. */
   salaUrl?: string | null;
+  /** Link do cliente com o WhatsApp do corretor: o card da unidade ganha "Falar com o corretor" e o QR (Plano 12b). */
+  corretor?: { nome: string; whatsapp: string; empreendimento: string } | null;
   /** Abrir já na vista de uma unidade e numa hora (foto pedida por texto). */
   inicio?: { unidadeId: string | null; hora: number | null };
   /** Fotos do imóvel com GPS: quadros no 3D onde foram tiradas (Plano 11c). */
@@ -1019,6 +1023,7 @@ export function Vitrine({
           <Cartao titulo={`Unidade ${unidade.codigo}`}>
             <div data-testid="unidade-selecionada" className="grid gap-3 text-sm">
               <span className={`w-fit rounded px-2 py-0.5 text-xs font-semibold ${COR_STATUS[unidade.status]}`}>{ROTULO_STATUS[unidade.status]}</span>
+              {corretor && <FalarComCorretor numero={corretor.whatsapp} nomeCorretor={corretor.nome} empreendimento={corretor.empreendimento} unidade={unidade.codigo} />}
               <dl className="grid grid-cols-2 gap-x-3 gap-y-1">
                 <dt className="text-suave">Andar</dt>
                 <dd>{nomeAndar.get(unidade.andar) ?? unidade.andar}</dd>

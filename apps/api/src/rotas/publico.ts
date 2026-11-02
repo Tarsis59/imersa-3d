@@ -103,14 +103,15 @@ export function rotasPublicas(app: FastifyInstance, { pool, armazenamento, entor
           projeto: { id: string; nome: string; descricao: string | null; cidade: string | null; uf: string | null; lat: number | null; lon: number | null; rotacaoGraus: number; estiloDecorado: string };
           empresa: string;
           consultora: string;
+          whatsapp: string | null;
         }>(
           `SELECT json_build_object('id', b.id, 'nome', b.nome) AS predio, b.modelo_asset_id AS "modeloId",
                   json_build_object('id', p.id, 'nome', p.nome, 'descricao', p.descricao, 'cidade', p.cidade, 'uf', p.uf,
                                     'lat', ST_Y(p.geom), 'lon', ST_X(p.geom), 'rotacaoGraus', p.rotacao_graus::float8, 'estiloDecorado', p.estilo_decorado) AS projeto,
-                  t.nome AS empresa, u.nome AS consultora
+                  t.nome AS empresa, u.nome AS consultora, (SELECT whatsapp FROM share_links WHERE id = $3) AS whatsapp
              FROM buildings b JOIN projects p ON p.id = b.project_id JOIN tenants t ON t.id = b.tenant_id, users u
             WHERE b.id = $1 AND u.id = $2`,
-          [l.predioId, l.consultoraId],
+          [l.predioId, l.consultoraId, l.linkId],
         )
       ).rows[0]!;
       const andares = (await c.query<{ numero: number; nome: string }>('SELECT numero, nome FROM floors WHERE building_id = $1 ORDER BY numero DESC', [l.predioId])).rows;
@@ -135,7 +136,7 @@ export function rotasPublicas(app: FastifyInstance, { pool, armazenamento, entor
     const modelo = arquivos.find((a) => a.id === base.modeloId && a.tipo === 'modelo_3d');
     return {
       empresa: { nome: base.empresa },
-      consultora: { nome: base.consultora },
+      consultora: { nome: base.consultora, whatsapp: base.whatsapp },
       projeto: base.projeto,
       predio: base.predio,
       andares,
