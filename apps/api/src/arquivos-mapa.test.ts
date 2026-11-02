@@ -61,10 +61,11 @@ const mapaFalso: ServicosMapa = {
     if (mapaFora) throw new Error('fora do ar');
     return [{ osmId: 'way/7', alturaM: 60, contorno: [[lon, lat], [lon + 0.0001, lat], [lon + 0.0001, lat + 0.0001]] }];
   },
-  async buscarMalha() {
+  async buscarMalha(lat, lon) {
     chamadasMalha++;
     if (malhaFora) throw new Error('Overpass respondeu 429');
-    return { vias: [{ tipo: 'primary', largura: 14, pontos: [[0, 0], [50, 0]] }] as never, areas: [] };
+    // uma rua do prédio até a estação Trianon-MASP (a rota a pé desenhada passa por ela)
+    return { vias: [{ osmId: 'way/9', tipo: 'local', nome: 'Rua de teste', larguraM: 7, pontos: [[lon, lat], [-46.6555, -23.5616], [-46.6564, -23.5614]] }], areas: [] };
   },
 };
 let chamadasPredios = 0;
@@ -336,6 +337,25 @@ describe('entorno: prédios reais do OSM em volta (com cache)', () => {
     const r2 = await req('GET', `/projetos/${q}/entorno`, undefined, admin);
     expect(r2.json.vias).toHaveLength(1);
     expect((await owner.query('SELECT jsonb_array_length(vias) AS n FROM entornos WHERE project_id = $1', [q])).rows[0].n).toBe(1);
+  });
+
+  it('rota a pé desenhada até o ponto: painel e link do cliente; ponto de outro projeto = 404', async () => {
+    const q = (await req('POST', '/projetos', { nome: 'Rota a pé' }, admin)).json.id;
+    await req('PATCH', `/projetos/${q}`, { lat: -23.56175, lon: -46.6545 }, admin);
+    expect((await req('GET', `/projetos/${q}/entorno`, undefined, admin)).json.vias).toHaveLength(1);
+    expect((await req('POST', `/projetos/${q}/pois/osm`, {}, admin)).status).toBeLessThan(300);
+    const pois = (await req('GET', `/projetos/${q}/pois`, undefined, consultora)).json.pois as Array<{ id: string; nome: string }>;
+    const metro = pois.find((x) => x.nome === 'Estação Trianon-MASP')!;
+    const r = await req('GET', `/projetos/${q}/pois/${metro.id}/rota`, undefined, consultora);
+    expect(r.status).toBe(200);
+    expect(r.json.rota.pontos.length).toBeGreaterThanOrEqual(3);
+    expect(r.json.rota.pontos[0]).toEqual([-46.6545, -23.56175]);
+    expect(r.json.rota.pontos.at(-1)).toEqual([-46.6564, -23.5614]);
+    expect(r.json.rota.metros).toBeGreaterThan(150);
+    expect(r.json.rota.minutosAPe).toBeGreaterThanOrEqual(2);
+    // ponto de outro projeto (ou inventado) não vaza
+    expect((await req('GET', `/projetos/${p}/pois/${metro.id}/rota`, undefined, admin)).status).toBe(404);
+    expect((await req('GET', `/projetos/${q}/pois/${metro.id}/rota`, undefined, outra)).status).toBe(404);
   });
 
   it('forçar atualização: só a gestão; outra empresa não vê', async () => {

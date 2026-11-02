@@ -1,7 +1,7 @@
 import type { Metadata } from 'next';
 import { notFound } from 'next/navigation';
 import { buscarPortal } from '@/lib/portal';
-import { carregarEntornoPublico, enviarLead, linkArquivoPublico } from './actions';
+import { carregarEntornoPublico, enviarLead, linkArquivoPublico, listarPontosPublico, rotaAtePublico } from './actions';
 import { PortalVitrine } from './portal';
 
 type Props = { params: Promise<{ token: string }> };
@@ -64,6 +64,7 @@ export default async function PaginaPortal({ params }: Props) {
         token={token}
         portal={p}
         carregarEntorno={carregarEntornoPublico.bind(null, token)}
+        proximidades={{ listar: listarPontosPublico.bind(null, token), rota: rotaAtePublico.bind(null, token) }}
         linkDoArquivo={linkArquivoPublico.bind(null, token)}
         enviarLead={enviarLead.bind(null, token)}
       />

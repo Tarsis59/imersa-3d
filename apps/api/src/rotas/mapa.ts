@@ -8,7 +8,7 @@ import type { Sessao } from '../auth/tokens';
 import { registrarAuditoria } from '../auditoria';
 import { IdParam } from '../esquemas';
 import type { PredioOsm, ServicosMapa } from '../mapa/osm';
-import { distanciasAPe, type Area, type Via } from '../mapa/malha';
+import { distanciasAPe, rotaAPe, type Area, type Via } from '../mapa/malha';
 import type { Relevo } from '../mapa/relevo';
 
 interface Dependencias {
@@ -119,6 +119,44 @@ export function criarEntorno(pool: pg.Pool, mapa: ServicosMapa) {
   return { obter, buscarPredios, buscarCidade, gravar };
 }
 
+const IdPoi = z.object({ id: z.uuid(), poiId: z.uuid() });
+
+/** Escolas, mercados, metrô... do projeto, os mais perto a pé primeiro (painel, link do cliente e IA). */
+export async function poisDoProjeto(c: pg.PoolClient, projetoId: string) {
+  const geo = (await c.query<{ tem: boolean }>('SELECT geom IS NOT NULL AS tem FROM projects WHERE id = $1', [projetoId])).rows[0];
+  if (!geo?.tem) return { semLocalizacao: true, pois: [] };
+  const pois = (
+    await c.query<{ id: string; categoria: string; nome: string; origem: string; lat: number; lon: number; distanciaM: number; caminhoM: number | null }>(
+      `SELECT p.id, p.categoria, p.nome, p.origem, ST_Y(p.geom) AS lat, ST_X(p.geom) AS lon,
+              round(ST_Distance(p.geom::geography, pr.geom::geography))::int AS "distanciaM", p.caminho_m AS "caminhoM"
+         FROM pois p JOIN projects pr ON pr.id = p.project_id
+        WHERE p.project_id = $1 ORDER BY coalesce(p.caminho_m, round(ST_Distance(p.geom::geography, pr.geom::geography))), p.nome`,
+      [projetoId],
+    )
+  ).rows;
+  // a pé pelas ruas quando dá para calcular; senão, linha reta
+  return { semLocalizacao: false, pois: pois.map((p) => ({ ...p, minutosAPe: Math.max(1, Math.ceil((p.caminhoM ?? p.distanciaM) / METROS_POR_MINUTO)) })) };
+}
+
+/**
+ * Rota a pé do empreendimento até o ponto, pelas ruas do entorno guardado. `undefined` = o ponto não é deste projeto;
+ * `null` = sem ruas em volta (o 3D mostra só a distância em linha reta).
+ */
+export async function rotaDoPoi(c: pg.PoolClient, projetoId: string, poiId: string) {
+  const r = (
+    await c.query<{ lat: number; lon: number; plat: number | null; plon: number | null; vias: Via[] | null }>(
+      `SELECT ST_Y(p.geom) AS lat, ST_X(p.geom) AS lon, ST_Y(pr.geom) AS plat, ST_X(pr.geom) AS plon, e.vias
+         FROM pois p JOIN projects pr ON pr.id = p.project_id LEFT JOIN entornos e ON e.project_id = pr.id
+        WHERE p.id = $1 AND p.project_id = $2`,
+      [poiId, projetoId],
+    )
+  ).rows[0];
+  if (!r) return undefined;
+  if (r.plat === null || r.plon === null || !r.vias?.length) return null;
+  const rota = rotaAPe(r.vias, { lat: r.plat, lon: r.plon }, { lat: r.lat, lon: r.lon });
+  return rota ? { ...rota, minutosAPe: Math.max(1, Math.ceil(rota.metros / METROS_POR_MINUTO)) } : null;
+}
+
 /**
  * Tempo a pé pelo desenho das ruas (Plano 11b, item 8): com as ruas do entorno em cache, cada ponto ganha a distância
  * andando de verdade (quarteirão, travessia), não em linha reta. Sem ruas, fica null e a tela usa a linha reta.
@@ -203,19 +241,18 @@ export function rotasMapa(app: FastifyInstance, { pool, exigir, mapa }: Dependen
     const s = await exigir(req, 'projeto:ler');
     const { id } = IdParam.parse(req.params);
     return withTenant(pool, ctx(s), async (c) => {
-      if (!(await localizacao(c, id))) return { semLocalizacao: true, pois: [] };
-      const pois = (
-        await c.query<{ distanciaM: number; caminhoM: number | null }>(
-          `SELECT p.id, p.categoria, p.nome, p.origem, ST_Y(p.geom) AS lat, ST_X(p.geom) AS lon,
-                  round(ST_Distance(p.geom::geography, pr.geom::geography))::int AS "distanciaM", p.caminho_m AS "caminhoM"
-             FROM pois p JOIN projects pr ON pr.id = p.project_id
-            WHERE p.project_id = $1 ORDER BY coalesce(p.caminho_m, round(ST_Distance(p.geom::geography, pr.geom::geography))), p.nome`,
-          [id],
-        )
-      ).rows;
-      // a pé pelas ruas quando dá para calcular; senão, linha reta
-      return { semLocalizacao: false, pois: pois.map((p) => ({ ...p, minutosAPe: Math.max(1, Math.ceil((p.caminhoM ?? p.distanciaM) / METROS_POR_MINUTO)) })) };
+      await localizacao(c, id); // projeto de outra empresa (ou inexistente): 404
+      return poisDoProjeto(c, id);
     });
+  });
+
+  /** A rota a pé desenhada até um ponto (Plano 12a, item 11). */
+  app.get('/projetos/:id/pois/:poiId/rota', async (req) => {
+    const s = await exigir(req, 'projeto:ler');
+    const { id, poiId } = IdPoi.parse(req.params);
+    const r = await withTenant(pool, ctx(s), (c) => rotaDoPoi(c, id, poiId));
+    if (r === undefined) throw new ErroHttp(404, 'nao_encontrado');
+    return { rota: r };
   });
 
   app.post('/projetos/:id/pois/osm', async (req) => {

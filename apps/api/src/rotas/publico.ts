@@ -8,7 +8,7 @@ import { withTenant } from '@imersa/db';
 import { ErroHttp } from '../erros';
 import { hashToken } from '../auth/hash';
 import type { Armazenamento } from '../arquivos/armazenamento';
-import type { criarEntorno } from './mapa';
+import { poisDoProjeto, rotaDoPoi, type criarEntorno } from './mapa';
 import { transmitirPredio, type CanalUnidades } from '../tempo-real/canal';
 import { giroDaVitrine } from './giros';
 import { responderAssistente, type ConfigIA } from './assistente';
@@ -42,6 +42,7 @@ const Eventos = z.object({
     .min(1)
     .max(50),
 });
+const PoiPublico = z.object({ poiId: z.uuid() });
 const NomeNaSala = z.object({ nome: z.string().trim().min(1).max(40).default('Visitante') });
 const SinalSala = z.object({
   de: z.uuid(),
@@ -183,6 +184,19 @@ export function rotasPublicas(app: FastifyInstance, { pool, armazenamento, entor
     const l = await resolver(req);
     const projetoId = await withTenant(pool, daEmpresa(l), async (c) => (await c.query<{ project_id: string }>('SELECT project_id FROM buildings WHERE id = $1', [l.predioId])).rows[0]!.project_id);
     return entorno.obter(daEmpresa(l), projetoId);
+  });
+
+  // o que há perto (escolas, mercados, metrô) e a rota a pé desenhada até cada um (Plano 12a, item 11)
+  app.get('/publico/links/:token/pois', limite(60, '1 minute'), async (req) => {
+    const l = await resolver(req);
+    return withTenant(pool, daEmpresa(l), async (c) => poisDoProjeto(c, (await c.query<{ project_id: string }>('SELECT project_id FROM buildings WHERE id = $1', [l.predioId])).rows[0]!.project_id));
+  });
+  app.get('/publico/links/:token/pois/:poiId/rota', limite(60, '1 minute'), async (req) => {
+    const l = await resolver(req);
+    const { poiId } = PoiPublico.parse(req.params);
+    const r = await withTenant(pool, daEmpresa(l), async (c) => rotaDoPoi(c, (await c.query<{ project_id: string }>('SELECT project_id FROM buildings WHERE id = $1', [l.predioId])).rows[0]!.project_id, poiId));
+    if (r === undefined) throw new ErroHttp(404, 'nao_encontrado');
+    return { rota: r };
   });
 
   /** Link de um arquivo 3D do empreendimento do link (interior real, modelo do prédio ou o giro 360° do prédio). */

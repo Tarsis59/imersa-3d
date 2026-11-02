@@ -14,6 +14,7 @@ import { Assistente, type AcaoAssistente } from './assistente';
 import { ComandoVitrine } from './comando';
 import { VisitaEmGrupo } from './visita-grupo';
 import { FalarComCorretor } from './falar-corretor';
+import { CartaoProximidades, type FonteProximidades } from './proximidades';
 import type { AcaoComando } from '@/lib/comandos';
 import { ehPorDoSol, MISSOES, PASSEIO_M, progressoTipologias, somarCaminhada, type IdMissao } from '@/lib/missoes';
 import { SimuladorFinanciamento } from './simulador';
@@ -78,6 +79,7 @@ export function Vitrine({
   inicio,
   salaUrl = null,
   corretor = null,
+  proximidades = null,
   lat,
   lon,
   interiores,
@@ -115,6 +117,8 @@ export function Vitrine({
   salaUrl?: string | null;
   /** Link do cliente com o WhatsApp do corretor: o card da unidade ganha "Falar com o corretor" e o QR (Plano 12b). */
   corretor?: { nome: string; whatsapp: string; empreendimento: string } | null;
+  /** O que há perto e a rota a pé desenhada no chão (painel, link do cliente e estande). */
+  proximidades?: FonteProximidades | null;
   /** Abrir já na vista de uma unidade e numa hora (foto pedida por texto). */
   inicio?: { unidadeId: string | null; hora: number | null };
   /** Fotos do imóvel com GPS: quadros no 3D onde foram tiradas (Plano 11c). */
@@ -914,6 +918,7 @@ export function Vitrine({
         data-outros={telemetria?.outros ?? 0}
         data-explosao={telemetria?.explosao ?? 0}
         data-etiquetas={telemetria?.etiquetas ?? 0}
+        data-rota={telemetria?.rota ?? 0}
         data-terceira={telemetria?.terceiraPessoa ? 'sim' : 'nao'}
         data-boneco={telemetria?.boneco ?? ''}
         data-no-ar={telemetria?.noAr ? 'sim' : 'nao'}
@@ -1204,6 +1209,7 @@ export function Vitrine({
           {[
             ['secao-unidades', 'Unidades'],
             ...(itensLazer.length ? [['secao-lazer', 'Áreas comuns']] : []),
+            ...(proximidades ? [['secao-entorno', 'O que há perto']] : []),
             ['secao-vista', 'Vista e horário'],
           ].map(([id, rotulo]) => (
             <button key={id} type="button" onClick={() => irPara(id!)} className="min-h-10 rounded-full border border-borda bg-superficie px-4 text-sm font-medium hover:bg-fundo">
@@ -1369,6 +1375,7 @@ export function Vitrine({
           </Cartao>
         )}
 
+        {proximidades && <CartaoProximidades fonte={proximidades} pronto={estado === 'pronto'} desenhar={(p) => viewer.current?.desenharRota(p) ?? false} />}
         <div id="secao-lazer" className="scroll-mt-4" />
         <CartaoLazer
           itens={itensLazer}

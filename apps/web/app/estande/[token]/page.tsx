@@ -4,7 +4,7 @@ import QRCode from 'qrcode';
 import { api } from '@/lib/api';
 import { lerOcioso, lerSinal } from '@/lib/estande';
 import { buscarPortal, TOKEN_LINK } from '@/lib/portal';
-import { carregarEntornoPublico, linkArquivoPublico } from '@/app/v/[token]/actions';
+import { carregarEntornoPublico, linkArquivoPublico, listarPontosPublico, rotaAtePublico } from '@/app/v/[token]/actions';
 import { enviarSinal } from './actions';
 import { TelaEstande } from './estande';
 
@@ -45,6 +45,7 @@ export default async function PaginaEstande({ params, searchParams }: Props) {
       ociosoS={lerOcioso(busca.ocioso)}
       sinalS={lerSinal(busca.sinal)}
       carregarEntorno={carregarEntornoPublico.bind(null, token)}
+      proximidades={{ listar: listarPontosPublico.bind(null, token), rota: rotaAtePublico.bind(null, token) }}
       linkDoArquivo={linkArquivoPublico.bind(null, token)}
       sinal={enviarSinal.bind(null, token)}
     />

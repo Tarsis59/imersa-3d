@@ -4,7 +4,7 @@ import type { UnidadeViewer } from '@imersa/viewer';
 import { apiNaPagina } from '@/lib/sessao';
 import { ehGestao, type Arquivo, type DetalheProjeto, type Espelho, type GirosDoPredio, type ItemLazer, type LinkCliente, type Me, type Portal } from '@/lib/tipos';
 import { Vitrine } from './vitrine';
-import { bilheteAoVivo, carregarEntorno, criarLazer, linkDoArquivo, removerLazer } from './actions';
+import { bilheteAoVivo, carregarEntorno, criarLazer, linkDoArquivo, listarPontos, removerLazer, rotaAte } from './actions';
 
 const NIVEIS_FIXOS = ['alto', 'medio', 'baixo'] as const;
 
@@ -75,6 +75,7 @@ export default async function PaginaVitrine({ params, searchParams }: { params: 
         qualidadeFixa={fixa >= 0 ? fixa : null}
         amostrasFoto={Number.isInteger(amostras) && amostras >= 1 && amostras <= 2000 ? amostras : undefined}
         carregarEntorno={carregarEntorno.bind(null, predio.projetoId)}
+        proximidades={{ listar: listarPontos.bind(null, predio.projetoId), rota: rotaAte.bind(null, predio.projetoId) }}
         linkDoArquivo={linkDoArquivo}
         aoVivo={bilheteAoVivo.bind(null, predio.id)}
         linksParaConduzir={linksAtivos}

@@ -1,7 +1,8 @@
 import { test, expect } from '@playwright/test';
 import { readFile } from 'node:fs/promises';
 import { layoutMarca } from '../../../packages/viewer/src/captura/marca';
-import { entrarComoAdminComMfa } from './ajuda';
+import { API, entrarComoAdminComMfa } from './ajuda';
+import { codigoTotp } from '../../api/src/auth/totp';
 
 const PLANILHA = [
   'predio;andar;codigo;tipologia;area_m2;quartos;preco;status',
@@ -15,7 +16,7 @@ const PLANILHA = [
 
 test('vitrine 3D: volumes do prédio, filtros, favoritos, voo até a unidade, corte por andar, bússola e primeira pessoa', async ({ page, request }) => {
   test.setTimeout(300_000);
-  await entrarComoAdminComMfa(page, request, 'vitrine');
+  const conta = await entrarComoAdminComMfa(page, request, 'vitrine');
 
   await page.getByLabel('Nome do projeto').fill('Residencial Vitrine');
   await page.getByRole('button', { name: 'Criar projeto' }).click();
@@ -24,6 +25,12 @@ test('vitrine 3D: volumes do prédio, filtros, favoritos, voo até a unidade, co
   await page.getByLabel('Longitude').fill('-46.6545');
   await page.getByRole('button', { name: 'Salvar dados' }).click();
   await expect(page.getByText('Dados salvos.')).toBeVisible();
+  // um lugar próximo (a estação de metrô), direto pela API: o "O que há perto" da Vitrine desenha a rota até ele
+  const projetoId = new URL(page.url()).pathname.split('/').at(-1)!;
+  await page.waitForTimeout(30_500 - (Date.now() % 30_000)); // o código de 6 dígitos não vale duas vezes: espera o próximo
+  const { acesso } = await (await request.post(`${API}/auth/login`, { data: { email: conta.email, senha: conta.senha, empresa: conta.empresa, codigoMfa: codigoTotp(conta.segredo) } })).json();
+  const metro = await request.post(`${API}/projetos/${projetoId}/pois`, { headers: { authorization: `Bearer ${acesso}` }, data: { categoria: 'transporte', nome: 'Estação Trianon-MASP', lat: -23.5614, lon: -46.6564 } });
+  expect(metro.status()).toBe(201);
   await page.getByLabel('Nome do prédio').fill('Torre V');
   await page.getByLabel('Andares').fill('2');
   await page.getByRole('button', { name: 'Criar prédio' }).click();
@@ -92,6 +99,16 @@ test('vitrine 3D: volumes do prédio, filtros, favoritos, voo até a unidade, co
   await page.reload();
   await expect(vitrine).toHaveAttribute('data-estado', 'pronto', { timeout: 45_000 });
   await expect(page.getByLabel(/Só favoritas \(1\)/)).toBeVisible();
+
+  // o que há perto: tempo a pé, filtro por tipo e a rota desenhada no chão pelas ruas (Plano 12)
+  const perto = page.getByTestId('proximidades');
+  await expect(perto).toContainText('Estação Trianon-MASP');
+  await expect(perto).toContainText(/\d+ min a pé/);
+  await perto.getByRole('group', { name: 'Tipo de lugar' }).getByRole('button', { name: 'Transporte' }).click();
+  await perto.getByRole('button', { name: /Estação Trianon-MASP/ }).click();
+  await expect(vitrine).toHaveAttribute('data-rota', /^[3-9]|^\d{2,}/, { timeout: 15_000 });
+  await perto.getByRole('button', { name: 'Apagar a rota' }).click();
+  await expect(vitrine).toHaveAttribute('data-rota', '0');
 
   // corte por andar
   await page.getByLabel('Ver até o andar (corte)').selectOption({ label: '1º andar' });

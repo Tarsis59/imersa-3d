@@ -3,6 +3,7 @@ import type { Entorno } from '@imersa/viewer';
 import { api } from '@/lib/api';
 import { tokenParaAcao } from '@/lib/sessao';
 import type { CategoriaLazer, ItemLazer } from '@/lib/tipos';
+import type { PontoProximo, RotaAPe } from './proximidades';
 
 export type ResultadoEntorno = { entorno: Entorno } | { entorno: null; motivo: 'sem_localizacao' | 'indisponivel' };
 
@@ -45,4 +46,17 @@ export async function criarLazer(predioId: string, d: NovoLazer): Promise<{ item
 export async function removerLazer(id: string): Promise<{ erro?: string }> {
   const r = await api(`/lazer/${encodeURIComponent(id)}`, { metodo: 'DELETE', token: await tokenParaAcao() });
   return r.status === 204 ? {} : { erro: ERROS_LAZER[r.status] ?? 'Não foi possível remover o ponto agora.' };
+}
+
+/** O que há perto do empreendimento, com o tempo a pé (Plano 12). */
+export async function listarPontos(projetoId: string): Promise<PontoProximo[] | null> {
+  const r = await api<{ pois: PontoProximo[] }>(`/projetos/${encodeURIComponent(projetoId)}/pois`, { token: await tokenParaAcao() });
+  return r.status === 200 ? r.dados.pois : null;
+}
+
+/** A rota a pé pelas ruas até o ponto, para desenhar no chão. */
+export async function rotaAte(projetoId: string, poiId: string): Promise<RotaAPe | null> {
+  if (!/^[0-9a-f-]{36}$/i.test(poiId)) return null;
+  const r = await api<{ rota: RotaAPe | null }>(`/projetos/${encodeURIComponent(projetoId)}/pois/${poiId}/rota`, { token: await tokenParaAcao() });
+  return r.status === 200 ? r.dados.rota : null;
 }

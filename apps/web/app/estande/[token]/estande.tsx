@@ -4,6 +4,7 @@ import { PainelCorretor, useModoCorretor } from './modo-corretor';
 import type { UnidadeViewer } from '@imersa/viewer';
 import { Vitrine, type EventoVitrine } from '@/app/painel/predios/[id]/vitrine/vitrine';
 import type { ResultadoEntorno } from '@/app/painel/predios/[id]/vitrine/actions';
+import type { FonteProximidades } from '@/app/painel/predios/[id]/vitrine/proximidades';
 import { conferir, inicial, tocar, type EstadoEstande } from '@/lib/estande';
 import type { Portal } from '@/lib/tipos';
 import type { DadosSinal, enviarSinal } from './actions';
@@ -133,6 +134,7 @@ export function TelaEstande({
   ociosoS,
   sinalS,
   carregarEntorno,
+  proximidades,
   linkDoArquivo,
   sinal,
 }: {
@@ -145,6 +147,7 @@ export function TelaEstande({
   /** Segundos entre os sinais de vida. */
   sinalS: number;
   carregarEntorno: () => Promise<ResultadoEntorno>;
+  proximidades: FonteProximidades;
   linkDoArquivo: (arquivoId: string) => Promise<string | null>;
   sinal: (d: DadosSinal) => ReturnType<typeof enviarSinal>;
 }) {
@@ -297,6 +300,7 @@ export function TelaEstande({
           giroRenderizado={portal.giro}
           assistenteUrl={portal.assistenteUrl}
           carregarEntorno={carregarEntorno}
+          proximidades={proximidades}
           linkDoArquivo={linkDoArquivo}
           telemetria={false}
           aoEvento={(e) => visitas.registrar(e)}

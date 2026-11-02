@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { CSM } from 'three/addons/csm/CSM.js';
-import { ORIGEM_PAULISTA } from './geo/project';
+import { lonLatToLocal, ORIGEM_PAULISTA } from './geo/project';
 import { sunDirection, horaSaoPauloParaUtc } from './sun/sun';
 import { criarCeu, type Clima } from './ambiente/ceu';
 import type { PosProcessamento } from './ambiente/pos';
@@ -15,7 +15,7 @@ import { malhasDaFachada, materiaisDaFachada, texturaDeJanelas } from './units/j
 import { buildCityMesh } from './city/cityMesh';
 import { injetarFachada } from './city/fachadaCidade';
 import { entornoParaLocal, type Entorno } from './city/entorno';
-import { criarCidade, terrenoDoRelevo, type CidadeCompleta } from './city/cidade';
+import { criarCidade, fita, paraModelo, terrenoDoRelevo, type CidadeCompleta } from './city/cidade';
 import { montarDecorado, planejarDecorado, type Decorado, type EstiloDecorado } from './interior/decorado';
 import { criarQuadros, planejarQuadros, type FotoNoLugar, type QuadrosDeFoto } from './ambiente/fotos';
 import { cameraAtrasDoOmbro, CORRETORA, criarBoneco, presetBoneco, type Boneco } from './cameras/boneco';
@@ -79,6 +79,8 @@ export interface EstadoViewer {
   decorado: number;
   /** Pessoas da visita em grupo desenhadas no 3D. */
   outros: number;
+  /** Rota a pé desenhada no chão (número de pontos; 0 = nenhuma). */
+  rota: number;
   /** Etiquetas "Apto 1201" à vista (unidades filtradas). */
   etiquetas: number;
   /** Vista explodida: 0 = andares juntos, 1 = separados (no meio da animação, entre os dois). */
@@ -129,6 +131,11 @@ export interface Viewer {
    * com as unidades pintadas pela situação. `false` junta de novo.
    */
   separarAndares(ligado: boolean): void;
+  /**
+   * Rota a pé desenhada no chão, do empreendimento até um ponto próximo (Plano 12a, item 11): pontos [lon, lat] pelas
+   * ruas; a câmera voa para enquadrar o caminho todo. `null` apaga. `false` sem o entorno carregado.
+   */
+  desenharRota(pontos: ReadonlyArray<readonly [number, number]> | null): boolean;
   voarPara(unidadeId: string): boolean;
   selecionar(unidadeId: string | null): void;
   definirModo(modo: ModoCamera): void;
@@ -722,6 +729,22 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
     ultimoAviso = 0;
   }
 
+  /** Centro do entorno carregado (a rota a pé chega em lon/lat e vira chão do 3D por ele). */
+  let centroEntorno: { lon: number; lat: number } | null = null;
+  let rotaDesenhada: THREE.Group | null = null;
+  function apagarRota(): void {
+    if (!rotaDesenhada) return;
+    rotaDesenhada.removeFromParent();
+    rotaDesenhada.traverse((o) => {
+      if (o instanceof THREE.Mesh) {
+        o.geometry.dispose();
+        (o.material as THREE.Material).dispose();
+      }
+    });
+    rotaDesenhada = null;
+    ultimoAviso = 0;
+  }
+
   /** Vista explodida: `atual` anda até `alvo` a cada quadro. */
   const explosao = { atual: 0, alvo: 0 };
   function aplicarExplosao(f: number): void {
@@ -1284,6 +1307,7 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
       outros: outros.size,
       explosao: Math.round(explosao.atual * 100) / 100,
       etiquetas: rotulos.size,
+      rota: rotaDesenhada?.userData.pontos ?? 0,
       corretora: !corretora || !corretora.objeto.visible ? 'fora' : corretoraFalando ? 'falando' : 'parada',
       terceiraPessoa,
       boneco: presetId,
@@ -1463,6 +1487,42 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
         m.needsUpdate = true;
       }
       return andar === null || y !== null;
+    },
+    desenharRota(pontos) {
+      apagarRota();
+      if (!pontos || pontos.length < 2 || !centroEntorno) return false;
+      const centro = centroEntorno;
+      const xz = pontos.map(([lon, lat]) => paraModelo(lonLatToLocal({ lon, lat }, centro), rotacao));
+      const altura = cidadeCompleta?.terreno.altura ?? (() => 0);
+      const geo = fita({ pontos: xz, largura: 2.4 }, altura, 0.35);
+      if (!geo) return false;
+      const grupo = new THREE.Group();
+      grupo.name = 'rota-a-pe';
+      // ciano por cima de tudo no chão (sem sombra, sem esconder atrás do meio-fio)
+      const linha = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ color: 0x22d3ee, transparent: true, opacity: 0.92, depthWrite: false }));
+      linha.renderOrder = 6;
+      const fim = xz.at(-1)!;
+      const alvo = new THREE.Mesh(new THREE.RingGeometry(2.2, 3.2, 40).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: 0x22d3ee, transparent: true, opacity: 0.9, side: THREE.DoubleSide, depthWrite: false }));
+      alvo.position.set(fim.x, altura(fim.x, fim.z) + 0.4, fim.z);
+      alvo.renderOrder = 6;
+      grupo.add(linha, alvo);
+      grupo.userData.pontos = pontos.length;
+      cena.add(grupo);
+      rotaDesenhada = grupo;
+      // enquadra o caminho inteiro (do prédio ao destino), de cima
+      if (modo !== 'orbita') definirModo('orbita');
+      const caixa = {
+        minX: Math.min(...xz.map((q) => q.x)),
+        maxX: Math.max(...xz.map((q) => q.x)),
+        minY: 0,
+        maxY: 20,
+        minZ: Math.min(...xz.map((q) => q.z)),
+        maxZ: Math.max(...xz.map((q) => q.z)),
+      };
+      orbita.enabled = false;
+      voo = { trajeto: planejarVoo({ posicao: camera.position.clone(), alvo: orbita.target.clone() }, enquadrar(caixa, camera.fov, camera.aspect || 1, 55, 1.3)), inicio: performance.now() };
+      ultimoAviso = 0;
+      return true;
     },
     separarAndares(ligado) {
       if (ligado && modo !== 'orbita') definirModo('orbita');
@@ -1708,6 +1768,8 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
     },
     async definirEntorno(entorno) {
       await pronto;
+      apagarRota();
+      centroEntorno = entorno ? { lon: entorno.centro.lon, lat: entorno.centro.lat } : null;
       // montar a cidade e compilar os materiais dela travam alguns quadros: não é o aparelho, não baixa a qualidade
       qualidade.ignorarCarga(3_000);
       if (cidade) {
