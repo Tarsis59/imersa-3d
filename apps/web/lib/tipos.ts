@@ -197,6 +197,8 @@ export interface Lead {
   status: StatusLead;
   criadoEm: string;
   unidade: string | null;
+  /** "lote X da quadra Y" (Plano 12e): pedido de contato a partir de um lote do loteamento, em vez de uma unidade. */
+  lote: string | null;
   predio: string;
   predioId: string;
   projeto: string;

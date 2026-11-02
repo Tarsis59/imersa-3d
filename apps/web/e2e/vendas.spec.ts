@@ -94,7 +94,10 @@ test('vendas: link pelo WhatsApp → cliente no celular (sem login) → pedido d
   await page.getByLabel('Novo status').selectOption('reservado');
   await page.getByRole('button', { name: 'Mudar status' }).click();
   await expect(page.getByText('Status alterado.')).toBeVisible();
-  await expect(cliente.getByTestId('lista-vitrine').getByRole('button', { name: /^101/ })).toContainText('Reservado', { timeout: 2_000 });
+  // 2 s é pouco para o `next dev` do CI (Turbopack sem otimizar, HMR ligado): a entrega do SSE em si é instantânea
+  // (LISTEN/NOTIFY do Postgres, sem passar pelo Next), mas o JS da página é bem mais pesado para rodar nesse modo;
+  // confirmado: em build de produção (mesma lógica, mesmo SSE) a troca aparece bem dentro de 2 s
+  await expect(cliente.getByTestId('lista-vitrine').getByRole('button', { name: /^101/ })).toContainText('Reservado', { timeout: 10_000 });
   await cliente.screenshot({ path: test.info().outputPath('portal-celular.png') });
 
   await cliente.getByRole('link', { name: /Quero falar com/ }).tap();

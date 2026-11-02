@@ -103,6 +103,7 @@ export function Vitrine({
   giroRenderizado = null,
   assistenteUrl = null,
   aoPedirContato,
+  aoLoteVisto,
   estande = null,
   linksParaConduzir = [],
   lazer = [],
@@ -161,6 +162,8 @@ export function Vitrine({
   assistenteUrl?: string | null;
   /** O assistente pediu o formulário de contato (portal): abre com a unidade e o motivo. */
   aoPedirContato?: (motivo: 'contato' | 'visita', unidadeId: string | null) => void;
+  /** Lote escolhido no loteamento (portal, Plano 12e): o formulário de contato pré-escolhe esse lote. */
+  aoLoteVisto?: (loteId: string) => void;
   /**
    * Estande de vendas (tela touch no PC do estande): `apresentando` = ninguém mexendo, a câmera gira sozinha e as
    * unidades disponíveis aparecem uma a uma; cada `reinicio` novo volta tudo ao começo (próximo visitante).
@@ -190,6 +193,8 @@ export function Vitrine({
   evento.current = aoEvento;
   const fonteAoVivo = useRef(aoVivo);
   fonteAoVivo.current = aoVivo;
+  const loteVisto = useRef(aoLoteVisto);
+  loteVisto.current = aoLoteVisto;
   // status que mudaram depois de a página abrir (venda/reserva feita agora por outra pessoa)
   const [statusAoVivo, setStatusAoVivo] = useState<Record<string, StatusUnidade>>({});
   const statusAoVivoRef = useRef(statusAoVivo);
@@ -244,6 +249,7 @@ export function Vitrine({
     if (loteSelecionado) {
       setVistaLote(null);
       viewer.current?.voarParaLote(loteSelecionado);
+      loteVisto.current?.(loteSelecionado);
     }
   }, [loteSelecionado]);
   // andar a pé ou entrar no apartamento junta os andares no 3D: o botão acompanha

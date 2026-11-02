@@ -28,7 +28,8 @@ export function ListaLeads({ leads, mudarStatus }: { leads: Lead[]; mudarStatus:
                   <strong className="text-base">{l.nome}</strong>
                   <span className="text-xs text-suave">
                     {quando(l.criadoEm)} · {l.projeto} · {l.predio}
-                    {l.unidade ? ` · unidade ${l.unidade}` : ''} · link de {l.consultora}
+                    {l.unidade ? ` · unidade ${l.unidade}` : ''}
+                    {l.lote ? ` · ${l.lote}` : ''} · link de {l.consultora}
                     {l.link ? ` (${l.link})` : ''}
                   </span>
                 </span>

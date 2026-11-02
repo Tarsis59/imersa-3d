@@ -70,6 +70,8 @@ export function PortalVitrine({
 }) {
   const registrar = useEventos(token);
   const [unidadeVista, setUnidadeVista] = useState('');
+  // último lote escolhido no loteamento (Plano 12e): pré-escolhe no formulário de contato, como a unidade
+  const [loteVista, setLoteVista] = useState('');
   // pedido do assistente: abre o formulário com a unidade e o motivo (os dados pessoais a pessoa digita lá)
   const [pedidoContato, setPedidoContato] = useState<{ motivo: 'contato' | 'visita'; unidadeId: string | null; vez: number } | null>(null);
   const aoEvento = (e: EventoVitrine) => {
@@ -103,6 +105,7 @@ export function PortalVitrine({
         giroRenderizado={portal.giro}
         assistenteUrl={portal.assistenteUrl}
         aoPedirContato={(motivo, unidadeId) => setPedidoContato((p) => ({ motivo, unidadeId, vez: (p?.vez ?? 0) + 1 }))}
+        aoLoteVisto={setLoteVista}
         carregarEntorno={carregarEntorno}
         proximidades={proximidades}
         linkDoArquivo={linkDoArquivo}
@@ -110,7 +113,7 @@ export function PortalVitrine({
         aoEvento={aoEvento}
         aoVivo={async () => portal.aoVivoUrl}
       />
-      <FormularioLead portal={portal} unidadeVista={unidadeVista} enviarLead={enviarLead} pedido={pedidoContato} />
+      <FormularioLead portal={portal} unidadeVista={unidadeVista} loteVista={loteVista} enviarLead={enviarLead} pedido={pedidoContato} />
     </>
   );
 }
@@ -118,22 +121,27 @@ export function PortalVitrine({
 function FormularioLead({
   portal,
   unidadeVista,
+  loteVista,
   enviarLead,
   pedido,
 }: {
   portal: Portal;
   unidadeVista: string;
+  /** Último lote escolhido no loteamento (Plano 12e): pré-escolhe no formulário, como a unidade. */
+  loteVista: string;
   enviarLead: (d: DadosLead) => Promise<{ ok: true } | { ok: false; erro: string }>;
   pedido: { motivo: 'contato' | 'visita'; unidadeId: string | null; vez: number } | null;
 }) {
   const textoConsentimento = `Autorizo ${portal.empresa.nome} e ${portal.consultora.nome} a usar meu nome e meus contatos para falar comigo sobre o ${portal.projeto.nome}. Posso pedir a exclusão dos meus dados a qualquer momento.`;
-  // unidadeId null = a pessoa ainda não escolheu: vale a última unidade vista no 3D
-  const [d, setD] = useState<Omit<DadosLead, 'unidadeId' | 'textoConsentimento'> & { unidadeId: string | null }>({
+  // unidadeId/loteId null = a pessoa ainda não escolheu: vale a última unidade/lote vistos no 3D (prédio e
+  // loteamento não se misturam, então só um dos dois faz sentido por vez)
+  const [d, setD] = useState<Omit<DadosLead, 'unidadeId' | 'loteId' | 'textoConsentimento'> & { unidadeId: string | null; loteId: string | null }>({
     nome: '',
     telefone: '',
     email: '',
     mensagem: '',
     unidadeId: null,
+    loteId: null,
     consentimento: false,
     site: '',
   });
@@ -151,6 +159,8 @@ function FormularioLead({
   const [resultado, setResultado] = useState<{ ok: true } | { ok: false; erro: string } | null>(null);
   const unidade = d.unidadeId ?? unidadeVista;
   const disponiveis = portal.unidades.filter((u) => u.status === 'disponivel' || u.id === unidade);
+  const lote = d.loteId ?? loteVista;
+  const lotesDisponiveis = portal.lotes.filter((l) => l.status === 'disponivel' || l.id === lote);
 
   if (resultado?.ok) {
     return (
@@ -173,7 +183,7 @@ function FormularioLead({
             setEnviando(true);
             setResultado(null);
             try {
-              setResultado(await enviarLead({ ...d, unidadeId: unidade, textoConsentimento }));
+              setResultado(await enviarLead({ ...d, unidadeId: unidade, loteId: lote, textoConsentimento }));
             } catch {
               setResultado({ ok: false, erro: 'Não foi possível enviar agora. Tente de novo em instantes.' });
             } finally {
@@ -191,15 +201,27 @@ function FormularioLead({
             <Campo id="lead-telefone" rotulo="WhatsApp ou telefone (com DDD)" type="tel" inputMode="tel" autoComplete="tel" maxLength={30} value={d.telefone} onChange={(e) => setD({ ...d, telefone: e.target.value })} />
             <Campo id="lead-email" rotulo="E-mail" type="email" autoComplete="email" maxLength={254} value={d.email} onChange={(e) => setD({ ...d, email: e.target.value })} />
           </div>
-          <Selecao id="lead-unidade" rotulo="Unidade de interesse (opcional)" value={unidade} onChange={(e) => setD({ ...d, unidadeId: e.target.value })}>
-            <option value="">Nenhuma em especial</option>
-            {disponiveis.map((u) => (
-              <option key={u.id} value={u.id}>
-                {u.codigo}
-                {u.tipologia ? ` · ${u.tipologia}` : ''}
-              </option>
-            ))}
-          </Selecao>
+          {portal.unidades.length > 0 && (
+            <Selecao id="lead-unidade" rotulo="Unidade de interesse (opcional)" value={unidade} onChange={(e) => setD({ ...d, unidadeId: e.target.value })}>
+              <option value="">Nenhuma em especial</option>
+              {disponiveis.map((u) => (
+                <option key={u.id} value={u.id}>
+                  {u.codigo}
+                  {u.tipologia ? ` · ${u.tipologia}` : ''}
+                </option>
+              ))}
+            </Selecao>
+          )}
+          {portal.lotes.length > 0 && (
+            <Selecao id="lead-lote" rotulo="Lote de interesse (opcional)" value={lote} onChange={(e) => setD({ ...d, loteId: e.target.value })}>
+              <option value="">Nenhum em especial</option>
+              {lotesDisponiveis.map((l) => (
+                <option key={l.id} value={l.id}>
+                  Lote {l.numero} · Quadra {l.quadra}
+                </option>
+              ))}
+            </Selecao>
+          )}
           <label htmlFor="lead-mensagem" className="grid gap-1 text-sm">
             <span className="font-medium">Mensagem (opcional)</span>
             <textarea

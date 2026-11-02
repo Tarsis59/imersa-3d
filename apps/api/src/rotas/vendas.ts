@@ -120,7 +120,8 @@ export function rotasVendas(app: FastifyInstance, { pool, exigir, webUrl }: Depe
       (
         await c.query(
           `SELECT x.id, x.nome, x.telefone, x.email, x.mensagem, x.status, x.criado_em AS "criadoEm",
-                  un.codigo AS unidade, b.nome AS predio, b.id AS "predioId", p.nome AS projeto, p.id AS "projetoId",
+                  un.codigo AS unidade, ('lote ' || lt.numero || ' da quadra ' || lt.quadra) AS lote,
+                  b.nome AS predio, b.id AS "predioId", p.nome AS projeto, p.id AS "projetoId",
                   u.nome AS consultora, l.titulo AS link,
                   temperatura_do_link(x.link_id) AS temperatura,
                   coalesce((SELECT array_agg(DISTINCT e.missao ORDER BY e.missao) FROM view_events e
@@ -131,6 +132,7 @@ export function rotasVendas(app: FastifyInstance, { pool, exigir, webUrl }: Depe
              JOIN buildings b ON b.id = l.building_id
              JOIN projects p ON p.id = b.project_id
              LEFT JOIN units un ON un.id = x.unit_id
+             LEFT JOIN lotes lt ON lt.id = x.lote_id
             WHERE ($1::uuid IS NULL OR l.criado_por = $1) AND ($2::uuid IS NULL OR p.id = $2) AND ($3::text IS NULL OR x.status = $3)
             ORDER BY x.criado_em DESC
             LIMIT 500`,

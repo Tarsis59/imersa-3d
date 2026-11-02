@@ -184,9 +184,11 @@ export function rotasIntegracoes(app: FastifyInstance, { pool, exigir, chaveCifr
       (
         await c.query(
           `SELECT x.id, x.nome, x.telefone, x.email, x.mensagem, x.status, x.criado_em AS "criadoEm",
-                  un.codigo AS unidade, b.nome AS predio, p.id AS "empreendimentoId", p.nome AS empreendimento, u.nome AS consultora
+                  un.codigo AS unidade, ('lote ' || lt.numero || ' da quadra ' || lt.quadra) AS lote,
+                  b.nome AS predio, p.id AS "empreendimentoId", p.nome AS empreendimento, u.nome AS consultora
              FROM leads x JOIN share_links l ON l.id = x.link_id JOIN users u ON u.id = l.criado_por
              JOIN buildings b ON b.id = l.building_id JOIN projects p ON p.id = b.project_id LEFT JOIN units un ON un.id = x.unit_id
+             LEFT JOIN lotes lt ON lt.id = x.lote_id
             WHERE ($1::timestamptz IS NULL OR date_trunc('milliseconds', x.criado_em) > $1)
             ORDER BY x.criado_em, x.id
             LIMIT $2`,

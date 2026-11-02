@@ -58,6 +58,8 @@ const NovoLead = z.object({
   email: z.email().max(254).transform((e) => e.toLowerCase()).optional(),
   mensagem: z.string().trim().max(2000).optional(),
   unidadeId: z.uuid().optional(),
+  /** Pedido de contato a partir de um lote do loteamento (Plano 12e), em vez de uma unidade. */
+  loteId: z.uuid().optional(),
   consentimento: z.boolean(),
   textoConsentimento: z.string().trim().min(10).max(2000),
   /** Armadilha para robôs: campo escondido na página; gente de verdade deixa vazio. */
@@ -302,10 +304,12 @@ export function rotasPublicas(app: FastifyInstance, { pool, armazenamento, entor
       const recentes = (await c.query<{ n: number }>("SELECT count(*)::int AS n FROM leads WHERE link_id = $1 AND criado_em > now() - interval '1 hour'", [l.linkId])).rows[0]!.n;
       if (recentes >= MAX_LEADS_POR_LINK_HORA) throw new ErroHttp(429, 'muitos_pedidos');
       const unidade = d.unidadeId && (await unidadesDoPredio(c, l, [d.unidadeId])).has(d.unidadeId) ? d.unidadeId : null;
+      // lote do loteamento (Plano 12e): a mesma ideia da unidade, mas noutra tabela (prédio e loteamento não se misturam)
+      const lote = d.loteId && (await c.query('SELECT 1 FROM lotes WHERE id = $1 AND building_id = $2', [d.loteId, l.predioId])).rowCount ? d.loteId : null;
       const r = await c.query<{ id: string }>(
-        `INSERT INTO leads (link_id, unit_id, nome, telefone, email, mensagem, consentimento, texto_consentimento, ip, navegador)
-         VALUES ($1, $2, $3, $4, $5, $6, true, $7, $8, $9) RETURNING id`,
-        [l.linkId, unidade, d.nome, d.telefone ?? null, d.email ?? null, d.mensagem || null, d.textoConsentimento, req.ip, req.headers['user-agent']?.slice(0, 400) ?? null],
+        `INSERT INTO leads (link_id, unit_id, lote_id, nome, telefone, email, mensagem, consentimento, texto_consentimento, ip, navegador)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, true, $8, $9, $10) RETURNING id`,
+        [l.linkId, unidade, lote, d.nome, d.telefone ?? null, d.email ?? null, d.mensagem || null, d.textoConsentimento, req.ip, req.headers['user-agent']?.slice(0, 400) ?? null],
       );
       return r.rows[0]!;
     });

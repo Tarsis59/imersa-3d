@@ -29,6 +29,8 @@ export interface DadosLead {
   email: string;
   mensagem: string;
   unidadeId: string;
+  /** Lote escolhido no loteamento (Plano 12e), em vez da unidade (prédio e loteamento não se misturam). */
+  loteId: string;
   consentimento: boolean;
   textoConsentimento: string;
   /** Campo escondido (armadilha para robôs). */
@@ -47,6 +49,7 @@ export async function enviarLead(token: string, d: DadosLead): Promise<{ ok: tru
       ...(d.email.trim() ? { email: d.email } : {}),
       ...(d.mensagem.trim() ? { mensagem: d.mensagem } : {}),
       ...(d.unidadeId ? { unidadeId: d.unidadeId } : {}),
+      ...(d.loteId ? { loteId: d.loteId } : {}),
       consentimento: d.consentimento,
       textoConsentimento: d.textoConsentimento,
       ...(d.site ? { site: d.site } : {}),
