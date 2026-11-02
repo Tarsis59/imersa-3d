@@ -88,6 +88,7 @@ export function PortalVitrine({
         rotacaoGraus={portal.projeto.rotacaoGraus}
         estiloDecorado={portal.projeto.estiloDecorado}
         fotos={portal.fotos}
+        salaUrl={portal.aoVivoUrl ? portal.aoVivoUrl.replace(/\/ao-vivo$/, '/sala') : null}
         lat={portal.projeto.lat}
         lon={portal.projeto.lon}
         interiores={portal.interiores}

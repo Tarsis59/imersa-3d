@@ -41,6 +41,7 @@ import { rotasAssistente, type ConfigIA } from './rotas/assistente';
 import { chamadaReal, type ChamarModelo } from './ia/assistente';
 import { chamadaSimulada } from './ia/simulada';
 import { CanalUnidades } from './tempo-real/canal';
+import { CanalSala } from './tempo-real/sala';
 import { ArmazenamentoLocal, ArmazenamentoS3, type Armazenamento } from './arquivos/armazenamento';
 import { clamav, semAntivirus, type Antivirus } from './arquivos/antivirus';
 import { comPrediosDeArquivo, comRelevoDePasta, servicosMapaReais, type ServicosMapa } from './mapa/osm';
@@ -397,9 +398,11 @@ export async function construirApp({ pool, config, logger = false, reportarErro,
   // status ao vivo: uma conexão LISTEN por instância; as transmissões abertas fecham antes de a API parar
   const canal = new CanalUnidades(config.DATABASE_URL);
   app.addHook('preClose', async () => canal.fechar());
+  const sala = new CanalSala(config.DATABASE_URL, pool);
+  app.addHook('preClose', async () => sala.fechar());
   const apiPublica = config.API_URL_PUBLICA ?? `http://localhost:${config.PORT}`;
   rotasAoVivo(app, { pool, exigir, canal, segredo: config.JWT_SECRET, apiPublica });
-  rotasPublicas(app, { pool, armazenamento: arm, entorno: criarEntorno(pool, servicosMapa), canal, apiPublica, ia });
+  rotasPublicas(app, { pool, armazenamento: arm, entorno: criarEntorno(pool, servicosMapa), canal, sala, apiPublica, ia });
   rotasIntegracoes(app, { pool, exigir, chaveCifra: config.TOTP_KEY, permitirLocal: config.WEBHOOK_PERMITIR_LOCAL });
   rotasLazer(app, { pool, exigir });
   rotasCriacao(app, { pool, exigir, mapa: servicosMapa });

@@ -3,6 +3,7 @@ import type { FastifyInstance, FastifyRequest } from 'fastify';
 import type pg from 'pg';
 import { z } from 'zod';
 import { fotosNoLugar, lazerDoPredio } from './lazer';
+import { transmitirSala, type CanalSala } from '../tempo-real/sala';
 import { withTenant } from '@imersa/db';
 import { ErroHttp } from '../erros';
 import { hashToken } from '../auth/hash';
@@ -16,6 +17,8 @@ interface Dependencias {
   pool: pg.Pool;
   armazenamento: Armazenamento;
   entorno: ReturnType<typeof criarEntorno>;
+  /** Visita em grupo: presença, posição dos bonecos e combinação da voz (Plano 11d). */
+  sala?: CanalSala;
   canal: CanalUnidades;
   /** Endereço da API visto pelo navegador (status ao vivo). */
   apiPublica: string;
@@ -38,6 +41,13 @@ const Eventos = z.object({
     )
     .min(1)
     .max(50),
+});
+const NomeNaSala = z.object({ nome: z.string().trim().min(1).max(40).default('Visitante') });
+const SinalSala = z.object({
+  de: z.uuid(),
+  para: z.uuid().nullable(),
+  tipo: z.enum(['posicao', 'oferta', 'resposta', 'ice']),
+  dados: z.unknown(),
 });
 const NovoLead = z.object({
   nome: z.string().trim().min(2).max(120),
@@ -62,7 +72,7 @@ interface Link {
   consultoraId: string;
 }
 
-export function rotasPublicas(app: FastifyInstance, { pool, armazenamento, entorno, canal, apiPublica, ia }: Dependencias): void {
+export function rotasPublicas(app: FastifyInstance, { pool, armazenamento, entorno, canal, sala, apiPublica, ia }: Dependencias): void {
   /** Token → link válido. Desconhecido: 404; revogado ou vencido: 410 (o cliente pede um link novo à consultora). */
   async function resolver(req: FastifyRequest): Promise<Link> {
     const p = TokenLink.safeParse({ token: (req.params as { token?: string }).token });
@@ -147,6 +157,25 @@ export function rotasPublicas(app: FastifyInstance, { pool, armazenamento, entor
   app.get('/publico/links/:token/ao-vivo', limite(30, '1 minute'), async (req, reply) => {
     const l = await resolver(req);
     await transmitirPredio(req, reply, canal, { tenantId: l.tenantId, predioId: l.predioId, linkId: l.linkId });
+  });
+
+  // visita em grupo: a sala é o link (quem tem o link da família entra junto)
+  app.get('/publico/links/:token/sala', limite(30, '1 minute'), async (req, reply) => {
+    if (!sala) throw new ErroHttp(503, 'sala_indisponivel');
+    const l = await resolver(req);
+    const { nome } = NomeNaSala.parse(req.query);
+    await transmitirSala(req, reply, sala, { t: l.tenantId, l: l.linkId, nome });
+  });
+  app.post('/publico/links/:token/sala/sinal', limite(900, '1 minute', 16 * 1024), async (req, reply) => {
+    if (!sala) throw new ErroHttp(503, 'sala_indisponivel');
+    const l = await resolver(req);
+    const s = SinalSala.parse(req.body);
+    try {
+      await sala.enviar({ t: l.tenantId, l: l.linkId, de: s.de, para: s.para, tipo: s.tipo, dados: s.dados });
+    } catch {
+      throw new ErroHttp(413, 'sinal_grande_demais');
+    }
+    return reply.status(204).send();
   });
 
   app.get('/publico/links/:token/entorno', limite(60, '1 minute'), async (req) => {

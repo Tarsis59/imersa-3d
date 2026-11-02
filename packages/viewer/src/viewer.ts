@@ -76,6 +76,8 @@ export interface EstadoViewer {
   som: boolean;
   /** Móveis do apartamento decorado em que a pessoa está (0 = fora, ou unidade sem decorado). */
   decorado: number;
+  /** Pessoas da visita em grupo desenhadas no 3D. */
+  outros: number;
   /** Corretora virtual na tela (e se está falando). */
   corretora: 'fora' | 'parada' | 'falando';
   /** Modo jogo: câmera atrás do boneco (terceira pessoa). */
@@ -165,6 +167,10 @@ export interface Viewer {
    * a câmera; acena enquanto `falando`. `null` tira a corretora.
    */
   mostrarCorretora(c: { unidadeId: string | null; falando: boolean } | null): void;
+  /** Visita em grupo: os bonecos das outras pessoas na sala, nas posições que elas mandaram (andam suave até lá). */
+  definirOutros(pessoas: ReadonlyArray<{ id: string; x: number; y: number; z: number; yaw: number; boneco: string }>): void;
+  /** Minha posição a pé (para mandar à sala), ou `null` fora do modo a pé. */
+  minhaPosicao(): { x: number; y: number; z: number; yaw: number; boneco: string } | null;
   /** Fotos do imóvel com GPS: quadros no 3D onde foram tiradas. Devolve quantos quadros ficaram (perto do prédio). */
   definirFotos(fotos: readonly FotoNoLugar[]): number;
   /** Põe a imagem (link assinado) no quadro da foto. */
@@ -625,6 +631,7 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
   let andadoQuadro = 0;
   let tempoQuadro = 0;
   const raioCamera = new THREE.Raycaster();
+  const outros = new Map<string, { b: Boneco; alvo: { x: number; y: number; z: number; yaw: number }; atual: { x: number; y: number; z: number; yaw: number } }>();
   let corretora: Boneco | null = null;
   let corretoraFalando = false;
   let corretoraPos = { x: 0, z: 0 };
@@ -1195,6 +1202,7 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
       moradores: pessoas?.objeto.visible ? (pessoas.objeto.children[0] as THREE.InstancedMesh).count : 0,
       som: som.ligado(),
       decorado: decorado?.moveis ?? 0,
+      outros: outros.size,
       corretora: !corretora || !corretora.objeto.visible ? 'fora' : corretoraFalando ? 'falando' : 'parada',
       terceiraPessoa,
       boneco: presetId,
@@ -1305,6 +1313,17 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
     }
 
     atualizarRaioX(modo === 'orbita' && !emVista ? orbita.target : null);
+    // pessoas da visita em grupo: andam suave até a última posição recebida (chega a cada ~0,5 s)
+    for (const o of outros.values()) {
+      const k = 1 - Math.exp(-dtMs / 160);
+      const antes = { ...o.atual };
+      o.atual.x += (o.alvo.x - o.atual.x) * k;
+      o.atual.y += (o.alvo.y - o.atual.y) * k;
+      o.atual.z += (o.alvo.z - o.atual.z) * k;
+      o.atual.yaw += Math.atan2(Math.sin(o.alvo.yaw - o.atual.yaw), Math.cos(o.alvo.yaw - o.atual.yaw)) * k;
+      const d = Math.hypot(o.atual.x - antes.x, o.atual.z - antes.z);
+      o.b.atualizar(o.atual, { distancia: d, velocidade: dtMs > 0 ? (d * 1000) / dtMs : 0, noAr: false, acenando: 0 }, agora / 1000, menosMovimento);
+    }
     if (corretora?.objeto.visible) {
       const yaw = Math.atan2(-(camera.position.x - corretoraPos.x), -(camera.position.z - corretoraPos.z));
       corretora.atualizar({ x: corretoraPos.x, y: 0, z: corretoraPos.z, yaw }, { distancia: 0, velocidade: 0, noAr: false, acenando: corretoraFalando ? 1 : 0 }, agora / 1000, menosMovimento);
@@ -1452,6 +1471,31 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
     },
     acenar() {
       acenarAte = performance.now() + 2000;
+    },
+    definirOutros(lista) {
+      const ids = new Set(lista.map((p) => p.id));
+      for (const [id, o] of outros) {
+        if (ids.has(id)) continue;
+        cena.remove(o.b.objeto);
+        o.b.destruir();
+        outros.delete(id);
+      }
+      for (const p of lista) {
+        const alvo = { x: p.x, y: p.y, z: p.z, yaw: p.yaw };
+        const o = outros.get(p.id);
+        if (!o) {
+          const b = criarBoneco(presetBoneco(p.boneco), (m) => prepararMaterial(m));
+          cena.add(b.objeto);
+          outros.set(p.id, { b, alvo, atual: { ...alvo } });
+        } else {
+          o.alvo = alvo;
+          if (o.b.preset.id !== presetBoneco(p.boneco).id) o.b.trocar(presetBoneco(p.boneco));
+        }
+      }
+      ultimoAviso = 0;
+    },
+    minhaPosicao() {
+      return modo === 'primeira-pessoa' ? { x: pessoa.x, y: pessoa.y, z: pessoa.z, yaw: pessoa.yaw, boneco: presetId } : null;
     },
     mostrarCorretora(c) {
       if (!c) {

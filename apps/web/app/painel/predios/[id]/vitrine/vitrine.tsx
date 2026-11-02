@@ -12,6 +12,7 @@ import { InteriorSplat } from './interior';
 import { Giro360 } from './giro';
 import { Assistente, type AcaoAssistente } from './assistente';
 import { ComandoVitrine } from './comando';
+import { VisitaEmGrupo } from './visita-grupo';
 import type { AcaoComando } from '@/lib/comandos';
 import { ehPorDoSol, MISSOES, PASSEIO_M, progressoTipologias, somarCaminhada, type IdMissao } from '@/lib/missoes';
 import { SimuladorFinanciamento } from './simulador';
@@ -74,6 +75,7 @@ export function Vitrine({
   estiloDecorado,
   fotos = SEM_FOTOS,
   inicio,
+  salaUrl = null,
   lat,
   lon,
   interiores,
@@ -107,6 +109,8 @@ export function Vitrine({
   lon: number | null;
   /** Estilo do apartamento decorado gerado ao entrar numa unidade do prédio desenhado. */
   estiloDecorado?: 'moderno' | 'classico' | 'jovem';
+  /** Visita em grupo (só no link do cliente): endereço da sala na API. */
+  salaUrl?: string | null;
   /** Abrir já na vista de uma unidade e numa hora (foto pedida por texto). */
   inicio?: { unidadeId: string | null; hora: number | null };
   /** Fotos do imóvel com GPS: quadros no 3D onde foram tiradas (Plano 11c). */
@@ -883,6 +887,7 @@ export function Vitrine({
         data-fotos={qtdFotos}
         data-missoes={missoes.size}
         data-corretora={telemetria?.corretora ?? 'fora'}
+        data-outros={telemetria?.outros ?? 0}
         data-terceira={telemetria?.terceiraPessoa ? 'sim' : 'nao'}
         data-boneco={telemetria?.boneco ?? ''}
         data-no-ar={telemetria?.noAr ? 'sim' : 'nao'}
@@ -1142,6 +1147,11 @@ export function Vitrine({
                 </>
               )}
             </div>
+          </Cartao>
+        )}
+        {salaUrl && (
+          <Cartao titulo="Visita em grupo">
+            <VisitaEmGrupo url={salaUrl} viewer={viewer} pronto={estado === 'pronto'} />
           </Cartao>
         )}
         <Cartao titulo={`Missões · ${missoes.size} de ${MISSOES.length}`}>
