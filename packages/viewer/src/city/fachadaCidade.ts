@@ -51,6 +51,8 @@ export const JANELAS = { largura: 3.2, andar: 3.1, terreo: 4 } as const;
 /** Janelas acesas à noite: ligue com o fator da noite (0 de dia → 1 à noite). */
 export interface FachadaCidade {
   noite: { value: number };
+  /** 1 = apartamento falso e cortinas nas janelas (qualidade média e alta); 0 = só o vidro (barato, celular fraco). */
+  detalhe: { value: number };
 }
 
 /**
@@ -59,6 +61,7 @@ export interface FachadaCidade {
  */
 export function injetarFachada(shader: THREE.WebGLProgramParametersWithUniforms, f: FachadaCidade): void {
   shader.uniforms.uFachadaNoite = f.noite;
+  shader.uniforms.uFachadaDetalhe = f.detalhe;
   shader.vertexShader = shader.vertexShader
     .replace('#include <common>', '#include <common>\nattribute float aBase;\nvarying vec3 vFachadaMundo;\nvarying vec3 vFachadaNormal;\nvarying float vFachadaBase;')
     .replace(
@@ -66,7 +69,7 @@ export function injetarFachada(shader: THREE.WebGLProgramParametersWithUniforms,
       '#include <begin_vertex>\nvFachadaMundo = (modelMatrix * vec4(transformed, 1.0)).xyz;\nvFachadaNormal = normalize(mat3(modelMatrix) * objectNormal);\nvFachadaBase = aBase;',
     );
   shader.fragmentShader = shader.fragmentShader
-    .replace('#include <common>', '#include <common>\nvarying vec3 vFachadaMundo;\nvarying vec3 vFachadaNormal;\nvarying float vFachadaBase;\nuniform float uFachadaNoite;')
+    .replace('#include <common>', '#include <common>\nvarying vec3 vFachadaMundo;\nvarying vec3 vFachadaNormal;\nvarying float vFachadaBase;\nuniform float uFachadaNoite;\nuniform float uFachadaDetalhe;')
     .replace(
       '#include <color_fragment>',
       `#include <color_fragment>
@@ -87,7 +90,11 @@ export function injetarFachada(shader: THREE.WebGLProgramParametersWithUniforms,
       diffuseColor.rgb *= 1.0 - 0.12 * fLaje;
       // apartamento falso atrás do vidro ("interior mapping"): o raio da câmera entra numa caixa do tamanho da
       // janela com 4 m de fundo e acha piso, teto, paredes e um móvel encostado no fundo, sem geometria nenhuma
+      vec3 fInterior = vec3(0.3);
+      float fCortina = 0.0;
       vec2 fW = clamp(vec2((fDentro.x - fVao.x) / (fVao.y - fVao.x), (fDentro.y - fVao.z) / (fVao.w - fVao.z)), 0.0, 1.0);
+      // o raio por janela custa caro por pixel: só nas qualidades média e alta (no desenho por software, trava)
+      if (uFachadaDetalhe > 0.5 && fJanela > 0.0) {
       vec3 fVisao = normalize(vFachadaMundo - cameraPosition);
       vec3 fRaio = vec3(dot(fVisao.xz, fTangente) / (fLargura * (fVao.y - fVao.x)), fVisao.y / (${JANELAS.andar.toFixed(2)} * (fVao.w - fVao.z)), max(dot(fVisao, -fN), 0.02) / 4.0);
       fRaio.xy = mix(fRaio.xy, vec2(1e-4), step(abs(fRaio.xy), vec2(1e-4)));
@@ -97,12 +104,13 @@ export function injetarFachada(shader: THREE.WebGLProgramParametersWithUniforms,
       vec3 fAchou = fPonto + fRaio * fT;
       float fSala = fract(sin(dot(floor(fCelula), vec2(41.3, 289.1))) * 15731.7);
       vec3 fParedeSala = mix(vec3(0.8, 0.75, 0.68), vec3(0.7, 0.73, 0.75), fSala);
-      vec3 fInterior = fParedeSala * 0.92;
+      fInterior = fParedeSala * 0.92;
       if (fT == fAte.y) fInterior = fRaio.y < 0.0 ? mix(vec3(0.46, 0.33, 0.23), vec3(0.62, 0.6, 0.57), step(0.6, fSala)) : vec3(0.9, 0.89, 0.86);
       else if (fT == fAte.z) fInterior = fAchou.y < 0.32 ? mix(vec3(0.32, 0.36, 0.42), vec3(0.55, 0.45, 0.36), fract(fSala * 3.0)) : fParedeSala * 0.8;
       fInterior *= 1.0 - 0.4 * fAchou.z;
       // cortina em ~metade das janelas, em alturas diferentes (de cima para baixo)
-      float fCortina = fJanela * (1.0 - fVidroTodo) * step(0.5, fract(fSala * 13.0)) * step(1.0 - (0.2 + 0.65 * fract(fSala * 7.0)), fW.y);
+      fCortina = fJanela * (1.0 - fVidroTodo) * step(0.5, fract(fSala * 13.0)) * step(1.0 - (0.2 + 0.65 * fract(fSala * 7.0)), fW.y);
+      }
       float fVidro = fJanela * (1.0 - fCortina);
       vec3 fVidroCor = mix(vec3(0.07, 0.1, 0.13), vec3(0.1, 0.17, 0.2), fVidroTodo);
       // de dia o vidro reflete e o interior aparece de leve; em prédio de vidro (escritório) aparece menos

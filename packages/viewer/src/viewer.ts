@@ -383,7 +383,7 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
   let atribuicaoEntorno: string | null = null;
   // cor de cada prédio vem do vértice (acabamento real); janelas e laje no shader (ver city/fachadaCidade)
   const materialCidade = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.88, vertexColors: true });
-  const fachadaCidade = { noite: { value: 0 } };
+  const fachadaCidade = { noite: { value: 0 }, detalhe: { value: 1 } };
   prepararMaterial(materialCidade);
 
   /**
@@ -1161,6 +1161,7 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
 
   function aplicarQualidade(n: NivelQualidade): void {
     renderer.setPixelRatio(qualidade.pixelRatio(window.devicePixelRatio));
+    fachadaCidade.detalhe.value = n.nome === 'baixo' ? 0 : 1; // apartamento falso nas janelas só onde a placa aguenta
     renderer.shadowMap.enabled = n.sombras;
     for (const l of csm.lights) {
       l.castShadow = n.sombras;

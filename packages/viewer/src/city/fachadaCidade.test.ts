@@ -30,7 +30,8 @@ describe('fachada da cidade', () => {
   it('o shader do three tem todos os pontos de encaixe (senão a fachada sumiria sem aviso)', () => {
     const shader = { uniforms: {}, vertexShader: THREE.ShaderLib.physical.vertexShader, fragmentShader: THREE.ShaderLib.physical.fragmentShader } as unknown as THREE.WebGLProgramParametersWithUniforms;
     const noite = { value: 0.7 };
-    injetarFachada(shader, { noite });
+    injetarFachada(shader, { noite, detalhe: { value: 1 } });
+    expect(shader.fragmentShader).toContain('if (uFachadaDetalhe > 0.5 && fJanela > 0.0)');
     expect(shader.vertexShader).toContain('attribute float aBase;');
     expect(shader.vertexShader).toContain('vFachadaBase = aBase;');
     for (const trecho of ['float fJanela', 'roughnessFactor = mix(roughnessFactor, 0.12, fVidro)', 'metalnessFactor = mix(metalnessFactor, 0.3, fVidro)', 'totalEmissiveRadiance += fLuz * fJanela']) {
