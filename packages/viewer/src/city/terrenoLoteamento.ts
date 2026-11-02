@@ -2,13 +2,15 @@ import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { lonLatToLocal, type LonLat } from '../geo/project';
 import { construirArvores, escolherEspecie, type ArvoresConstruidas, type DescricaoArvore } from '../ambiente/vegetacao';
-import { fita, paraModelo, type Xz } from './cidade';
+import { fita, paraModelo, poligono, type Xz } from './cidade';
 
 /**
  * Terreno e infraestrutura do loteamento (Plano 12d, item 8): ruas, meio-fio, calçadas e árvores da região, lidos
  * do mesmo DXF dos lotes (ver `apps/api/.../loteamento/terreno.ts`); relevo das curvas de nível quando houver, ou o
  * relevo AWS que o viewer já tem (ver `terrenoDoRelevo`, em `cidade.ts`). Reaproveita a fita/árvore da cidade
  * completa (mesmo desenho, menos malhas) — por isso não "parece tabuleiro" mesmo sem o entorno real carregado.
+ * `criarGramado`, abaixo, cobre os lotes com chão verde (ver seu comentário): sem ele os lotes flutuam sobre o chão
+ * genérico cinza do viewer, que é só a base até o horizonte, não um gramado.
  */
 export interface TerrenoLoteamentoLido {
   ruas: ReadonlyArray<ReadonlyArray<readonly [number, number]>>;
@@ -26,6 +28,11 @@ export interface TerrenoLoteamento {
   destruir(): void;
 }
 
+export interface GramadoLoteamento {
+  objeto: THREE.Mesh;
+  destruir(): void;
+}
+
 const LARGURA_RUA_M = 7;
 const LARGURA_CALCADA_M = 1.5;
 const LARGURA_MEIO_FIO_M = 0.3;
@@ -33,6 +40,14 @@ const LARGURA_MEIO_FIO_M = 0.3;
 const ESPACO_ARVORES_M = 8;
 /** Mudas saem do viveiro nessa altura, em qualquer espécie (item 10); acima disso, interpola até a altura adulta. */
 export const ALTURA_MUDA_M = 1.5;
+/**
+ * Margem do gramado (bugfix das capturas de CI, Plano 12e) além da caixa dos lotes/rua: sem isso os lotes "flutuam"
+ * sobre o chão genérico cinza (sem grama nem cidade ao redor para dar escala). Cobre também a rua quando ela sai da
+ * caixa dos lotes (como no DXF de teste, onde a rua fica só do lado leste).
+ */
+const MARGEM_GRAMADO_M = 12;
+/** Verde do gramado: mesmo tom do paisagismo do prédio (`ambiente/paisagismo.ts`), para o chão ficar igual. */
+const COR_GRAMADO = 0x6a9442;
 
 const ruido = (x: number, z: number) => {
   const s = Math.sin(x * 12.9898 + z * 78.233) * 43758.5453;
@@ -165,6 +180,37 @@ export function criarTerreno(terreno: TerrenoLoteamentoLido, centro: LonLat, rot
       for (const g of geos) g.dispose();
       for (const m of materiais) m.dispose();
       if (construidas) construidas.destruir();
+    },
+  };
+}
+
+/**
+ * Gramado do loteamento (bugfix das capturas de CI, Plano 12e): chão verde cobrindo os lotes e a rua/calçada, com
+ * margem (`MARGEM_GRAMADO_M`); sem ele os lotes ficam flutuando sobre o chão genérico cinza do viewer (sem grama
+ * nem cidade ao redor para dar escala — o loteamento não tem `paisagismo.ts`, que é por prédio). `caixa` é quem
+ * chama que decide (normalmente a caixa dos lotes, ou a união dela com a da rua quando a rua sai da caixa dos lotes).
+ */
+export function criarGramado(caixa: { minX: number; maxX: number; minZ: number; maxZ: number }, altura: (x: number, z: number) => number, preparar: (m: THREE.Material) => void): GramadoLoteamento {
+  const contorno: Xz[] = [
+    { x: caixa.minX - MARGEM_GRAMADO_M, z: caixa.minZ - MARGEM_GRAMADO_M },
+    { x: caixa.maxX + MARGEM_GRAMADO_M, z: caixa.minZ - MARGEM_GRAMADO_M },
+    { x: caixa.maxX + MARGEM_GRAMADO_M, z: caixa.maxZ + MARGEM_GRAMADO_M },
+    { x: caixa.minX - MARGEM_GRAMADO_M, z: caixa.maxZ + MARGEM_GRAMADO_M },
+  ];
+  // acima do chão genérico do viewer (y = 0, uma base cinza até o horizonte, sem relevo) e abaixo da rua (que
+  // começa em 0.05, ver `camada` acima): senão o chão genérico cobre o gramado por cima e ele não aparece.
+  const geo = poligono(contorno, altura, 0.02) ?? new THREE.BufferGeometry();
+  geo.computeVertexNormals();
+  const material = new THREE.MeshStandardMaterial({ color: COR_GRAMADO, roughness: 0.96, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 });
+  preparar(material);
+  const malha = new THREE.Mesh(geo, material);
+  malha.name = 'gramado-loteamento';
+  malha.receiveShadow = true;
+  return {
+    objeto: malha,
+    destruir() {
+      geo.dispose();
+      material.dispose();
     },
   };
 }

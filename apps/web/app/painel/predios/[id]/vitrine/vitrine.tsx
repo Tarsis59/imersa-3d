@@ -1188,7 +1188,9 @@ export function Vitrine({
                 </button>
               </div>
             )}
-            <span className="pointer-events-none absolute bottom-2 left-2 rounded bg-black/45 px-1.5 py-0.5 text-[10px] text-white/90">Imagens meramente ilustrativas</span>
+            {/* no celular os créditos do mapa (abaixo) quebram em 2 linhas e cobririam o aviso na mesma faixa; a partir do sm
+                (tablet/computador) cabem lado a lado, então volta para a mesma linha dos créditos */}
+            <span className="pointer-events-none absolute bottom-12 left-2 rounded bg-black/45 px-1.5 py-0.5 text-[10px] text-white/90 sm:bottom-2">Imagens meramente ilustrativas</span>
           </>
         )}
         {apresentando && <Apresentacao unidade={unidadesAtuais.find((u) => u.id === vitrineDaVez) ?? null} nomeAndar={(n) => nomeAndar.get(n) ?? `${n}º andar`} />}

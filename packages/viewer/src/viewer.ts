@@ -18,7 +18,7 @@ import { entornoParaLocal, type Entorno } from './city/entorno';
 import { criarCidade, fita, paraModelo, terrenoDoRelevo, type CidadeCompleta } from './city/cidade';
 import { criarCarros, pistasDeVias, planejarCarros, CARROS_POR_NIVEL, type Carros } from './city/carros';
 import { criarLotes, DETALHE_VARREDURA, type LoteViewer, type LotesNoChao } from './city/lotes';
-import { criarTerreno, type TerrenoLoteamento, type TerrenoLoteamentoLido } from './city/terrenoLoteamento';
+import { criarGramado, criarTerreno, type GramadoLoteamento, type TerrenoLoteamento, type TerrenoLoteamentoLido } from './city/terrenoLoteamento';
 import { construirCasaModelo, type CasaModelo } from './city/casaModelo';
 import { montarDecorado, planejarDecorado, type Decorado, type EstiloDecorado } from './interior/decorado';
 import { criarQuadros, planejarQuadros, type FotoNoLugar, type QuadrosDeFoto } from './ambiente/fotos';
@@ -904,6 +904,35 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
   let terrenoLote: TerrenoLoteamento | null = null;
   // casa-modelo no lote (Plano 12d, item 9)
   let casaModelo: CasaModelo | null = null;
+  // gramado do loteamento (bugfix das capturas de CI): chão verde sob os lotes e a rua, ver `atualizarGramadoLoteamento`
+  let gramadoLote: GramadoLoteamento | null = null;
+
+  /**
+   * Refaz o gramado do loteamento com a caixa dos lotes + a da rua/calçada/meio-fio (se já tiver chegado): sem
+   * isso os lotes ficam flutuando sobre o chão genérico cinza do viewer. Chamado de `definirLotes` e
+   * `definirTerrenoLoteamento` (a ordem entre os dois não é garantida: cada um refaz com o que já existir).
+   */
+  function atualizarGramadoLoteamento(): void {
+    if (gramadoLote) {
+      gramadoLote.objeto.removeFromParent();
+      gramadoLote.destruir();
+      gramadoLote = null;
+    }
+    if (!loteamento) return;
+    const caixa = { ...loteamento.caixa };
+    if (terrenoLote) {
+      const bboxTerreno = new THREE.Box3().setFromObject(terrenoLote.objeto);
+      if (Number.isFinite(bboxTerreno.min.x) && bboxTerreno.min.x <= bboxTerreno.max.x) {
+        caixa.minX = Math.min(caixa.minX, bboxTerreno.min.x);
+        caixa.maxX = Math.max(caixa.maxX, bboxTerreno.max.x);
+        caixa.minZ = Math.min(caixa.minZ, bboxTerreno.min.z);
+        caixa.maxZ = Math.max(caixa.maxZ, bboxTerreno.max.z);
+      }
+    }
+    const altura = terrenoLote?.altura ?? cidadeCompleta?.terreno.altura ?? (() => 0);
+    gramadoLote = criarGramado(caixa, altura, (m) => prepararMaterial(m));
+    cena.add(gramadoLote.objeto);
+  }
 
   // loteamento (Plano 12d)
   let loteamento: LotesNoChao | null = null;
@@ -1866,7 +1895,10 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
       }
       statusLotes.clear();
       nomesLotes.clear();
-      if (!lotes.length) return 0;
+      if (!lotes.length) {
+        atualizarGramadoLoteamento(); // sem lotes: tira o gramado que sobrou (loteamento já é null acima)
+        return 0;
+      }
       for (const l of lotes) {
         statusLotes.set(l.id, l.status);
         nomesLotes.set(l.id, `Lote ${l.numero}`);
@@ -1876,6 +1908,7 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
       // loteamento não tem torre: o jardim e a fachada do "prédio" vazio sairiam por cima dos lotes
       if (paisagismo) paisagismo.objeto.visible = false;
       if (raizPredio) raizPredio.visible = false;
+      atualizarGramadoLoteamento(); // chão verde sob os lotes (e a rua, se já tiver chegado) — ver seu comentário
       loteamento.pintar(statusLotes, passamLotes);
       numerarLotes();
       iniciarVarredura(); // Plano 12d, item 4: o buscador "abre" com os lotes aparecendo com a varredura em ciano
@@ -1937,9 +1970,13 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
         terrenoLote.destruir();
         terrenoLote = null;
       }
-      if (!terreno) return;
+      if (!terreno) {
+        atualizarGramadoLoteamento(); // sem terreno: o gramado volta a cobrir só a caixa dos lotes
+        return;
+      }
       terrenoLote = criarTerreno(terreno, { lon, lat }, rotacao, cidadeCompleta?.terreno.altura ?? (() => 0), (m) => prepararMaterial(m));
       cena.add(terrenoLote.objeto);
+      atualizarGramadoLoteamento(); // a rua pode sair da caixa dos lotes (como no DXF de teste): refaz o gramado maior
     },
     definirIdadeArvoresLoteamento(anos) {
       terrenoLote?.definirIdadeArvores(anos);
