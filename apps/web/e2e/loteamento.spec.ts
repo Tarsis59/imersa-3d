@@ -67,13 +67,29 @@ test('loteamento: DXF do parcelamento → prévia → lotes gravados → Vitrine
   await expect(card).toContainText('Leste');
   await expect(card).toContainText('sol da manhã');
   // "Ver daqui" (Plano 12d, item 11): câmera na calçada do lote, olhos a 1,60 m
+  await expect(vitrine).toHaveAttribute('data-placas-lotes', 'sim');
   await card.getByTestId('ver-daqui').click();
   await expect(vitrine).toHaveAttribute('data-vista-lote', /.+/);
+  // na altura dos olhos as placas de quadra/lote (feitas para a vista de cima) saem da frente
+  await expect(vitrine).toHaveAttribute('data-placas-lotes', 'nao');
   // casa-modelo (Plano 12d, item 9): botão no card coloca a casa nas medidas do lote, com os recuos
   await card.getByTestId('casa-modelo').click();
   await expect(vitrine).toHaveAttribute('data-casa-modelo', /.+/);
+  await expect(vitrine).toHaveAttribute('data-casa-modelo-3d', 'sim');
   await card.getByTestId('casa-modelo').click(); // alterna: tira a casa de novo
   await expect(vitrine).toHaveAttribute('data-casa-modelo', '');
+  await expect(vitrine).toHaveAttribute('data-casa-modelo-3d', 'nao');
+  // fechar o lote com a casa à mostra, na vista da calçada: a casa sai do 3D e a câmera volta à visão geral dos lotes
+  await card.getByTestId('casa-modelo').click();
+  await expect(vitrine).toHaveAttribute('data-casa-modelo-3d', 'sim');
+  await card.getByRole('button', { name: 'Fechar o lote' }).click();
+  await expect(vitrine).toHaveAttribute('data-casa-modelo-3d', 'nao');
+  await expect(vitrine).toHaveAttribute('data-casa-modelo', '');
+  await expect(vitrine).toHaveAttribute('data-vista-lote', '');
+  await expect(vitrine).toHaveAttribute('data-placas-lotes', 'sim');
+  // reabre o lote para as verificações seguintes
+  await busca.getByTestId('lista-lotes').getByRole('button', { name: /Q02 · L01/ }).click();
+  await expect(card).toContainText('360 m²');
   // terreno e infraestrutura (Plano 12d, item 8): o DXF trouxe rua, calçada e meio-fio, então o controle aparece
   await expect(vitrine).toHaveAttribute('data-anos', '10'); // padrão: árvores adultas
   const anos = page.getByTestId('daqui-a-10-anos');

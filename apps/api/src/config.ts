@@ -36,6 +36,8 @@ const Esquema = z.object({
   LIMITE_ARMAZENAMENTO_GB: z.coerce.number().positive().optional(),
   /** Identificação exigida pelo Nominatim/Overpass (em produção: nome e contato reais). */
   OSM_USER_AGENT: z.string().optional(),
+  /** Servidores do Overpass separados por vírgula, na ordem de tentativa (sem ele: o principal e dois espelhos públicos). */
+  OVERPASS_URLS: z.string().optional(),
   /** Arquivo do Overpass já baixado: prédios do entorno sem internet (testes e demonstração). */
   MAPA_ARQUIVO_PREDIOS: z.string().optional(),
   /** Pasta com blocos de relevo já baixados (z-x-y.png); sem ela, o relevo vem dos Terrain Tiles da AWS. */

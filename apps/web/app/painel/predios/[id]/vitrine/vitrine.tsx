@@ -983,9 +983,17 @@ export function Vitrine({
     setVistaLote(null);
     setPasseio3D(null);
     setCasaModeloLote(null);
+    viewer.current?.mostrarCasaModelo(null); // o botão volta a "Casa-modelo": a casa sai do 3D junto
     setInterior(null);
     viewer.current?.visaoGeral();
   }
+  // fechar o lote ou trocar de lote tira a casa-modelo do anterior (senão ela ficava na cena com o botão já desligado)
+  useEffect(() => {
+    if (casaModeloLote && casaModeloLote !== loteSelecionado) {
+      viewer.current?.mostrarCasaModelo(null);
+      setCasaModeloLote(null);
+    }
+  }, [loteSelecionado, casaModeloLote]);
   const verLote = (id: string) => {
     if (viewer.current?.verLote(id)) setVistaLote(id);
   };
@@ -1078,6 +1086,8 @@ export function Vitrine({
         data-passeio-3d={passeio3D ?? ''}
         data-anos={terreno ? anosArvores : ''}
         data-casa-modelo={casaModeloLote ?? ''}
+        data-casa-modelo-3d={telemetria?.casaModelo ? 'sim' : 'nao'}
+        data-placas-lotes={telemetria?.placasLotes ? 'sim' : 'nao'}
         data-carros={telemetria?.carros ?? 0}
         data-nuvens={telemetria?.nuvens ? 'sim' : 'nao'}
         data-verticais={telemetria?.verticaisRetas ? 'sim' : 'nao'}
@@ -1417,7 +1427,10 @@ export function Vitrine({
             filtro={filtroLotes}
             aoFiltrar={setFiltroLotes}
             selecionado={loteSelecionado}
-            aoSelecionar={setLoteSelecionado}
+            aoSelecionar={(id) => {
+              if (id === null && vistaLote) visaoGeral(); // fechar o lote na vista da calçada volta à visão geral
+              setLoteSelecionado(id);
+            }}
             corretor={corretor}
             vistaLote={vistaLote}
             aoVerDaqui={verLote}
