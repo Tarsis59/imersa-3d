@@ -381,6 +381,7 @@ export async function construirApp({ pool, config, logger = false, reportarErro,
   const mapaReal = servicosMapaReais(
     config.OSM_USER_AGENT ?? 'Imersa3D-dev/0.1 (ambiente de desenvolvimento)',
     config.OVERPASS_URLS?.split(',').map((u) => u.trim()).filter(Boolean),
+    (m) => app.log.warn(m),
   );
   const doArquivo = config.MAPA_ARQUIVO_PREDIOS ? comPrediosDeArquivo(mapaReal, config.MAPA_ARQUIVO_PREDIOS) : mapaReal;
   const servicosMapa = mapa ?? (config.MAPA_PASTA_RELEVO ? comRelevoDePasta(doArquivo, config.MAPA_PASTA_RELEVO) : doArquivo);
@@ -410,7 +411,7 @@ export async function construirApp({ pool, config, logger = false, reportarErro,
   app.addHook('preClose', async () => sala.fechar());
   const apiPublica = config.API_URL_PUBLICA ?? `http://localhost:${config.PORT}`;
   rotasAoVivo(app, { pool, exigir, canal, segredo: config.JWT_SECRET, apiPublica });
-  rotasPublicas(app, { pool, armazenamento: arm, entorno: criarEntorno(pool, servicosMapa), canal, sala, apiPublica, ia });
+  rotasPublicas(app, { pool, armazenamento: arm, entorno: criarEntorno(pool, servicosMapa, (m) => app.log.warn(m)), canal, sala, apiPublica, ia });
   rotasIntegracoes(app, { pool, exigir, chaveCifra: config.TOTP_KEY, permitirLocal: config.WEBHOOK_PERMITIR_LOCAL });
   rotasLazer(app, { pool, exigir });
   rotasLotes(app, { pool, exigir });

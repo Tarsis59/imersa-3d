@@ -47,13 +47,28 @@ const REPETIR_RELEVO_H = 6;
 const REPETIR_MALHA_MIN = 10;
 
 type Contexto = { tenantId: string; userId: string | null };
+type Entorno = { semLocalizacao: boolean; centro: { lat: number; lon: number } | null; predios: PredioOsm[]; vias: Via[]; areas: Area[]; relevo: Relevo | null; atualizadoEm: Date | null; atribuicao: string };
+
+/**
+ * Consultas ao OSM em andamento, por projeto (valem para todas as instâncias de `criarEntorno` do processo): visitas
+ * ao mesmo tempo esperam a mesma consulta em vez de enfileirar outra igual atrás dela na fila do Overpass.
+ */
+const buscandoEntorno = new Map<string, Promise<Entorno>>();
+/** Projetos cujas ruas/relevo estão sendo completados por trás (a visita não espera por isso). */
+const completandoCidade = new Map<string, Promise<void>>();
+
+/** Para os testes esperarem o complemento por trás terminar. */
+export function esperarComplementos(): Promise<unknown> {
+  return Promise.all(completandoCidade.values());
+}
 
 /** Entorno do projeto (cache no banco; consulta o OSM quando falta ou o projeto mudou de lugar). Usado pelo painel e pelo portal público. */
-export function criarEntorno(pool: pg.Pool, mapa: ServicosMapa) {
+export function criarEntorno(pool: pg.Pool, mapa: ServicosMapa, aviso: (msg: string) => void = () => {}) {
   async function buscarPredios(centro: { lat: number; lon: number }): Promise<PredioOsm[]> {
     try {
       return await mapa.buscarPredios(centro.lat, centro.lon, RAIO_ENTORNO_M);
-    } catch {
+    } catch (e) {
+      aviso(`entorno: prédios do OSM não vieram (${(e as Error).message})`);
       throw new ErroHttp(502, 'servico_mapa_indisponivel');
     }
   }
@@ -64,8 +79,12 @@ export function criarEntorno(pool: pg.Pool, mapa: ServicosMapa) {
    */
   async function buscarCidade(centro: { lat: number; lon: number }): Promise<{ vias: Via[] | null; areas: Area[] | null; relevo: Relevo | null }> {
     const [malha, relevo] = await Promise.all([
-      mapa.buscarMalha ? mapa.buscarMalha(centro.lat, centro.lon, RAIO_CIDADE_M).catch(() => null) : Promise.resolve(null),
-      mapa.buscarRelevo ? mapa.buscarRelevo(centro.lat, centro.lon, RAIO_CIDADE_M).catch(() => null) : Promise.resolve(null),
+      mapa.buscarMalha
+        ? mapa.buscarMalha(centro.lat, centro.lon, RAIO_CIDADE_M).catch((e: Error) => (aviso(`entorno: ruas e verde do OSM não vieram (${e.message})`), null))
+        : Promise.resolve(null),
+      mapa.buscarRelevo
+        ? mapa.buscarRelevo(centro.lat, centro.lon, RAIO_CIDADE_M).catch((e: Error) => (aviso(`entorno: relevo não veio (${e.message})`), null))
+        : Promise.resolve(null),
     ]);
     return { vias: malha?.vias ?? null, areas: malha?.areas ?? null, relevo };
   }
@@ -86,7 +105,21 @@ export function criarEntorno(pool: pg.Pool, mapa: ServicosMapa) {
       ],
     );
 
-  async function obter(contexto: Contexto, id: string) {
+  /** Ruas/relevo que faltam no cache: busca por trás e guarda; a visita leva o que já há, sem esperar a fila do mapa. */
+  function completarCidade(contexto: Contexto, id: string, centro: { lat: number; lon: number }, cache: { predios: PredioOsm[]; vias: Via[] | null; areas: Area[] | null; relevo: Relevo | null }) {
+    if (completandoCidade.has(id)) return;
+    const tarefa = (async () => {
+      const cidade = await buscarCidade(centro);
+      await withTenant(pool, contexto, (c) =>
+        gravar(c, id, centro, cache.predios, { vias: cache.vias ?? cidade.vias, areas: cache.areas ?? cidade.areas, relevo: cache.relevo ?? cidade.relevo }),
+      );
+    })()
+      .catch((e: Error) => aviso(`entorno: complemento da cidade falhou (${e.message})`))
+      .finally(() => completandoCidade.delete(id));
+    completandoCidade.set(id, tarefa);
+  }
+
+  async function obter(contexto: Contexto, id: string): Promise<Entorno> {
     const { centro, cache } = await withTenant(pool, contexto, async (c) => {
       const centro = await localizacao(c, id);
       if (!centro) return { centro, cache: undefined };
@@ -99,21 +132,21 @@ export function criarEntorno(pool: pg.Pool, mapa: ServicosMapa) {
     });
     if (!centro) return { semLocalizacao: true, centro: null, predios: [], vias: [], areas: [], relevo: null, atualizadoEm: null, atribuicao: ATRIBUICAO_OSM };
     if (cache && cache.raio === RAIO_ENTORNO_M && cache.desvio <= DESVIO_MAX_CACHE_M) {
-      let { vias, areas, relevo } = cache;
-      // cache de antes da cidade completa (ou relevo que falhou há tempo): completa agora, sem refazer os prédios
+      const { vias, areas, relevo } = cache;
+      // cache de antes da cidade completa (ou relevo que falhou há tempo): completa por trás, sem refazer os prédios
       const idadeMs = Date.now() - new Date(cache.atualizadoEm).getTime();
-      if ((vias === null && idadeMs > REPETIR_MALHA_MIN * 60_000) || (relevo === null && idadeMs > REPETIR_RELEVO_H * 3_600_000)) {
-        const cidade = await buscarCidade(centro);
-        vias = vias ?? cidade.vias;
-        areas = areas ?? cidade.areas;
-        relevo = relevo ?? cidade.relevo;
-        await withTenant(pool, contexto, (c) => gravar(c, id, centro, cache.predios, { vias, areas, relevo }));
-      }
+      if ((vias === null && idadeMs > REPETIR_MALHA_MIN * 60_000) || (relevo === null && idadeMs > REPETIR_RELEVO_H * 3_600_000)) completarCidade(contexto, id, centro, cache);
       return { semLocalizacao: false, centro, predios: cache.predios, vias: vias ?? [], areas: areas ?? [], relevo, atualizadoEm: cache.atualizadoEm, atribuicao: ATRIBUICAO_COMPLETA };
     }
-    const [predios, cidade] = await Promise.all([buscarPredios(centro), buscarCidade(centro)]);
-    await withTenant(pool, contexto, (c) => gravar(c, id, centro, predios, cidade));
-    return { semLocalizacao: false, centro, predios, vias: cidade.vias ?? [], areas: cidade.areas ?? [], relevo: cidade.relevo, atualizadoEm: new Date(), atribuicao: ATRIBUICAO_COMPLETA };
+    const emCurso = buscandoEntorno.get(id);
+    if (emCurso) return emCurso;
+    const busca = (async (): Promise<Entorno> => {
+      const [predios, cidade] = await Promise.all([buscarPredios(centro), buscarCidade(centro)]);
+      await withTenant(pool, contexto, (c) => gravar(c, id, centro, predios, cidade));
+      return { semLocalizacao: false, centro, predios, vias: cidade.vias ?? [], areas: cidade.areas ?? [], relevo: cidade.relevo, atualizadoEm: new Date(), atribuicao: ATRIBUICAO_COMPLETA };
+    })().finally(() => buscandoEntorno.delete(id));
+    buscandoEntorno.set(id, busca);
+    return busca;
   }
 
   return { obter, buscarPredios, buscarCidade, gravar };
@@ -206,7 +239,7 @@ export async function importarPoisOsm(pool: pg.Pool, mapa: ServicosMapa, context
 }
 
 export function rotasMapa(app: FastifyInstance, { pool, exigir, mapa }: Dependencias): void {
-  const entorno = criarEntorno(pool, mapa);
+  const entorno = criarEntorno(pool, mapa, (m) => app.log.warn(m));
 
   app.get('/projetos/:id/entorno', async (req) => {
     const s = await exigir(req, 'projeto:ler');
