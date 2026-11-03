@@ -101,6 +101,8 @@ export function filaOverpass(
   fazer: (consulta: string, tempoMs: number, tentativa: number) => Promise<Response>,
   esperas: readonly number[] = [2_000, 6_000],
   servidores = 1,
+  /** Cada tentativa que falhou (para o log dizer qual servidor e por quê). */
+  aviso: (tentativa: number, motivo: string) => void = () => {},
 ) {
   let corrente: Promise<unknown> = Promise.resolve();
   return <T>(consulta: string, tempoMs: number, ler: (json: unknown) => T): Promise<T> => {
@@ -111,13 +113,16 @@ export function filaOverpass(
           const r = await fazer(consulta, tempoMs, tentativa);
           if (r.ok) return ler(await r.json());
           motivo = `Overpass respondeu ${r.status}`;
-          if (r.status !== 429 && r.status < 500) throw new Error(motivo);
+          aviso(tentativa, motivo);
+          // consulta errada (400) não melhora repetindo; outra recusa (403 do endereço da nuvem, por exemplo) só
+          // melhora noutro servidor
+          if (r.status === 400 || (r.status !== 429 && r.status < 500 && tentativa + 1 >= servidores)) throw new Error(motivo);
         } catch (e) {
-          // consulta errada (4xx) não melhora repetindo; e quem já esperou o tempo todo só tenta de novo num
-          // servidor que ainda não foi tentado
-          if ((e as Error).message?.startsWith('Overpass respondeu 4')) throw e;
-          if ((e as Error).name === 'TimeoutError' && tentativa + 1 >= servidores) throw e;
+          if ((e as Error).message?.startsWith('Overpass respondeu')) throw e;
           motivo = (e as Error).message;
+          aviso(tentativa, motivo);
+          // quem já esperou o tempo todo só tenta de novo num servidor que ainda não foi tentado
+          if ((e as Error).name === 'TimeoutError' && tentativa + 1 >= servidores) throw e;
         }
         if (tentativa >= esperas.length) throw new Error(motivo);
         await new Promise((ok) => setTimeout(ok, esperas[tentativa]));
@@ -209,7 +214,7 @@ export const SERVIDORES_OVERPASS = [
 ] as const;
 
 /** Serviços reais do OpenStreetMap. `userAgent` deve identificar a empresa (exigência do Nominatim). */
-export function servicosMapaReais(userAgent: string, servidores: readonly string[] = SERVIDORES_OVERPASS): ServicosMapa {
+export function servicosMapaReais(userAgent: string, servidores: readonly string[] = SERVIDORES_OVERPASS, aviso: (msg: string) => void = () => {}): ServicosMapa {
   const fila = espacar(1100);
   const lista = servidores.length ? servidores : SERVIDORES_OVERPASS;
   const overpass = filaOverpass(
@@ -222,6 +227,7 @@ export function servicosMapaReais(userAgent: string, servidores: readonly string
       }),
     [2_000, 6_000],
     lista.length,
+    (tentativa, motivo) => aviso(`Overpass ${new URL(lista[tentativa % lista.length]!).host} falhou: ${motivo}`),
   );
   return {
     buscarEndereco: (texto) =>

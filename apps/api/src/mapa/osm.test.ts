@@ -211,6 +211,23 @@ describe('filaOverpass (o mapa público cheio não derruba a criação)', () => 
     expect(usados).toEqual([0, 1, 2]);
   });
 
+  it('com espelhos: recusa do principal (403, endereço da nuvem bloqueado) vai para o espelho; cada falha é avisada', async () => {
+    const avisos: string[] = [];
+    const fila = filaOverpass(
+      async (_q, _t, tentativa) => (tentativa === 0 ? resposta(403) : resposta(200, { elements: [1] })),
+      [1, 1],
+      3,
+      (tentativa, motivo) => avisos.push(`${tentativa}: ${motivo}`),
+    );
+    await expect(fila('q', 1000, (j) => (j as { elements: number[] }).elements.length)).resolves.toBe(1);
+    expect(avisos).toEqual(['0: Overpass respondeu 403']);
+    // sem espelho, a mesma recusa desiste na hora
+    let chamadas = 0;
+    const so = filaOverpass(async () => (chamadas++, resposta(403)), [1, 1]);
+    await expect(so('q', 1000, () => 0)).rejects.toThrow('Overpass respondeu 403');
+    expect(chamadas).toBe(1);
+  });
+
   it('com espelhos: o tempo estourado em todos desiste no último', async () => {
     let chamadas = 0;
     const lenta = filaOverpass(

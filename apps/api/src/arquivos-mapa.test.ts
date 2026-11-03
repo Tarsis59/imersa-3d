@@ -15,6 +15,7 @@ import { processarProxima, type Reconstrutor } from './capturas/worker';
 import { processarProximaConversao, type ConversorBim } from './bim/worker';
 import type { ServicosMapa } from './mapa/osm';
 import type { Config } from './config';
+import { esperarComplementos } from './rotas/mapa';
 
 // Banco próprio deste arquivo (os arquivos de teste rodam em paralelo).
 const OWNER = process.env.TEST_API3_DATABASE_URL_OWNER ?? 'postgres://imersa_owner:imersa_owner_dev@localhost:55432/imersa_test_api_3';
@@ -333,11 +334,26 @@ describe('entorno: prédios reais do OSM em volta (com cache)', () => {
     } finally {
       malhaFora = false;
     }
-    // passados 10 min, a próxima visita busca de novo e as ruas aparecem (e ficam guardadas)
+    // passados 10 min, a próxima visita busca de novo por trás (sem esperar o mapa) e as ruas ficam guardadas
     await owner.query("UPDATE entornos SET atualizado_em = now() - interval '11 minutes' WHERE project_id = $1", [q]);
-    const r2 = await req('GET', `/projetos/${q}/entorno`, undefined, admin);
-    expect(r2.json.vias).toHaveLength(1);
+    const antes = chamadasMalha;
+    const [r2, r3] = await Promise.all([req('GET', `/projetos/${q}/entorno`, undefined, admin), req('GET', `/projetos/${q}/entorno`, undefined, admin)]);
+    expect(r2.status).toBe(200);
+    expect(r3.status).toBe(200);
+    await esperarComplementos();
+    // duas visitas juntas pedem as ruas uma vez só
+    expect(chamadasMalha).toBe(antes + 1);
     expect((await owner.query('SELECT jsonb_array_length(vias) AS n FROM entornos WHERE project_id = $1', [q])).rows[0].n).toBe(1);
+    expect((await req('GET', `/projetos/${q}/entorno`, undefined, admin)).json.vias).toHaveLength(1);
+  });
+
+  it('visitas juntas sem cache esperam a mesma consulta dos prédios', async () => {
+    const q = (await req('POST', '/projetos', { nome: 'Visitas juntas' }, admin)).json.id;
+    await req('PATCH', `/projetos/${q}`, { lat: -23.58, lon: -46.63 }, admin);
+    const antes = chamadasPredios;
+    const rs = await Promise.all([1, 2, 3].map(() => req('GET', `/projetos/${q}/entorno`, undefined, admin)));
+    expect(rs.map((r) => r.status)).toEqual([200, 200, 200]);
+    expect(chamadasPredios).toBe(antes + 1);
   });
 
   it('rota a pé desenhada até o ponto: painel e link do cliente; ponto de outro projeto = 404', async () => {
