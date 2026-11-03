@@ -31,7 +31,7 @@ from pathlib import Path
 from .kaggle_cli import KaggleCli
 from .pipeline import RAIZ, ErroPipeline, Nuvem
 
-PADRAO = {"largura": 1024, "amostras": 128}
+PADRAO = {"largura": 1024, "amostras": 64}  # poucas amostras + denoise do compositor (ver kaggle/bake_blender.py)
 #: o GLB assado vai para o navegador (celular): acima disso fica pesado demais para abrir
 MAX_GLB_MB = 80
 _JSON, _BIN = 0x4E4F534A, 0x004E4942

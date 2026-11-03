@@ -19,8 +19,8 @@ def _glb_json_only(doc: dict) -> bytes:
     return b"glTF" + struct.pack("<II", 2, 12 + len(corpo)) + corpo
 
 
-def _cubo(tmp_path: Path) -> Path:
-    """GLB com 1 cubo (1 m lado), 1 material, UV0 e um bloco BIN de verdade."""
+def _cubo(tmp_path: Path, com_uv: bool = True, ifc: str | None = None) -> Path:
+    """GLB com 1 cubo (1 m lado), 1 material, UV0 (ou sem UV nenhuma, como sai do BIM) e um bloco BIN de verdade."""
     v = np.array([[x, y, z] for x in (0, 1) for y in (0, 1) for z in (0, 1)], np.float32)
     f = np.array([0, 1, 3, 0, 3, 2, 4, 6, 7, 4, 7, 5, 0, 4, 5, 0, 5, 1, 2, 3, 7, 2, 7, 6, 0, 2, 6, 0, 6, 4, 1, 5, 7, 1, 7, 3], np.uint16)
     uv = np.tile(np.array([[0, 0], [1, 0], [0, 1], [1, 1]], np.float32), (6, 1))[: len(v)]
@@ -29,8 +29,8 @@ def _cubo(tmp_path: Path) -> Path:
         "asset": {"version": "2.0"},
         "scene": 0,
         "scenes": [{"nodes": [0]}],
-        "nodes": [{"name": "fachada", "mesh": 0}],
-        "meshes": [{"primitives": [{"attributes": {"POSITION": 0, "TEXCOORD_0": 2}, "indices": 1, "material": 0}]}],
+        "nodes": [{"name": "fachada", "mesh": 0, **({"extras": {"ifc": ifc}} if ifc else {})}],
+        "meshes": [{"primitives": [{"attributes": {"POSITION": 0, "TEXCOORD_0": 2} if com_uv else {"POSITION": 0}, "indices": 1, "material": 0}]}],
         # metallicFactor explícito: o padrão do glTF é 1.0 (metal puro, sem componente difusa) — o cubo do teste
         # precisa ser dielétrico para o bake de luz difusa (dia/noite) ter algo para medir
         "materials": [{"name": "concreto", "pbrMetallicRoughness": {"baseColorFactor": [0.7, 0.7, 0.7, 1], "metallicFactor": 0.0, "roughnessFactor": 0.8}}],
@@ -218,3 +218,29 @@ def test_bake_real_no_blender_gera_uv2_ao_e_as_duas_luzes(tmp_path: Path):
     assert ao.shape[:2] == (32, 32) and dia.shape[:2] == (32, 32) and noite.shape[:2] == (32, 32)
     # bake de verdade: não é uma textura lisa (tem variação de valores)
     assert ao.std() > 1 and dia.std() > 1
+
+
+@pytest.mark.skipif(not BLENDER, reason="defina IMERSA_BLENDER com o executável do Blender 4.2 para o render real")
+def test_bake_real_modelo_sem_uv_do_bim_poe_o_lightmap_no_canal_1(tmp_path: Path):
+    """O GLB do BIM não tem UV: o lightmap precisa sair em TEXCOORD_1, o canal que o occlusionTexture e o viewer leem."""
+    glb = _cubo(tmp_path, com_uv=False)
+    r = tmp_path / "r.json"
+    args = ["--glb", str(glb), "--id", "teste2", "--saida", str(tmp_path / "s"), "--resultado", str(r), "--blender", BLENDER, "--largura", "32", "--amostras", "8"]
+    assert principal(args) == 0, r.read_text()
+    doc, _ = _ler_glb(Path(json.loads(r.read_text())["glb"]).read_bytes())
+    for malha in doc["meshes"]:
+        for prim in malha["primitives"]:
+            assert "TEXCOORD_1" in prim["attributes"], prim["attributes"]
+
+
+@pytest.mark.skipif(not BLENDER, reason="defina IMERSA_BLENDER com o executável do Blender 4.2 para o render real")
+def test_bake_real_janela_do_bim_acende_a_noite_pelo_tipo_ifc(tmp_path: Path):
+    """No BIM os nomes são GUIDs: a janela acende pelo tipo (IfcWindow), não pelo nome."""
+    import cv2
+
+    glb = _cubo(tmp_path, com_uv=False, ifc="IfcWindow")
+    r = tmp_path / "r.json"
+    args = ["--glb", str(glb), "--id", "teste3", "--saida", str(tmp_path / "s"), "--resultado", str(r), "--blender", BLENDER, "--largura", "32", "--amostras", "8"]
+    assert principal(args) == 0, r.read_text()
+    noite = cv2.imread(str(next((tmp_path / "s").rglob("noite.png"))), cv2.IMREAD_GRAYSCALE)
+    assert noite.max() > 150, noite.max()
