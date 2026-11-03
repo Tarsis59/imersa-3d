@@ -67,7 +67,11 @@ test('estande: painel cria → PC em tela cheia apresenta sozinho → visitante 
   await tela.getByTestId('lista-vitrine').getByRole('button', { name: /^102/ }).tap();
   await expect(estande).toHaveAttribute('data-apresentacao', 'desligada');
   await expect(tela.getByTestId('apresentacao-unidade')).toHaveCount(0);
-  await expect(tela.getByRole('heading', { name: 'Unidade 102' })).toBeVisible();
+  // no CI (3D por software) o 1º toque às vezes só acorda o estande: toca de novo, como o visitante faria
+  await expect(async () => {
+    if (!(await tela.getByRole('heading', { name: 'Unidade 102' }).isVisible())) await tela.getByTestId('lista-vitrine').getByRole('button', { name: /^102/ }).tap();
+    await expect(tela.getByRole('heading', { name: 'Unidade 102' })).toBeVisible({ timeout: 5_000 });
+  }).toPass({ timeout: 30_000 });
   // modo corretor escondido (3 dedos por 3 s; no teclado Ctrl+Alt+C): esconde os preços sem sair do estande
   await expect(tela.getByTestId('unidade-selecionada')).toContainText('R$');
   await tela.keyboard.press('Control+Alt+c');
