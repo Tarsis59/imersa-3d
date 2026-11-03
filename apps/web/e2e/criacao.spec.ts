@@ -120,10 +120,10 @@ test('criar com tudo: foto com GPS + planta + texto → montagem ao vivo → Vit
   await expect(jogo.getByRole('button', { name: 'Andar' })).toBeVisible();
   const antes = await vitrine.getAttribute('data-posicao');
   await vitrine.click({ position: { x: 20, y: 20 } }); // foco no 3D (o teclado vale para ele)
+  // segura o W até andar: no CI (3D por software) um quadro pode durar mais que um segundo inteiro
   await page.keyboard.down('w');
-  await page.waitForTimeout(1200);
+  await expect.poll(() => vitrine.getAttribute('data-posicao'), { timeout: 30_000 }).not.toBe(antes);
   await page.keyboard.up('w');
-  await expect.poll(() => vitrine.getAttribute('data-posicao'), { timeout: 10_000 }).not.toBe(antes);
   await vitrine.screenshot({ path: test.info().outputPath('boneco.png') });
   // V volta para a 1ª pessoa sem recarregar
   await page.keyboard.press('v');
