@@ -2,6 +2,13 @@ import { describe, expect, it } from 'vitest';
 import * as THREE from 'three';
 import { aplicarBakeNoModelo, CHAVE_LIGHTMAP_DIA, CHAVE_LIGHTMAP_NOITE, injetarLightmap } from './lightmap';
 
+/** Caixa com a UV2 do bake (`uv1`), como as peças assadas do GLB. */
+function caixaComUv2(): THREE.BufferGeometry {
+  const g = new THREE.BoxGeometry();
+  g.setAttribute('uv1', g.getAttribute('uv').clone());
+  return g;
+}
+
 describe('bake de luz (dia/noite) no shader', () => {
   it('o shader do three tem os pontos de encaixe (USE_UV1 do aoMap) e mistura dia↔noite pela hora', () => {
     const shader = { uniforms: {}, vertexShader: THREE.ShaderLib.physical.vertexShader, fragmentShader: THREE.ShaderLib.physical.fragmentShader } as unknown as THREE.WebGLProgramParametersWithUniforms;
@@ -29,9 +36,9 @@ describe('bake de luz (dia/noite) no shader', () => {
     const semBake = new THREE.MeshStandardMaterial();
 
     const grupo = new THREE.Group();
-    grupo.add(new THREE.Mesh(new THREE.BoxGeometry(), comBake));
-    grupo.add(new THREE.Mesh(new THREE.BoxGeometry(), soDia));
-    grupo.add(new THREE.Mesh(new THREE.BoxGeometry(), semBake));
+    grupo.add(new THREE.Mesh(caixaComUv2(), comBake));
+    grupo.add(new THREE.Mesh(caixaComUv2(), soDia));
+    grupo.add(new THREE.Mesh(caixaComUv2(), semBake));
 
     const texturas = new Map<number, THREE.Texture>([
       [2, new THREE.Texture()],
@@ -50,5 +57,20 @@ describe('bake de luz (dia/noite) no shader', () => {
     expect(antes).toBe(1); // não perde quem já mexia no material
     expect((shader.uniforms as Record<string, { value: unknown }>).uBakeDia!.value).toBe(texturas.get(2));
     expect(soDia.onBeforeCompile.toString()).not.toContain('uBakeDia'); // sem os dois extras, fica intocado
+  });
+
+  it('peça sem a UV2 (ambiente, vão do IFC) ganha cópia do material sem o bake; a assada continua com ele', async () => {
+    const assado = new THREE.MeshStandardMaterial({ aoMap: new THREE.Texture() });
+    assado.userData = { [CHAVE_LIGHTMAP_DIA]: 2, [CHAVE_LIGHTMAP_NOITE]: 3 };
+    const parede = new THREE.Mesh(caixaComUv2(), assado);
+    const ambiente = new THREE.Mesh(new THREE.BoxGeometry(), assado); // sem uv1: ficou fora do bake
+    const grupo = new THREE.Group().add(parede, ambiente);
+    const n = await aplicarBakeNoModelo(grupo, async () => new THREE.Texture(), { noite: { value: 0 }, intensidade: { value: 1 } });
+    expect(n).toBe(1);
+    expect(parede.material).toBe(assado);
+    const copia = ambiente.material as THREE.MeshStandardMaterial;
+    expect(copia).not.toBe(assado);
+    expect(copia.aoMap).toBeNull();
+    expect(copia.userData[CHAVE_LIGHTMAP_DIA]).toBeUndefined();
   });
 });

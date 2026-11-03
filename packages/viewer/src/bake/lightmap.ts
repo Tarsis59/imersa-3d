@@ -64,8 +64,26 @@ export async function aplicarBakeNoModelo(
   estado: LightmapBake,
 ): Promise<number> {
   const materiais = new Map<THREE.Material, { dia: number; noite: number }>();
+  const semBake = new Map<THREE.Material, THREE.Material>();
   modelo.traverse((o) => {
     if (!(o instanceof THREE.Mesh)) return;
+    // peça que ficou fora do bake (ambiente, vão do IFC) não tem a UV2: com o material assado ela leria o lightmap
+    // num ponto só do atlas (escura). Ganha uma cópia do material sem o bake (o material é dividido entre peças).
+    if (!o.geometry.getAttribute('uv1')) {
+      const trocar = (m: THREE.Material) => {
+        if (!indicesDoBake(m) && !(m as THREE.MeshStandardMaterial).aoMap) return m;
+        let c = semBake.get(m);
+        if (!c) {
+          c = m.clone();
+          c.userData = { ...m.userData, [CHAVE_LIGHTMAP_DIA]: undefined, [CHAVE_LIGHTMAP_NOITE]: undefined };
+          if ('aoMap' in c) (c as THREE.MeshStandardMaterial).aoMap = null;
+          semBake.set(m, c);
+        }
+        return c;
+      };
+      o.material = Array.isArray(o.material) ? o.material.map(trocar) : trocar(o.material);
+      return;
+    }
     for (const m of Array.isArray(o.material) ? o.material : [o.material]) {
       if (materiais.has(m)) continue;
       const indices = indicesDoBake(m);
