@@ -33,6 +33,9 @@ const RELEVO_PAULISTA = fileURLToPath(new URL('../../exemplos/cidade-real/relevo
 export default defineConfig({
   testDir: './e2e',
   timeout: 90_000,
+  // no CI o 3D é desenhado por software e cada quadro ocupa a página por segundos: os 5 s padrão do expect estouravam
+  // ora num teste, ora noutro (estande, arquivos, vendas, criação), sempre em textos que aparecem certo, só mais tarde
+  expect: { timeout: process.env.CI ? 15_000 : 5_000 },
   workers: 1,
   retries: 0,
   reporter: 'list',
