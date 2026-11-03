@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { describe, expect, it } from 'vitest';
 import { localParaLonLat } from './lotes.teste-ajuda';
-import { COR_LOTE, criarLotes, DETALHE_VARREDURA, type LoteViewer } from './lotes';
+import { COR_LOTE, criarLotes, DETALHE_VARREDURA, distanciaDaVista, type LoteViewer } from './lotes';
 
 const centro = { lon: -46.65, lat: -23.56 };
 // 3 lotes de 12 × 30 m lado a lado (quadra 01) e 1 na quadra 02
@@ -64,14 +64,20 @@ describe('lotes no chão', () => {
     }).not.toThrow();
   });
 
-  it('"Ver daqui" (Plano 12d, item 11): ponto 3 m fora do maior lado do lote, olhando para o centro dele', () => {
+  it('"Ver daqui" (Plano 12d, item 11): ponto fora do maior lado do lote, olhando para o centro dele', () => {
     const v = l.vistas.get('b')!;
     expect(v).toBeDefined();
-    // lote "b": x de 12 a 24, z de 0 a -30 — o lado mais longo (30 m) é o de x = 24; 3 m para fora dele é x ≈ 27
-    expect(v.x).toBeCloseTo(27, 0);
+    // lote "b": x de 12 a 24, z de 0 a -30 — o lado mais longo (30 m) é o de x = 24; 25 m para fora dele é x ≈ 49
+    expect(v.x).toBeCloseTo(49, 0);
     expect(v.z).toBeCloseTo(-15, 0);
     expect(v.alvoX).toBeCloseTo(18, 0);
     expect(v.alvoZ).toBeCloseTo(-15, 0);
+  });
+
+  it('"Ver daqui": a distância cresce com a frente, de 3 m (frente estreita) a 25 m (frente larga)', () => {
+    expect(distanciaDaVista(5)).toBe(3);
+    expect(distanciaDaVista(12)).toBeCloseTo(9.4, 5);
+    expect(distanciaDaVista(30)).toBe(25);
   });
 
   it('footprint da casa-modelo (Plano 12d, item 9): o retângulo construtivo do lote, com os recuos', () => {

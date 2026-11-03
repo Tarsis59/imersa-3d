@@ -94,21 +94,29 @@ export function espacar(intervaloMs: number) {
 /**
  * O Overpass público aceita poucas consultas ao mesmo tempo por endereço e recusa na hora (429) ou cai por tempo
  * (504) quando está cheio. Por isso as consultas saem uma de cada vez e tentam de novo com espera crescente.
+ * Com `servidores` > 1, cada tentativa vai para o próximo servidor da lista (o principal recusa em bloco os
+ * endereços compartilhados da nuvem, como o do Render); `fazer` recebe o número da tentativa para escolher.
  */
-export function filaOverpass(fazer: (consulta: string, tempoMs: number) => Promise<Response>, esperas: readonly number[] = [2_000, 6_000]) {
+export function filaOverpass(
+  fazer: (consulta: string, tempoMs: number, tentativa: number) => Promise<Response>,
+  esperas: readonly number[] = [2_000, 6_000],
+  servidores = 1,
+) {
   let corrente: Promise<unknown> = Promise.resolve();
   return <T>(consulta: string, tempoMs: number, ler: (json: unknown) => T): Promise<T> => {
     const vez = corrente.then(async () => {
       for (let tentativa = 0; ; tentativa++) {
         let motivo: string;
         try {
-          const r = await fazer(consulta, tempoMs);
+          const r = await fazer(consulta, tempoMs, tentativa);
           if (r.ok) return ler(await r.json());
           motivo = `Overpass respondeu ${r.status}`;
           if (r.status !== 429 && r.status < 500) throw new Error(motivo);
         } catch (e) {
-          // consulta errada (4xx) não melhora repetindo; e quem já esperou o tempo todo não espera de novo
-          if ((e as Error).message?.startsWith('Overpass respondeu 4') || (e as Error).name === 'TimeoutError') throw e;
+          // consulta errada (4xx) não melhora repetindo; e quem já esperou o tempo todo só tenta de novo num
+          // servidor que ainda não foi tentado
+          if ((e as Error).message?.startsWith('Overpass respondeu 4')) throw e;
+          if ((e as Error).name === 'TimeoutError' && tentativa + 1 >= servidores) throw e;
           motivo = (e as Error).message;
         }
         if (tentativa >= esperas.length) throw new Error(motivo);
@@ -193,16 +201,27 @@ export function interpretarPredios(json: unknown, centro: { lat: number; lon: nu
     .map(({ d: _d, ...p }) => p);
 }
 
+/** Overpass principal e dois espelhos públicos gratuitos, na ordem de tentativa. */
+export const SERVIDORES_OVERPASS = [
+  'https://overpass-api.de/api/interpreter',
+  'https://overpass.private.coffee/api/interpreter',
+  'https://maps.mail.ru/osm/tools/overpass/api/interpreter',
+] as const;
+
 /** Serviços reais do OpenStreetMap. `userAgent` deve identificar a empresa (exigência do Nominatim). */
-export function servicosMapaReais(userAgent: string): ServicosMapa {
+export function servicosMapaReais(userAgent: string, servidores: readonly string[] = SERVIDORES_OVERPASS): ServicosMapa {
   const fila = espacar(1100);
-  const overpass = filaOverpass((consulta, tempoMs) =>
-    fetch('https://overpass-api.de/api/interpreter', {
-      method: 'POST',
-      headers: { 'user-agent': userAgent, 'content-type': 'application/x-www-form-urlencoded', accept: 'application/json' },
-      body: new URLSearchParams({ data: consulta }),
-      signal: AbortSignal.timeout(tempoMs),
-    }),
+  const lista = servidores.length ? servidores : SERVIDORES_OVERPASS;
+  const overpass = filaOverpass(
+    (consulta, tempoMs, tentativa) =>
+      fetch(lista[tentativa % lista.length]!, {
+        method: 'POST',
+        headers: { 'user-agent': userAgent, 'content-type': 'application/x-www-form-urlencoded', accept: 'application/json' },
+        body: new URLSearchParams({ data: consulta }),
+        signal: AbortSignal.timeout(tempoMs),
+      }),
+    [2_000, 6_000],
+    lista.length,
   );
   return {
     buscarEndereco: (texto) =>

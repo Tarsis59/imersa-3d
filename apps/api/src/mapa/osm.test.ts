@@ -195,6 +195,36 @@ describe('filaOverpass (o mapa público cheio não derruba a criação)', () => 
     expect(chamadas).toBe(1);
   });
 
+  it('com espelhos: cada tentativa vai para o próximo servidor, e o tempo estourado no principal tenta o espelho', async () => {
+    const usados: number[] = [];
+    const fila = filaOverpass(
+      async (_q, _t, tentativa) => {
+        usados.push(tentativa);
+        if (tentativa === 0) throw Object.assign(new Error('The operation was aborted due to timeout'), { name: 'TimeoutError' });
+        if (tentativa === 1) return resposta(429);
+        return resposta(200, { elements: [1, 2] });
+      },
+      [1, 1],
+      3,
+    );
+    await expect(fila('q', 1000, (j) => (j as { elements: number[] }).elements.length)).resolves.toBe(2);
+    expect(usados).toEqual([0, 1, 2]);
+  });
+
+  it('com espelhos: o tempo estourado em todos desiste no último', async () => {
+    let chamadas = 0;
+    const lenta = filaOverpass(
+      async () => {
+        chamadas++;
+        throw Object.assign(new Error('The operation was aborted due to timeout'), { name: 'TimeoutError' });
+      },
+      [1, 1],
+      2,
+    );
+    await expect(lenta('q', 1000, () => 0)).rejects.toThrow('timeout');
+    expect(chamadas).toBe(2);
+  });
+
   it('uma consulta de cada vez, mesmo pedidas juntas (e a falha de uma não trava a próxima)', async () => {
     let abertas = 0;
     let maximo = 0;

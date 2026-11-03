@@ -18,8 +18,13 @@ export const COR_LOTE: Record<StatusUnidade, number> = { disponivel: 0x2f7fe0, r
 
 /** Ciano da varredura (Plano 12d, item 4). */
 const COR_VARREDURA = new THREE.Vector3(0.3, 0.95, 1.0);
-/** "Ver daqui" (item 11): metros entre a câmera e o lado da frente (recuo + calçada). */
-const DISTANCIA_CALCADA_VISTA = 3;
+/**
+ * "Ver daqui" (item 11): metros entre a câmera e o lado da frente. Cresce com a largura da frente para a casa-modelo
+ * (5 m para dentro, quase da largura toda) caber na tela em retrato: a 3 m fixos ela tomava a tela inteira.
+ */
+export function distanciaDaVista(frenteM: number): number {
+  return Math.min(25, Math.max(3, frenteM * 1.2 - 5));
+}
 /** Liga/desliga o custo da varredura no shader pelo nível de qualidade (objeto compartilhado: sobrevive a recriar os lotes). */
 export const DETALHE_VARREDURA = { value: 1 };
 
@@ -94,8 +99,8 @@ export function criarLotes(lotes: readonly LoteViewer[], centro: LonLat, rotacao
     const cz = pts.reduce((s, p) => s + p.z, 0) / pts.length;
     centros.set(l.id, new THREE.Vector3(cx, altura(cx, cz), cz));
     // "Ver daqui" (item 11): sem saber onde fica a rua (o terreno do item 8 é por prédio, não por lote aqui), a
-    // mesma hipótese do item 6 sem via — o maior lado do polígono é a frente; a câmera fica na calçada, 3 m para
-    // fora dele, olhando para o meio do lote.
+    // mesma hipótese do item 6 sem via — o maior lado do polígono é a frente; a câmera fica do lado de fora dele
+    // (distanciaDaVista), olhando para o meio do lote.
     let frente: { comprimento: number; mx: number; mz: number; nx: number; nz: number } | null = null;
     for (let i = 0; i < pts.length; i++) {
       const a = pts[i]!;
@@ -115,7 +120,8 @@ export function criarLotes(lotes: readonly LoteViewer[], centro: LonLat, rotacao
       frente = { comprimento, mx, mz, nx, nz };
     }
     if (frente) {
-      vistas.set(l.id, { x: frente.mx + frente.nx * DISTANCIA_CALCADA_VISTA, z: frente.mz + frente.nz * DISTANCIA_CALCADA_VISTA, alvoX: cx, alvoZ: cz });
+      const d = distanciaDaVista(frente.comprimento);
+      vistas.set(l.id, { x: frente.mx + frente.nx * d, z: frente.mz + frente.nz * d, alvoX: cx, alvoZ: cz });
       pontosPorLote.set(l.id, pts);
       frentesPorLote.set(l.id, { x: frente.nx, z: frente.nz });
     }

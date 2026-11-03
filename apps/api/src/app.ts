@@ -378,7 +378,10 @@ export async function construirApp({ pool, config, logger = false, reportarErro,
     segredo: config.JWT_SECRET,
     limiteBytes: (config.LIMITE_ARMAZENAMENTO_GB ?? 50) * 1024 ** 3,
   });
-  const mapaReal = servicosMapaReais(config.OSM_USER_AGENT ?? 'Imersa3D-dev/0.1 (ambiente de desenvolvimento)');
+  const mapaReal = servicosMapaReais(
+    config.OSM_USER_AGENT ?? 'Imersa3D-dev/0.1 (ambiente de desenvolvimento)',
+    config.OVERPASS_URLS?.split(',').map((u) => u.trim()).filter(Boolean),
+  );
   const doArquivo = config.MAPA_ARQUIVO_PREDIOS ? comPrediosDeArquivo(mapaReal, config.MAPA_ARQUIVO_PREDIOS) : mapaReal;
   const servicosMapa = mapa ?? (config.MAPA_PASTA_RELEVO ? comRelevoDePasta(doArquivo, config.MAPA_PASTA_RELEVO) : doArquivo);
   rotasMapa(app, { pool, exigir, mapa: servicosMapa });

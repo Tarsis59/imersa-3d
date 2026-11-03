@@ -97,6 +97,10 @@ export interface EstadoViewer {
   lotes: number;
   /** Varredura em ciano do buscador de lotes em andamento (Plano 12d, item 4). */
   varredura: boolean;
+  /** Casa-modelo de algum lote na cena agora (Plano 12d, item 9). */
+  casaModelo: boolean;
+  /** Placas de quadra/lote à mostra (somem na vista de 1,60 m do lote). */
+  placasLotes: boolean;
   /** Modelo com a luz pré-calculada (AO + dia/noite) do Plano 12a, item 6. */
   bake: boolean;
   /** Rota a pé desenhada no chão (número de pontos; 0 = nenhuma). */
@@ -722,6 +726,10 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
     for (const s of solidos) b.union(new THREE.Box3().setFromObject(s));
     return b.isEmpty() ? { minX: -10, maxX: 10, minY: 0, maxY: 10, minZ: -10, maxZ: 10 } : caixaDe(b);
   }
+  /** O que a visão geral e o zoom enquadram: os lotes no loteamento (o "prédio" dele fica escondido), senão o prédio. */
+  function caixaDaVisaoGeral(): Caixa {
+    return loteamento ? { ...loteamento.caixa, minY: 0, maxY: 10 } : caixaDoPredio();
+  }
   /** Onde os prédios do OSM não entram: a caixa do prédio unida à dos lotes (loteamento). */
   function areaDoEmpreendimento(): Caixa {
     const c = caixaDoPredio();
@@ -733,7 +741,7 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
   function zoomAtual(): number {
     if (modo !== 'orbita' || emVista) return 0.5;
     const distancia = camera.position.distanceTo(orbita.target);
-    return zoomDaDistancia(distancia, limitesZoom(caixaDoPredio()));
+    return zoomDaDistancia(distancia, limitesZoom(caixaDaVisaoGeral()));
   }
 
   // -------------------------------------------------------------- câmera
@@ -803,7 +811,8 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
   let joystick: Entrada = { frente: 0, lado: 0 };
 
   function enquadrarPredio(): void {
-    const pose = enquadrar(caixaDoPredio(), camera.fov, camera.aspect || 1, 30); // prédio inteiro: um pouco mais de cima
+    // loteamento: o "prédio" fica escondido (caixa padrão de 20 m no meio); a visão geral é a dos lotes, de cima como ao abrir
+    const pose = enquadrar(caixaDaVisaoGeral(), camera.fov, camera.aspect || 1, loteamento ? 50 : 30, loteamento ? 1.1 : undefined); // prédio inteiro: um pouco mais de cima
     camera.position.copy(pose.posicao);
     orbita.target.copy(pose.alvo);
     camera.far = Math.max(4000, pose.posicao.distanceTo(pose.alvo) * 10);
@@ -814,6 +823,7 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
   function sairDaVista(): void {
     if (!emVista) return;
     emVista = false;
+    placasLotes.visible = true;
     camera.fov = 50;
     camera.updateProjectionMatrix();
     orbita.enableZoom = true;
@@ -1596,6 +1606,8 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
       rota: rotaDesenhada?.userData.pontos ?? 0,
       lotes: loteamento?.centros.size ?? 0,
       varredura: varreduraInicio > 0,
+      casaModelo: casaModelo !== null,
+      placasLotes: placasLotes.visible && placasLotes.children.length > 0,
       bake: temBake,
       corretora: !corretora || !corretora.objeto.visible ? 'fora' : corretoraFalando ? 'falando' : 'parada',
       terceiraPessoa,
@@ -1972,6 +1984,7 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
       orbita.minDistance = orbita.maxDistance = distancia;
       orbita.enabled = true;
       emVista = true;
+      placasLotes.visible = false; // na altura dos olhos as placas de quadra/lote (feitas para a vista de cima) tampam a casa
       return true;
     },
     definirTerrenoLoteamento(terreno) {
@@ -2396,7 +2409,7 @@ export function criarViewer(canvas: HTMLCanvasElement, config: ConfigViewer): Vi
       const direcao = camera.position.clone().sub(alvo);
       if (direcao.lengthSq() < 1e-6) direcao.set(0, 0, 1); // câmera em cima do alvo (raro): direção qualquer
       direcao.normalize();
-      const distancia = distanciaDoZoom(t, limitesZoom(caixaDoPredio()));
+      const distancia = distanciaDoZoom(t, limitesZoom(caixaDaVisaoGeral()));
       camera.position.copy(alvo).addScaledVector(direcao, distancia);
       orbita.update();
     },
