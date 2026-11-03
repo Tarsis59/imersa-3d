@@ -4,7 +4,7 @@ Luz pré-calculada (AO + dia/noite) na GPU gratuita do Kaggle (Blender Cycles).
 Entrada (dataset privado anexado ao notebook, montado em /kaggle/input/<dataset>/):
   modelo.glb        modelo 3D do prédio, já sem compressão (o importador do Blender não lê Meshopt)
   bake_blender.py   o roteiro que roda dentro do Blender
-  config.json       {"largura": 1024, "amostras": 128}
+  config.json       {"largura": 1024, "amostras": 64}
 
 Saída (/kaggle/working/, baixada pelo orquestrador):
   baseline.glb      o mesmo modelo, com a UV2 do lightmap pack
