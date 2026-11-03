@@ -1,12 +1,14 @@
 'use client';
 import { useEffect, useMemo, useRef, useState, type PointerEvent as EventoPonteiro } from 'react';
-import { BONECOS, criarViewer, filtrar, suporteImersivo, temWebGpu, type SuporteImersivo, type Caixa, type Clima, type EstudoSolar, type PeriodoDeSol, type Giro, filtroVazio, pontoCardeal, vetorJoystick, type EstadoViewer, type Filtro, type UnidadeViewer, type Viewer } from '@imersa/viewer';
+import { BONECOS, criarViewer, filtrar, suporteImersivo, temWebGpu, type SuporteImersivo, type Caixa, type Clima, type EstudoSolar, type PeriodoDeSol, type Giro, filtroVazio, pontoCardeal, vetorJoystick, type EstadoViewer, type Filtro, type UnidadeViewer, type Viewer, type TerrenoLoteamentoLido } from '@imersa/viewer';
 import type { ItemLazer, StatusUnidade } from '@/lib/tipos';
 import { Botao, Campo, Cartao, Selecao } from '@/components/ui';
 import { alternarFavorito, lerFavoritos, salvarFavoritos } from '@/lib/favoritos';
 import { brl, COR_STATUS, ROTULO_STATUS, STATUS_UNIDADE } from '@/lib/tipos';
 import { DECODIFICADORES } from '@/lib/decodificadores';
+import { TEXTURAS_PBR } from '@/lib/texturasPbr';
 import { giroDoZip } from '@/lib/giro-zip';
+import { pedidoRenderizadorExperimental } from '@/lib/experimentoWebgpu';
 import type { ResultadoEntorno } from './actions';
 import { InteriorSplat } from './interior';
 import { Giro360 } from './giro';
@@ -22,7 +24,9 @@ import type { AcaoComando } from '@/lib/comandos';
 import { ehPorDoSol, MISSOES, PASSEIO_M, progressoTipologias, somarCaminhada, type IdMissao } from '@/lib/missoes';
 import { SimuladorFinanciamento } from './simulador';
 import { CartaoLazer, PainelDoPonto, passoDoTourMs, rotuloDoPonto, type EstadoTour } from './lazer';
+import { CarrosselAreasComuns } from './carrossel-lazer';
 import type { NovoLazer } from './actions';
+import { CartaoGaleria, GestaoGaleria, type FotoGaleria } from './galeria';
 
 const ROTULO_NIVEL = { alto: 'alta', medio: 'média', baixo: 'baixa' } as const;
 const ROTULO_SOL: Record<PeriodoDeSol, string> = { manha: 'Sol da manhã', tarde: 'Sol da tarde', 'dia-todo': 'Sol o dia todo', 'pouco-sol': 'Pouco sol direto' };
@@ -66,6 +70,7 @@ export type EventoVitrine = { tipo: 'unidade' | 'favorito'; unidadeId: string } 
 type EstadoEntorno = { tipo: 'carregando' } | { tipo: 'pronto'; predios: number; atribuicao: string } | { tipo: 'sem_localizacao' } | { tipo: 'indisponivel' };
 
 const SEM_FOTOS: NonNullable<Parameters<typeof Vitrine>[0]['fotos']> = [];
+const SEM_FOTOS_GALERIA: FotoGaleria[] = [];
 
 export function Vitrine({
   predioId,
@@ -74,6 +79,7 @@ export function Vitrine({
   empresa,
   chaveModelo,
   modeloUrl,
+  modeloBakeUrl = null,
   unidades,
   andares,
   rotacaoGraus,
@@ -84,6 +90,7 @@ export function Vitrine({
   corretor = null,
   proximidades = null,
   lotes = SEM_LOTES,
+  terreno = null,
   lat,
   lon,
   interiores,
@@ -96,10 +103,14 @@ export function Vitrine({
   giroRenderizado = null,
   assistenteUrl = null,
   aoPedirContato,
+  aoLoteVisto,
   estande = null,
   linksParaConduzir = [],
   lazer = [],
   gerirLazer = null,
+  galeria = SEM_FOTOS_GALERIA,
+  fotosProjeto = SEM_FOTOS_GALERIA,
+  gerirGaleria = null,
   amostrasFoto = AMOSTRAS_FOTO,
 }: {
   predioId: string;
@@ -110,6 +121,8 @@ export function Vitrine({
   /** Identidade estável do modelo (o link assinado muda a cada atualização da página). */
   chaveModelo: string;
   modeloUrl: string | null;
+  /** GLB "assado" (Plano 12a, item 6): luz pré-calculada; usado no lugar de `modeloUrl` quando houver. */
+  modeloBakeUrl?: string | null;
   unidades: UnidadeViewer[];
   andares: Array<{ numero: number; nome: string }>;
   rotacaoGraus: number;
@@ -125,6 +138,8 @@ export function Vitrine({
   proximidades?: FonteProximidades | null;
   /** Loteamento (Plano 12d): os lotes no chão do 3D com o buscador de lotes. */
   lotes?: LoteVitrine[];
+  /** Terreno e infraestrutura do loteamento (Plano 12d, item 8): ruas, calçadas, meio-fio e curvas de nível. */
+  terreno?: TerrenoLoteamentoLido | null;
   /** Abrir já na vista de uma unidade e numa hora (foto pedida por texto). */
   inicio?: { unidadeId: string | null; hora: number | null };
   /** Fotos do imóvel com GPS: quadros no 3D onde foram tiradas (Plano 11c). */
@@ -147,6 +162,8 @@ export function Vitrine({
   assistenteUrl?: string | null;
   /** O assistente pediu o formulário de contato (portal): abre com a unidade e o motivo. */
   aoPedirContato?: (motivo: 'contato' | 'visita', unidadeId: string | null) => void;
+  /** Lote escolhido no loteamento (portal, Plano 12e): o formulário de contato pré-escolhe esse lote. */
+  aoLoteVisto?: (loteId: string) => void;
   /**
    * Estande de vendas (tela touch no PC do estande): `apresentando` = ninguém mexendo, a câmera gira sozinha e as
    * unidades disponíveis aparecem uma a uma; cada `reinicio` novo volta tudo ao começo (próximo visitante).
@@ -160,16 +177,24 @@ export function Vitrine({
   /** Amostras do path tracing na foto fotorrealista. */
   amostrasFoto?: number;
   gerirLazer?: { criar: (d: NovoLazer) => Promise<{ item?: ItemLazer; erro?: string }>; remover: (id: string) => Promise<{ erro?: string }> } | null;
+  /** Galeria do empreendimento (Plano 12b, item 7): fotos escolhidas pela gestão, já na ordem dela. */
+  galeria?: FotoGaleria[];
+  /** Fotos prontas do projeto: para a gestão escolher as da ficha do lazer e as da galeria. */
+  fotosProjeto?: FotoGaleria[];
+  /** Gestão: escolher e ordenar as fotos da galeria (só no painel). */
+  gerirGaleria?: { salvar: (ids: string[]) => Promise<{ erro?: string }> } | null;
 }) {
   const canvas = useRef<HTMLCanvasElement>(null);
   const coluna = useRef<HTMLDivElement>(null);
   const viewer = useRef<Viewer | null>(null);
-  const inicial = useRef({ modeloUrl, unidades, rotacaoGraus, estiloDecorado, lat, lon, projetoId, predioId, qualidadeFixa, carregarEntorno, comTelemetria });
-  inicial.current = { modeloUrl, unidades, rotacaoGraus, estiloDecorado, lat, lon, projetoId, predioId, qualidadeFixa, carregarEntorno, comTelemetria };
+  const inicial = useRef({ modeloUrl, modeloBakeUrl, unidades, rotacaoGraus, estiloDecorado, lat, lon, projetoId, predioId, qualidadeFixa, carregarEntorno, comTelemetria });
+  inicial.current = { modeloUrl, modeloBakeUrl, unidades, rotacaoGraus, estiloDecorado, lat, lon, projetoId, predioId, qualidadeFixa, carregarEntorno, comTelemetria };
   const evento = useRef(aoEvento);
   evento.current = aoEvento;
   const fonteAoVivo = useRef(aoVivo);
   fonteAoVivo.current = aoVivo;
+  const loteVisto = useRef(aoLoteVisto);
+  loteVisto.current = aoLoteVisto;
   // status que mudaram depois de a página abrir (venda/reserva feita agora por outra pessoa)
   const [statusAoVivo, setStatusAoVivo] = useState<Record<string, StatusUnidade>>({});
   const statusAoVivoRef = useRef(statusAoVivo);
@@ -182,6 +207,8 @@ export function Vitrine({
   const [conduzindo, setConduzindo] = useState<string | null>(null);
   const [linkEscolhido, setLinkEscolhido] = useState('');
   const [estado, setEstado] = useState<'carregando' | 'pronto' | 'erro'>('carregando');
+  // `?renderizador=webgpu` (Plano 12a, item 16): só destaca a capacidade medida; não troca o renderizador
+  const [experimentoWebgpu] = useState(() => typeof window !== 'undefined' && pedidoRenderizadorExperimental(window.location.search));
   const [telemetria, setTelemetria] = useState<EstadoViewer | null>(null);
   const [filtro, setFiltro] = useState<Filtro>(filtroVazio);
   const [favoritos, setFavoritos] = useState<Set<string>>(() => new Set());
@@ -189,26 +216,55 @@ export function Vitrine({
   const [andarCorte, setAndarCorte] = useState('');
   const [comCorte, setComCorte] = useState<number[]>([]);
   const [separados, setSeparados] = useState(false);
+  // casa de bonecas (Plano 12c, item 1) e planta 3D humanizada (item 3): os dois usam o andar do corte
+  const [casaDeBonecas, setCasaDeBonecas] = useState<number | null>(null);
+  const [planta, setPlanta] = useState(false);
   // loteamento: lotes no 3D, buscador e o lote escolhido (no 3D ou na lista)
   const [filtroLotes, setFiltroLotes] = useState<FiltroLotes>(FILTRO_LOTES_VAZIO);
   const [loteSelecionado, setLoteSelecionado] = useState<string | null>(null);
+  // "Ver daqui" (Plano 12d, item 11): câmera na calçada em frente ao lote, olhos a 1,60 m
+  const [vistaLote, setVistaLote] = useState<string | null>(null);
+  // casa-modelo no lote (Plano 12d, item 9): qual lote está com a casa, se algum
+  const [casaModeloLote, setCasaModeloLote] = useState<string | null>(null);
+  // "Daqui a 10 anos" (Plano 12d, item 10): idade das árvores do terreno do loteamento (0 a 10 anos)
+  const [anosArvores, setAnosArvores] = useState(10);
   useEffect(() => {
     if (estado !== 'pronto' || !lotes.length || lat == null || lon == null) return;
     viewer.current?.definirLotes(lotes, { lon, lat });
     viewer.current?.aoSelecionarLote((id) => setLoteSelecionado(id));
   }, [estado, lotes, lat, lon]);
   useEffect(() => {
+    if (estado !== 'pronto') return;
+    viewer.current?.definirTerrenoLoteamento(terreno);
+  }, [estado, terreno]);
+  useEffect(() => {
+    if (estado === 'pronto' && terreno) viewer.current?.definirIdadeArvoresLoteamento(anosArvores);
+  }, [estado, terreno, anosArvores]);
+  useEffect(() => {
     if (estado !== 'pronto' || !lotes.length) return;
     const vazio = filtroLotes.precoMax === null && filtroLotes.areaMin === null && !filtroLotes.quadras.size && !filtroLotes.status.size;
     viewer.current?.destacarLotes(vazio ? null : filtrarLotes(lotes, filtroLotes));
   }, [estado, lotes, filtroLotes]);
   useEffect(() => {
-    if (loteSelecionado) viewer.current?.voarParaLote(loteSelecionado);
+    if (loteSelecionado) {
+      setVistaLote(null);
+      viewer.current?.voarParaLote(loteSelecionado);
+      loteVisto.current?.(loteSelecionado);
+    }
   }, [loteSelecionado]);
   // andar a pé ou entrar no apartamento junta os andares no 3D: o botão acompanha
   useEffect(() => {
     if (separados && telemetria && telemetria.modo !== 'orbita') setSeparados(false);
   }, [separados, telemetria]);
+  // casa de bonecas e planta (Plano 12c): trocar para 1ª pessoa (andar a pé ou entrar na unidade) sai dos dois
+  useEffect(() => {
+    if (!telemetria || telemetria.modo === 'orbita' || (casaDeBonecas === null && !planta)) return;
+    viewer.current?.casaDeBonecas(null);
+    viewer.current?.plantaHumanizada(null);
+    setCasaDeBonecas(null);
+    setPlanta(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [telemetria?.modo]);
   const [dataSol, setDataSol] = useState(hoje);
   // abre no fim de tarde: sol baixo e sombras longas são a imagem mais bonita do dia (Plano 12a, item 7)
   const [horaSol, setHoraSol] = useState(16.5);
@@ -222,7 +278,11 @@ export function Vitrine({
   const sobreposicaoAr = useRef<HTMLDivElement>(null);
   // lazer: pontos no 3D, o tour "Conheça o lazer" e (gestão) a marcação clicando no 3D
   const [itensLazer, setItensLazer] = useState<ItemLazer[]>(lazer);
+  // galeria do empreendimento (Plano 12b, item 7): estado local, atualizado depois de a gestão salvar (como o lazer)
+  const [galeriaAtual, setGaleriaAtual] = useState<FotoGaleria[]>(galeria);
   const [pontoLazer, setPontoLazer] = useState<string | null>(null);
+  // "Passeio 3D" (Plano 12d, item 7): qual ponto do lazer tem o boneco em 1ª pessoa, se algum
+  const [passeio3D, setPasseio3D] = useState<string | null>(null);
   const [tour, setTour] = useState<EstadoTour | null>(null);
   const [marcandoLazer, setMarcandoLazer] = useState<Omit<NovoLazer, 'x' | 'y' | 'z'> | null>(null);
   const [erroLazer, setErroLazer] = useState<string | null>(null);
@@ -384,7 +444,7 @@ export function Vitrine({
     if (!el) return;
     const c = inicial.current;
     setEstado('carregando');
-    const v = criarViewer(el, { unidades: c.unidades, modeloUrl: c.modeloUrl, rotacaoGraus: c.rotacaoGraus, estiloDecorado: c.estiloDecorado, lat: c.lat ?? undefined, lon: c.lon ?? undefined, decodificadores: DECODIFICADORES,
+    const v = criarViewer(el, { unidades: c.unidades, modeloUrl: c.modeloUrl, modeloBakeUrl: c.modeloBakeUrl, rotacaoGraus: c.rotacaoGraus, estiloDecorado: c.estiloDecorado, lat: c.lat ?? undefined, lon: c.lon ?? undefined, decodificadores: DECODIFICADORES, texturasPbr: TEXTURAS_PBR,
       ...(c.qualidadeFixa !== null ? { qualidadeInicial: c.qualidadeFixa, qualidadeFixa: true } : {}),
     });
     viewer.current = v;
@@ -393,7 +453,11 @@ export function Vitrine({
     // telemetria: uma vez por visita, ao sair da página (ou trocar de página dentro do site)
     let enviado = false;
     let webgpu: boolean | null = null;
-    void temWebGpu().then((w) => (webgpu = w));
+    void temWebGpu().then((w) => {
+      webgpu = w;
+      // experimental: só registra a capacidade medida (o 3D continua no WebGL2); ver /painel/telemetria
+      if (experimentoWebgpu) console.info(`[imersa] renderizador experimental pedido: WebGPU ${w ? 'disponível' : 'indisponível'} neste aparelho (o 3D continua em WebGL2)`);
+    });
     const enviarTelemetria = () => {
       const m = v.metricas();
       if (!c.comTelemetria || enviado || (m.cargaMs === null && m.erros === 0)) return;
@@ -733,6 +797,7 @@ export function Vitrine({
     }
   };
   const voar = (id: string) => {
+    sairDosModosDeAndar();
     setVista(null);
     setInterior(null);
     setSelecionada(id);
@@ -879,11 +944,26 @@ export function Vitrine({
           viewer.current?.separarAndares(a.ligado);
           setSeparados(a.ligado);
           break;
+        case 'casa_bonecas':
+          if (!ligarCasaDeBonecas(a.ligado, a.andar)) problemas.push(a.ligado ? 'Escolha o andar para a casa de bonecas.' : 'Não há casa de bonecas aberta.');
+          break;
         case 'visao_geral':
           visaoGeral();
           break;
         case 'som':
           void viewer.current?.definirSom(a.ligado);
+          break;
+        case 'limpar_lotes':
+          setFiltroLotes(FILTRO_LOTES_VAZIO);
+          break;
+        case 'filtro_lotes':
+          setFiltroLotes((f) => ({
+            ...f,
+            ...(a.precoMax !== undefined ? { precoMax: a.precoMax } : {}),
+            ...(a.areaMin !== undefined ? { areaMin: a.areaMin } : {}),
+            ...(a.quadras ? { quadras: new Set(a.quadras) } : {}),
+            ...(a.status ? { status: new Set(a.status) } : {}),
+          }));
           break;
       }
     }
@@ -898,11 +978,60 @@ export function Vitrine({
 
   // volta ao prédio inteiro de cima (botão, duplo toque no 3D e comando "visão geral")
   function visaoGeral() {
+    sairDosModosDeAndar();
     setVista(null);
+    setVistaLote(null);
+    setPasseio3D(null);
+    setCasaModeloLote(null);
     setInterior(null);
     viewer.current?.visaoGeral();
   }
+  const verLote = (id: string) => {
+    if (viewer.current?.verLote(id)) setVistaLote(id);
+  };
+  const alternarCasaModelo = (id: string) => {
+    const ligar = casaModeloLote !== id;
+    if (viewer.current?.mostrarCasaModelo(ligar ? id : null)) setCasaModeloLote(ligar ? id : null);
+  };
   const irPara = (id: string) => document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+
+  // casa de bonecas (Plano 12c, item 1): liga/desliga no andar do corte (ou no `andar` do comando por voz/texto)
+  const ligarCasaDeBonecas = (ligar: boolean, andarPedido?: number | null) => {
+    const andar = ligar ? (andarPedido ?? (andarCorte ? Number(andarCorte) : null)) : null;
+    if (ligar && andar === null) return false;
+    if (ligar && planta) {
+      viewer.current?.plantaHumanizada(null);
+      setPlanta(false);
+    }
+    const ok = viewer.current?.casaDeBonecas(andar) ?? false;
+    if (ok) {
+      setCasaDeBonecas(andar);
+      if (andar !== null) setAndarCorte(String(andar));
+    }
+    return ok;
+  };
+  // planta 3D humanizada (Plano 12c, item 3): câmera ortográfica de cima, no andar do corte
+  const ligarPlanta = (ligar: boolean) => {
+    if (ligar && !andarCorte) return false;
+    if (ligar && casaDeBonecas !== null) {
+      viewer.current?.casaDeBonecas(null);
+      setCasaDeBonecas(null);
+    }
+    const ok = viewer.current?.plantaHumanizada(ligar ? Number(andarCorte) : null) ?? false;
+    if (ok) setPlanta(ligar);
+    return ok;
+  };
+  // sai da casa de bonecas/planta ao escolher outra unidade ou voltar à visão geral (Plano 12c)
+  const sairDosModosDeAndar = () => {
+    if (casaDeBonecas !== null) {
+      viewer.current?.casaDeBonecas(null);
+      setCasaDeBonecas(null);
+    }
+    if (planta) {
+      viewer.current?.plantaHumanizada(null);
+      setPlanta(false);
+    }
+  };
 
   return (
     <div className="grid gap-6 lg:grid-cols-[1fr_340px] lg:items-start">
@@ -939,18 +1068,31 @@ export function Vitrine({
         data-corretora={telemetria?.corretora ?? 'fora'}
         data-outros={telemetria?.outros ?? 0}
         data-explosao={telemetria?.explosao ?? 0}
+        data-casa-bonecas={telemetria?.casaDeBonecas ?? ''}
+        data-planta={telemetria?.planta ? 'sim' : 'nao'}
         data-etiquetas={telemetria?.etiquetas ?? 0}
         data-rota={telemetria?.rota ?? 0}
         data-lotes={telemetria?.lotes ?? 0}
+        data-varredura={telemetria?.varredura ? 'sim' : 'nao'}
+        data-vista-lote={vistaLote ?? ''}
+        data-passeio-3d={passeio3D ?? ''}
+        data-anos={terreno ? anosArvores : ''}
+        data-casa-modelo={casaModeloLote ?? ''}
+        data-carros={telemetria?.carros ?? 0}
+        data-nuvens={telemetria?.nuvens ? 'sim' : 'nao'}
+        data-verticais={telemetria?.verticaisRetas ? 'sim' : 'nao'}
         data-terceira={telemetria?.terceiraPessoa ? 'sim' : 'nao'}
         data-boneco={telemetria?.boneco ?? ''}
         data-no-ar={telemetria?.noAr ? 'sim' : 'nao'}
         data-pulos={telemetria?.pulos ?? 0}
         data-nivel={telemetria?.nivel ?? ''}
+        data-zoom={telemetria ? Math.round(telemetria.zoom * 100) : ''}
         data-som={telemetria?.som ? 'ligado' : 'desligado'}
         data-marcando-lazer={marcandoLazer ? 'sim' : ''}
         data-apresentacao={apresentando ? 'ligada' : 'desligada'}
         data-unidade-da-vez={vitrineDaVez ?? ''}
+        data-renderizador-experimental={experimentoWebgpu ? 'webgpu' : ''}
+        data-bake={telemetria?.bake ? 'sim' : 'nao'}
         className={`relative ${estande ? 'h-[calc(100dvh-7rem)]' : 'h-[70vh]'} min-h-96 overflow-hidden rounded-2xl border border-borda bg-fundo lg:sticky lg:top-6`}
       >
         <canvas
@@ -960,7 +1102,7 @@ export function Vitrine({
         />
         {estado === 'carregando' && <p className="absolute inset-0 grid place-items-center text-suave">Carregando o 3D…</p>}
         {(tour || pontoLazer) && !conducao?.ativo && (
-          <PainelDoPonto item={itensLazer.find((l) => l.id === pontoLazer) ?? null} tour={tour} total={itensLazer.length} aoProximo={proximoDoTour} aoEncerrar={encerrarLazer} />
+          <PainelDoPonto item={itensLazer.find((l) => l.id === pontoLazer) ?? null} tour={tour} total={itensLazer.length} aoProximo={proximoDoTour} aoEncerrar={encerrarLazer} resolverFoto={linkDoArquivo} />
         )}
         {conducao?.ativo && (
           <div className="pointer-events-none absolute inset-x-0 top-3 z-10 flex justify-center px-16">
@@ -1014,7 +1156,38 @@ export function Vitrine({
             <button type="button" onClick={visaoGeral} className="absolute right-3 top-16 min-h-9 rounded-full bg-white/90 px-3 text-xs font-semibold text-slate-900 shadow hover:bg-white">
               Visão geral
             </button>
-            <span className="pointer-events-none absolute bottom-2 left-2 rounded bg-black/45 px-1.5 py-0.5 text-[10px] text-white/90">Imagens meramente ilustrativas</span>
+            {modo === 'orbita' && (
+              // zoom vertical (Plano 12b, item 3): só a faixa toca (pointer-events-none no resto), para não tirar o toque do 3D
+              <div data-testid="zoom-vertical" className="pointer-events-none absolute right-3 top-28 flex flex-col items-center gap-1">
+                <button
+                  type="button"
+                  aria-label="Aproximar o zoom"
+                  onClick={() => viewer.current?.definirZoom(Math.min(1, (telemetria?.zoom ?? 0.5) + 0.1))}
+                  className="pointer-events-auto grid h-7 w-7 place-items-center rounded-full bg-white/90 text-sm font-bold text-slate-900 shadow hover:bg-white"
+                >
+                  +
+                </button>
+                <input
+                  type="range"
+                  aria-label="Zoom"
+                  min={0}
+                  max={100}
+                  step={5}
+                  value={Math.round((telemetria?.zoom ?? 0.5) * 100)}
+                  onChange={(e) => viewer.current?.definirZoom(Number(e.target.value) / 100)}
+                  style={{ writingMode: 'vertical-lr', direction: 'rtl' }}
+                  className="pointer-events-auto h-28 w-6 accent-white"
+                />
+                <button
+                  type="button"
+                  aria-label="Afastar o zoom"
+                  onClick={() => viewer.current?.definirZoom(Math.max(0, (telemetria?.zoom ?? 0.5) - 0.1))}
+                  className="pointer-events-auto grid h-7 w-7 place-items-center rounded-full bg-white/90 text-sm font-bold text-slate-900 shadow hover:bg-white"
+                >
+                  −
+                </button>
+              </div>
+            )}
           </>
         )}
         {apresentando && <Apresentacao unidade={unidadesAtuais.find((u) => u.id === vitrineDaVez) ?? null} nomeAndar={(n) => nomeAndar.get(n) ?? `${n}º andar`} />}
@@ -1030,20 +1203,28 @@ export function Vitrine({
             )}
           </>
         )}
-        {entorno.tipo === 'pronto' && entorno.predios > 0 &&
-          (estande ? (
-            // no estande não há para onde navegar: a atribuição (licença do OSM) fica só como texto
-            <span className="absolute bottom-2 right-2 rounded bg-white/85 px-2 py-0.5 text-[11px] text-slate-800">{entorno.atribuicao}</span>
-          ) : (
-            <a
-              href="https://www.openstreetmap.org/copyright"
-              target="_blank"
-              rel="noreferrer"
-              className="absolute bottom-2 right-2 rounded bg-white/85 px-2 py-0.5 text-[11px] text-slate-800 hover:underline"
-            >
-              {entorno.atribuicao}
-            </a>
-          ))}
+        {/* aviso e créditos do mapa numa faixa só: lado a lado quando cabem, o aviso sobe quando o 3D é estreito
+            (a largura que conta é a do 3D, não a da tela: no computador a Vitrine divide a tela com os cartões) */}
+        <div className="pointer-events-none absolute inset-x-2 bottom-2 flex flex-wrap-reverse items-end justify-between gap-1">
+          {estado === 'pronto' && modo !== 'primeira-pessoa' && !mostrarGiro && (
+            <span className="rounded bg-black/45 px-1.5 py-0.5 text-[10px] text-white/90">Imagens meramente ilustrativas</span>
+          )}
+          {entorno.tipo === 'pronto' &&
+            entorno.predios > 0 &&
+            (estande ? (
+              // no estande não há para onde navegar: a atribuição (licença do OSM) fica só como texto
+              <span className="ml-auto rounded bg-white/85 px-2 py-0.5 text-[11px] text-slate-800">{entorno.atribuicao}</span>
+            ) : (
+              <a
+                href="https://www.openstreetmap.org/copyright"
+                target="_blank"
+                rel="noreferrer"
+                className="pointer-events-auto ml-auto rounded bg-white/85 px-2 py-0.5 text-[11px] text-slate-800 hover:underline"
+              >
+                {entorno.atribuicao}
+              </a>
+            ))}
+        </div>
         {mostrarGiro && (tipoGiro === 'fotorrealista' ? giroFoto : giro) && (
           <Giro360
             giro={(tipoGiro === 'fotorrealista' ? giroFoto : giro)!}
@@ -1230,12 +1411,37 @@ export function Vitrine({
             <VisitaEmGrupo url={salaUrl} viewer={viewer} pronto={estado === 'pronto'} />
           </Cartao>
         )}
-        {lotes.length > 0 && <CartaoLotes lotes={lotes} filtro={filtroLotes} aoFiltrar={setFiltroLotes} selecionado={loteSelecionado} aoSelecionar={setLoteSelecionado} corretor={corretor} />}
+        {lotes.length > 0 && (
+          <CartaoLotes
+            lotes={lotes}
+            filtro={filtroLotes}
+            aoFiltrar={setFiltroLotes}
+            selecionado={loteSelecionado}
+            aoSelecionar={setLoteSelecionado}
+            corretor={corretor}
+            vistaLote={vistaLote}
+            aoVerDaqui={verLote}
+            casaModeloLote={casaModeloLote}
+            aoCasaModelo={alternarCasaModelo}
+          />
+        )}
+        {terreno && (
+          <Cartao titulo="Daqui a 10 anos">
+            <div className="grid gap-2 text-sm" data-testid="daqui-a-10-anos">
+              <label className="grid gap-1" htmlFor="anos-arvores">
+                <span className="font-medium">Árvores do loteamento: {anosArvores === 0 ? 'recém-plantadas' : `${anosArvores} ano${anosArvores > 1 ? 's' : ''}`}</span>
+                <input id="anos-arvores" type="range" min={0} max={10} step={1} value={anosArvores} onChange={(e) => setAnosArvores(Number(e.target.value))} />
+              </label>
+              <p className="text-xs text-suave">Simula o crescimento das árvores das calçadas, da muda até a altura adulta da espécie.</p>
+            </div>
+          </Cartao>
+        )}
         <nav aria-label="Seções da Vitrine" data-testid="secoes" className="flex flex-wrap gap-2">
           {[
             ...(lotes.length ? [['secao-lotes', 'Lotes']] : []),
             ['secao-unidades', 'Unidades'],
             ...(itensLazer.length ? [['secao-lazer', 'Áreas comuns']] : []),
+            ...(galeriaAtual.length > 0 || gerirGaleria ? [['secao-galeria', 'Galeria']] : []),
             ...(proximidades ? [['secao-entorno', 'O que há perto']] : []),
             ['secao-vista', 'Vista e horário'],
           ].map(([id, rotulo]) => (
@@ -1243,6 +1449,16 @@ export function Vitrine({
               {rotulo}
             </button>
           ))}
+          {/* Planta 3D humanizada (Plano 12c, item 3): câmera ortográfica de cima; sai com o próprio botão */}
+          <button
+            type="button"
+            aria-pressed={planta}
+            disabled={estado !== 'pronto' || (!planta && !andarCorte)}
+            onClick={() => ligarPlanta(!planta)}
+            className={`min-h-10 rounded-full border px-4 text-sm font-medium disabled:opacity-50 ${planta ? 'border-acento bg-acento text-acento-texto' : 'border-borda bg-superficie hover:bg-fundo'}`}
+          >
+            {planta ? 'Voltar ao 3D' : 'Planta'}
+          </button>
         </nav>
         <Cartao titulo={`Missões · ${missoes.size} de ${MISSOES.length}`}>
           <ul className="grid gap-2 text-sm" data-testid="missoes" data-feitas={missoes.size}>
@@ -1404,6 +1620,19 @@ export function Vitrine({
 
         {proximidades && <CartaoProximidades fonte={proximidades} pronto={estado === 'pronto'} desenhar={(p) => viewer.current?.desenharRota(p) ?? false} />}
         <div id="secao-lazer" className="scroll-mt-4" />
+        <CarrosselAreasComuns
+          itens={itensLazer}
+          interiores={interiores}
+          temGiro360={giroRenderizado !== null}
+          pronto={estado === 'pronto'}
+          resolverFoto={linkDoArquivo}
+          aoAbrirSplat={(i) => {
+            setInteriorAberto(i);
+            evento.current?.({ tipo: 'interior' });
+          }}
+          aoAbrirGiro360={() => void abrirGiroFoto()}
+          aoVoarAoPonto={(id) => irAoPontoLazer(itensLazer.findIndex((l) => l.id === id), false)}
+        />
         <CartaoLazer
           itens={itensLazer}
           pronto={estado === 'pronto'}
@@ -1422,7 +1651,26 @@ export function Vitrine({
           aoCancelarMarcacao={() => setMarcandoLazer(null)}
           aoRemover={(id) => void removerPontoLazer(id)}
           erro={erroLazer}
+          fotosDisponiveis={fotosProjeto}
+          aoPasseio3D={(id) => {
+            if (viewer.current?.passeioLazer(id)) setPasseio3D(id);
+          }}
         />
+        {galeriaAtual.length === 0 && gerirGaleria && <div id="secao-galeria" className="scroll-mt-4" />}
+        <CartaoGaleria fotos={galeriaAtual} resolverUrl={linkDoArquivo} />
+        {gerirGaleria && (
+          <Cartao titulo="Gestão da galeria">
+            <GestaoGaleria
+              disponiveis={fotosProjeto}
+              atual={galeriaAtual.map((f) => f.id)}
+              salvar={async (ids) => {
+                const r = await gerirGaleria.salvar(ids);
+                if (!r.erro) setGaleriaAtual(ids.map((id) => fotosProjeto.find((f) => f.id === id) ?? { id, nome: id }));
+                return r;
+              }}
+            />
+          </Cartao>
+        )}
         <Cartao titulo="Vista" id="secao-vista">
           <div className="grid gap-4 text-sm">
             <p data-testid="aviso-entorno" className="text-suave">
@@ -1450,6 +1698,16 @@ export function Vitrine({
               }}
             >
               {separados ? 'Juntar os andares' : 'Separar os andares'}
+            </Botao>
+            {/* Corte "casa de bonecas" (Plano 12c, item 1): paredes de cada unidade do andar, pintadas pela situação */}
+            <Botao
+              type="button"
+              variante="secundario"
+              aria-pressed={casaDeBonecas !== null}
+              disabled={estado !== 'pronto' || !andarCorte}
+              onClick={() => ligarCasaDeBonecas(casaDeBonecas === null)}
+            >
+              {casaDeBonecas !== null ? 'Sair da casa de bonecas' : 'Casa de bonecas'}
             </Botao>
             <div className="grid grid-cols-2 gap-3">
               <Campo id="data-sol" rotulo="Dia do sol" type="date" value={dataSol} onChange={(e) => e.target.value && setDataSol(e.target.value)} />

@@ -17,6 +17,30 @@ const ST = ['disponivel', 'disponivel', 'reservado', 'vendido', 'bloqueado'];
 const linhas = ['predio;andar;codigo;tipologia;area_m2;quartos;preco;status'];
 for (let a = 1; a <= 10; a++) for (let f = 1; f <= 4; f++) linhas.push(`Torre A;${a};${a}0${f};Tipo ${f % 2 ? 2 : 3}Q;${f % 2 ? 70 : 98};${f % 2 ? 2 : 3};${600 + a * 10 + f}.000,00;${ST[(a + f) % 5]}`);
 
+// loteamento (Plano 12e): 3 quadras com 3 lotes de 12 × 30 m cada (9 lotes), com rua/calçada/meio-fio (layers do
+// item 8) para o terreno do DXF aparecer no chão, igual ao gerador de e2e/loteamento.spec.ts.
+function dxfLoteamento(): string {
+  const poli = (camada: string, pts: Array<[number, number]>) => ['0', 'LWPOLYLINE', '8', camada, '90', String(pts.length), '70', '1', ...pts.flatMap(([x, y]) => ['10', String(x), '20', String(y)])];
+  const linha = (camada: string, pts: Array<[number, number]>) => ['0', 'LWPOLYLINE', '8', camada, '90', String(pts.length), '70', '0', ...pts.flatMap(([x, y]) => ['10', String(x), '20', String(y)])];
+  const texto = (camada: string, x: number, y: number, t: string) => ['0', 'TEXT', '8', camada, '10', String(x), '20', String(y), '40', '1.5', '1', t];
+  const e: string[] = [];
+  // perto do centro do projeto (-23.56175, -46.6545, fuso 23 SIRGAS 2000): ~75 m do pino, bem dentro do raio de
+  // 500-600 m do entorno/relevo (RAIO_ENTORNO_M/RAIO_CIDADE_M em apps/api/src/rotas/mapa.ts) — do contrário os
+  // lotes saem do alcance da cidade do OSM e a captura mostra só o chão cinza sem fim (Plano 12, item 12e).
+  const [x0, y0] = [331_120, 7_393_250];
+  for (const [q, dy] of [[1, 0], [2, 50], [3, 100]] as const) {
+    e.push(...poli('QUADRAS', [[x0 - 2, y0 + dy - 2], [x0 + 38, y0 + dy - 2], [x0 + 38, y0 + dy + 32], [x0 - 2, y0 + dy + 32]]), ...texto('QUADRAS', x0 + 30, y0 + dy + 31, `Q-${q}`));
+    for (let l = 0; l < 3; l++) {
+      const x = x0 + l * 12;
+      e.push(...poli('LOTES', [[x, y0 + dy], [x + 12, y0 + dy], [x + 12, y0 + dy + 30], [x, y0 + dy + 30]]), ...texto('NUMEROS', x + 6, y0 + dy + 15, String(l + 1)));
+    }
+  }
+  e.push(...linha('CALCADAS', [[x0 + 37.5, y0 - 5], [x0 + 37.5, y0 + 135]]));
+  e.push(...linha('MEIO_FIO', [[x0 + 39, y0 - 5], [x0 + 39, y0 + 135]]));
+  e.push(...linha('RUAS', [[x0 + 41, y0 - 5], [x0 + 41, y0 + 135]]));
+  return ['0', 'SECTION', '2', 'ENTITIES', ...e, '0', 'ENDSEC', '0', 'EOF'].join('\n');
+}
+
 test('aparência da Vitrine 3D em celular, tablet e computador', async ({ page, request }) => {
   test.setTimeout(900_000); // 5 imagens com a cidade completa, duas com acabamento de imagem: no CI o 3D é desenhado por software
   await entrarComoAdminComMfa(page, request, 'visual');
@@ -81,4 +105,46 @@ test('aparência da Vitrine 3D em celular, tablet e computador', async ({ page, 
   await page.getByLabel(/^Hora/).fill('21');
   await page.waitForTimeout(1500);
   await expect(vitrine).toHaveScreenshot('vitrine-computador-noite.png', { maxDiffPixelRatio: 0.02, timeout: 90_000, mask: [page.getByTestId('qualidade')] });
+});
+
+// loteamento (Plano 12e): produto novo do Plano 12d, lotes coloridos no chão com o terreno (rua, calçada, meio-fio)
+// do DXF. Teste à parte: no CI o 3D é desenhado por software e as 5 imagens do prédio já usam quase todo o tempo.
+test('aparência do loteamento com o terreno do DXF', async ({ page, request }) => {
+  test.setTimeout(600_000);
+  await entrarComoAdminComMfa(page, request, 'visual-lote');
+  await page.getByLabel('Nome do projeto').fill('Residencial dos Ipês');
+  await page.getByRole('button', { name: 'Criar projeto' }).click();
+  await page.getByRole('link', { name: /Residencial dos Ipês/ }).click();
+  await page.getByLabel('Latitude').fill('-23.56175');
+  await page.getByLabel('Longitude').fill('-46.6545');
+  await page.getByRole('button', { name: 'Salvar dados' }).click();
+  await expect(page.getByText('Dados salvos.')).toBeVisible();
+  await page.getByLabel('Nome do prédio').fill('Loteamento');
+  await page.getByLabel('Andares').fill('1');
+  await page.getByRole('button', { name: 'Criar prédio' }).click();
+  await expect(page.getByText('Prédio criado.')).toBeVisible();
+  await page.getByRole('link', { name: /ver espelho de vendas/ }).click();
+  const importar = page.getByTestId('importar-lotes');
+  await importar.getByLabel('Arquivo do loteamento').setInputFiles({ name: 'loteamento-visual.dxf', mimeType: 'application/dxf', buffer: Buffer.from(dxfLoteamento()) });
+  await importar.getByRole('button', { name: 'Ver a prévia' }).click();
+  await importar.getByRole('button', { name: 'Gravar os lotes' }).click();
+  await expect(page.getByTestId('previa-lotes')).toContainText('Gravado: 9 lotes');
+  await page.getByRole('link', { name: 'Abrir Vitrine 3D' }).click();
+  await page.waitForURL(/\/painel\/predios\/[^/]+\/vitrine$/);
+  const urlLote = new URL(page.url());
+  urlLote.searchParams.set('qualidade', 'medio');
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto(urlLote.toString());
+  const vitrineLote = page.getByTestId('vitrine-3d');
+  await expect(vitrineLote).toHaveAttribute('data-estado', 'pronto', { timeout: 45_000 });
+  await expect(vitrineLote).toHaveAttribute('data-lotes', '9', { timeout: 30_000 });
+  await expect(vitrineLote).toHaveAttribute('data-anos', '10', { timeout: 15_000 }); // terreno do DXF carregado
+  // a cidade do OSM monta depois do prédio (estado "pronto" não espera o entorno): sem isto a captura pode sair
+  // antes dela aparecer, como o teste do prédio já garante acima com a mesma espera.
+  await expect(vitrineLote).toHaveAttribute('data-entorno', /^\d+$/, { timeout: 45_000 });
+  await page.getByLabel('Dia do sol').fill('2026-06-21');
+  await page.getByLabel(/^Hora/).fill('15');
+  await page.evaluate(() => window.scrollTo(0, 0));
+  await page.waitForTimeout(1500);
+  await expect(vitrineLote).toHaveScreenshot('vitrine-loteamento.png', { maxDiffPixelRatio: 0.02, timeout: 90_000, mask: [page.getByTestId('qualidade')] });
 });

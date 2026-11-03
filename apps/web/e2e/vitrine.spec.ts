@@ -51,6 +51,12 @@ test('vitrine 3D: volumes do prédio, filtros, favoritos, voo até a unidade, co
   // entorno: prédios reais da Av. Paulista em volta (do OSM), com a atribuição exigida pela licença
   await expect(vitrine).toHaveAttribute('data-entorno', /^\d+$/, { timeout: 30_000 });
   expect(Number(await vitrine.getAttribute('data-entorno'))).toBeGreaterThan(300);
+  // carros nas ruas do entorno (Plano 12a, item 10) e nuvens baixas (item 15): o atributo existe sempre; a
+  // contagem de carros pode cair a 0 se a qualidade adaptativa descer para "baixo" num CI lento
+  await expect(vitrine).toHaveAttribute('data-carros', /^\d+$/, { timeout: 30_000 });
+  await expect(vitrine).toHaveAttribute('data-nuvens', /^(sim|nao)$/, { timeout: 30_000 });
+  // câmera de arquitetura com verticais retas (Plano 12a, item 13): ligada por padrão na órbita (pitch inicial dentro da faixa segura)
+  await expect(vitrine).toHaveAttribute('data-verticais', 'sim', { timeout: 30_000 });
   await expect(page.getByRole('link', { name: /OpenStreetMap/ })).toHaveAttribute('href', 'https://www.openstreetmap.org/copyright');
   await expect(page.getByTestId('aviso-entorno')).toContainText('prédios reais em volta');
 
@@ -102,13 +108,13 @@ test('vitrine 3D: volumes do prédio, filtros, favoritos, voo até a unidade, co
 
   // o que há perto: tempo a pé, filtro por tipo e a rota desenhada no chão pelas ruas (Plano 12)
   const perto = page.getByTestId('proximidades');
-  await expect(perto).toContainText('Estação Trianon-MASP');
+  await expect(perto).toContainText('Estação Trianon-MASP', { timeout: 30_000 }); // server action na fila com as outras da página
   await expect(perto).toContainText(/\d+ min a pé/);
   await perto.getByRole('group', { name: 'Tipo de lugar' }).getByRole('button', { name: 'Transporte' }).click();
   await perto.getByRole('button', { name: /Estação Trianon-MASP/ }).click();
   await expect(vitrine).toHaveAttribute('data-rota', /^[3-9]|^\d{2,}/, { timeout: 15_000 });
   await perto.getByRole('button', { name: 'Apagar a rota' }).click();
-  await expect(vitrine).toHaveAttribute('data-rota', '0');
+  await expect(vitrine).toHaveAttribute('data-rota', '0', { timeout: 30_000 });
 
   // corte por andar
   await page.getByLabel('Ver até o andar (corte)').selectOption({ label: '1º andar' });
@@ -125,6 +131,7 @@ test('vitrine 3D: volumes do prédio, filtros, favoritos, voo até a unidade, co
   // primeira pessoa: anda com o teclado e mostra o joystick de toque
   await page.getByRole('button', { name: 'Andar a pé (1ª pessoa)' }).click();
   await expect(vitrine).toHaveAttribute('data-modo', 'primeira-pessoa');
+  await expect(vitrine).toHaveAttribute('data-verticais', 'nao'); // desligada na primeira pessoa (item 13)
   await expect(page.getByTestId('joystick')).toBeVisible();
   await expect(vitrine).not.toHaveAttribute('data-posicao', '');
   const zAntes = Number((await vitrine.getAttribute('data-posicao'))!.split(',')[1]);
@@ -133,6 +140,22 @@ test('vitrine 3D: volumes do prédio, filtros, favoritos, voo até a unidade, co
   await page.keyboard.up('s');
   await page.getByRole('button', { name: 'Voltar para a vista de cima' }).click();
   await expect(vitrine).toHaveAttribute('data-modo', 'orbita');
+
+  // zoom vertical (Plano 12b, item 3): o botão "+" aproxima a câmera (o número do zoom sobe), sem sair da órbita
+  const zoomAntes = Number(await vitrine.getAttribute('data-zoom'));
+  await page.getByRole('button', { name: 'Aproximar o zoom' }).click();
+  await expect.poll(async () => Number(await vitrine.getAttribute('data-zoom'))).toBeGreaterThan(zoomAntes);
+  await expect(vitrine).toHaveAttribute('data-modo', 'orbita');
+  const depoisDoMais = Number(await vitrine.getAttribute('data-zoom'));
+  // o botão "−" afasta (o número desce)
+  await page.getByRole('button', { name: 'Afastar o zoom' }).click();
+  await expect.poll(async () => Number(await vitrine.getAttribute('data-zoom'))).toBeLessThan(depoisDoMais);
+  // o slider (role=slider, acessível por teclado: ArrowUp/ArrowDown mudam o valor nativo do range)
+  const slider = page.getByRole('slider', { name: 'Zoom' });
+  await slider.focus();
+  const antesDoTeclado = Number(await vitrine.getAttribute('data-zoom'));
+  await slider.press('ArrowUp');
+  await expect.poll(async () => Number(await vitrine.getAttribute('data-zoom'))).not.toBe(antesDoTeclado);
 
   // telemetria: ao sair da Vitrine a visita é enviada (sendBeacon) e aparece no painel de desempenho
   await page.getByRole('link', { name: 'Desempenho 3D' }).click();

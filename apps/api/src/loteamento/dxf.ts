@@ -7,6 +7,8 @@ export interface PolilinhaDxf {
   camada: string;
   fechada: boolean;
   pontos: Array<[number, number]>;
+  /** Elevação (curva de nível, código 38 da LWPOLYLINE, ou z dos vértices na POLYLINE antiga); `null` sem cota. */
+  elevacao: number | null;
 }
 export interface TextoDxf {
   camada: string;
@@ -73,17 +75,24 @@ export function lerDxf(conteudo: string): Dxf {
       for (let k = 0; k < e.campos.length; k++) {
         if (e.campos[k]![0] === 10) pontos.push([Number(e.campos[k]![1]), Number(e.campos.slice(k + 1).find(([q]) => q === 20)?.[1])]);
       }
-      polilinhas.push({ camada, fechada: (flags & 1) === 1, pontos });
+      const elevRaw = e.campos.find(([k]) => k === 38)?.[1];
+      const elevacao = elevRaw !== undefined && Number.isFinite(Number(elevRaw)) ? Number(elevRaw) : null;
+      polilinhas.push({ camada, fechada: (flags & 1) === 1, pontos, elevacao });
     } else if (e.tipo === 'POLYLINE') {
-      // formato antigo: os vértices vêm em entidades VERTEX até o SEQEND
+      // formato antigo: os vértices vêm em entidades VERTEX até o SEQEND (a cota pode estar em cada vértice, código 30)
       const flags = Number(e.campos.find(([k]) => k === 70)?.[1] ?? 0);
       const pontos: Array<[number, number]> = [];
+      const elevacoes: number[] = [];
       while (i < pares.length && pares[i]![1] === 'VERTEX') {
         const v2 = entidade();
         pontos.push([Number(v2.campos.find(([k]) => k === 10)?.[1]), Number(v2.campos.find(([k]) => k === 20)?.[1])]);
+        const z = v2.campos.find(([k]) => k === 30)?.[1];
+        if (z !== undefined && Number.isFinite(Number(z))) elevacoes.push(Number(z));
       }
       if (pares[i]?.[1] === 'SEQEND') entidade();
-      polilinhas.push({ camada, fechada: (flags & 1) === 1, pontos });
+      const elevEntidade = e.campos.find(([k]) => k === 38)?.[1];
+      const elevacao = elevEntidade !== undefined && Number.isFinite(Number(elevEntidade)) ? Number(elevEntidade) : elevacoes.length ? elevacoes[0]! : null;
+      polilinhas.push({ camada, fechada: (flags & 1) === 1, pontos, elevacao });
     } else if (e.tipo === 'TEXT' || e.tipo === 'MTEXT') {
       const texto = textoLimpo(e.campos.filter(([k]) => k === 1 || k === 3).map(([, t]) => t).join(''));
       const x = Number(e.campos.find(([k]) => k === 10)?.[1]);
@@ -91,5 +100,7 @@ export function lerDxf(conteudo: string): Dxf {
       if (texto && Number.isFinite(x) && Number.isFinite(y)) textos.push({ camada, x, y, texto });
     }
   }
-  return { polilinhas: polilinhas.filter((p) => p.pontos.length >= 3 && p.pontos.every(([x, y]) => Number.isFinite(x) && Number.isFinite(y))), textos };
+  // >= 2 pontos: os lotes e as quadras (fechados) sempre têm 3+ na prática, mas ruas, calçadas e meio-fio do
+  // terreno (item 8) costumam ser um traço reto de 2 pontos só
+  return { polilinhas: polilinhas.filter((p) => p.pontos.length >= 2 && p.pontos.every(([x, y]) => Number.isFinite(x) && Number.isFinite(y))), textos };
 }

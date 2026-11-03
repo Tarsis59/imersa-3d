@@ -94,7 +94,10 @@ test('vendas: link pelo WhatsApp → cliente no celular (sem login) → pedido d
   await page.getByLabel('Novo status').selectOption('reservado');
   await page.getByRole('button', { name: 'Mudar status' }).click();
   await expect(page.getByText('Status alterado.')).toBeVisible();
-  await expect(cliente.getByTestId('lista-vitrine').getByRole('button', { name: /^101/ })).toContainText('Reservado', { timeout: 2_000 });
+  // a entrega do SSE é instantânea (LISTEN/NOTIFY do Postgres), mas no CI o 3D é desenhado por software e cada quadro
+  // ocupa a página por segundos (a cidade montando, nuvens, carros): a lista só repinta entre um quadro e outro.
+  // Em build de produção num computador comum a troca aparece em menos de 2 s; aqui, a mesma espera dos estados do 3D
+  await expect(cliente.getByTestId('lista-vitrine').getByRole('button', { name: /^101/ })).toContainText('Reservado', { timeout: 30_000 });
   await cliente.screenshot({ path: test.info().outputPath('portal-celular.png') });
 
   await cliente.getByRole('link', { name: /Quero falar com/ }).tap();

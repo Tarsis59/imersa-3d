@@ -23,7 +23,12 @@ export type AcaoComando =
   | { tipo: 'modo'; modo: 'orbita' | 'primeira-pessoa' }
   | { tipo: 'visao_geral' }
   | { tipo: 'som'; ligado: boolean }
-  | { tipo: 'separar_andares'; ligado: boolean };
+  | { tipo: 'separar_andares'; ligado: boolean }
+  /** Corte "casa de bonecas" (Plano 12c, item 1): `andar: null` usa o andar já escolhido na tela. */
+  | { tipo: 'casa_bonecas'; ligado: boolean; andar: number | null }
+  /** Buscador de lotes do loteamento (Plano 12d, item 5): "lotes de até 300 mil na quadra 4". */
+  | { tipo: 'filtro_lotes'; precoMax?: number; areaMin?: number; quadras?: string[]; status?: StatusUnidade[] }
+  | { tipo: 'limpar_lotes' };
 
 export interface Interpretacao {
   acoes: AcaoComando[];
@@ -118,7 +123,34 @@ export function interpretarComando(texto: string): Interpretacao {
     partes.push('sem filtros');
   }
 
-  // filtro
+  // loteamento (Plano 12d, item 5): "lotes" na frase manda o filtro/preço/área/status para o buscador de lotes,
+  // não para o de unidades (prédio e loteamento nunca aparecem juntos na mesma Vitrine)
+  const souLotes = /\blotes?\b/.test(n);
+  if (souLotes) {
+    if (/\b(limpa(r)?|tira(r)?|remove(r)?|apaga(r)?)\b.*\blotes?\b|\blotes? sem filtros?\b/.test(n)) {
+      acoes.push({ tipo: 'limpar_lotes' });
+      partes.push('lotes sem filtro');
+    } else {
+      const filtroLotes: Extract<AcaoComando, { tipo: 'filtro_lotes' }> = { tipo: 'filtro_lotes' };
+      const pl = n.match(/\b(?:ate|no maximo|abaixo de|menos de|max(?:imo)?|por ate|teto de)\s*(?:r\$\s*)?(\d[\d.,]*)\s*(mil|k|milhao|milhoes|mi)?\b/);
+      if (pl) {
+        const v = dinheiro(pl[1]!, pl[2]);
+        if (v !== null) filtroLotes.precoMax = v;
+      }
+      const al = n.match(/\b(?:acima de|mais de|pelo menos|minimo de|a partir de|maior que|com mais de)\s*(\d+)\s*(?:m2|m²|metros)/);
+      if (al) filtroLotes.areaMin = Number(al[1]);
+      const qd = n.match(/\bquadras?\s*(\d{1,3}(?:\s*(?:,|e|ou)\s*\d{1,3})*)\b/);
+      if (qd) filtroLotes.quadras = [...new Set((qd[1]!.match(/\d+/g) ?? []).map((x) => x.padStart(2, '0')))];
+      const stl = STATUS.filter(([re]) => re.test(n)).map(([, s]) => s);
+      if (stl.length) filtroLotes.status = stl;
+      if (Object.keys(filtroLotes).length > 1) {
+        acoes.push(filtroLotes);
+        partes.push('lotes' + (filtroLotes.quadras ? ` da quadra ${filtroLotes.quadras.join(' ou ')}` : '') + (filtroLotes.precoMax ? ` até ${reais(filtroLotes.precoMax)}` : '') + (filtroLotes.areaMin ? ` a partir de ${filtroLotes.areaMin} m²` : '') + (filtroLotes.status ? ` ${filtroLotes.status.map((s) => ({ disponivel: 'disponíveis', reservado: 'reservados', vendido: 'vendidos', bloqueado: 'bloqueados' })[s]).join(' e ')}` : ''));
+      }
+    }
+  }
+
+  // filtro (unidades do prédio)
   const filtro: Extract<AcaoComando, { tipo: 'filtro' }> = { tipo: 'filtro' };
   const q = n.match(/\b(\d+(?:\s*(?:,|e|ou|a)\s*\d+)*)\s*(?:quartos?|dorm\w*|qts?)\b/);
   if (q) {
@@ -126,12 +158,12 @@ export function interpretarComando(texto: string): Interpretacao {
     const lista = faixa ? Array.from({ length: Math.max(0, Number(faixa[2]) - Number(faixa[1]) + 1) }, (_, k) => Number(faixa[1]) + k) : (q[1]!.match(/\d+/g) ?? []).map(Number);
     filtro.quartos = [...new Set(lista.filter((x) => x >= 0 && x <= 10))];
   } else if (/\b(studios?|kitnets?|lofts?)\b/.test(n)) filtro.quartos = [0];
-  const p = n.match(/\b(?:ate|no maximo|abaixo de|menos de|max(?:imo)?|por ate|teto de)\s*(?:r\$\s*)?(\d[\d.,]*)\s*(mil|k|milhao|milhoes|mi)?\b/);
+  const p = !souLotes ? n.match(/\b(?:ate|no maximo|abaixo de|menos de|max(?:imo)?|por ate|teto de)\s*(?:r\$\s*)?(\d[\d.,]*)\s*(mil|k|milhao|milhoes|mi)?\b/) : null;
   if (p) {
     const v = dinheiro(p[1]!, p[2]);
     if (v !== null) filtro.precoMax = v;
   }
-  const a = n.match(/\b(?:acima de|mais de|pelo menos|minimo de|a partir de|maior que|com mais de)\s*(\d+)\s*(?:m2|m²|metros)/);
+  const a = !souLotes ? n.match(/\b(?:acima de|mais de|pelo menos|minimo de|a partir de|maior que|com mais de)\s*(\d+)\s*(?:m2|m²|metros)/) : null;
   if (a) filtro.areaMin = Number(a[1]);
   const sol: PeriodoSol[] = [];
   if (/\bsol (da|de|pela) manha\b|\bsol nascente\b|\bnascente\b/.test(n)) sol.push('manha');
@@ -139,10 +171,10 @@ export function interpretarComando(texto: string): Interpretacao {
   if (/\bsol o dia (todo|inteiro)\b|\bsol (o )?dia todo\b|\bmuito sol\b/.test(n)) sol.push('dia-todo');
   if (/\b(pouco sol|sem sol|fresc[ao]s?|sombra)\b/.test(n)) sol.push('pouco-sol');
   if (sol.length) filtro.sol = sol;
-  const st = STATUS.filter(([re]) => re.test(n)).map(([, s]) => s);
+  const st = souLotes ? [] : STATUS.filter(([re]) => re.test(n)).map(([, s]) => s);
   if (st.length) filtro.status = st;
   if (/\bfavorit[ao]s?\b|\bque (eu )?gostei\b|\bque (eu )?salvei\b/.test(n)) filtro.favoritos = true;
-  if (Object.keys(filtro).length > 1) {
+  if (!souLotes && Object.keys(filtro).length > 1) {
     acoes.push(filtro);
     if (filtro.quartos) partes.push(filtro.quartos.map((x) => (x === 0 ? 'studio' : `${x} quarto${x > 1 ? 's' : ''}`)).join(' ou '));
     if (filtro.sol) partes.push(filtro.sol.map((s) => ROTULO_SOL[s]).join(' ou '));
@@ -221,6 +253,16 @@ export function interpretarComando(texto: string): Interpretacao {
   } else if (/\b(tira(r)?|sem|remove(r)?) (o )?corte\b|\bpredio (todo|inteiro)\b/.test(n)) {
     acoes.push({ tipo: 'corte', andar: null });
     partes.push('prédio inteiro');
+  }
+
+  // corte "casa de bonecas" (Plano 12c, item 1): "casa de bonecas do 5º andar", "sai da casa de bonecas"
+  if (/\b(tira(r)?|sai(r)?|fecha(r)?|sem)\b.{0,6}casa de bonecas\b/.test(n)) {
+    acoes.push({ tipo: 'casa_bonecas', ligado: false, andar: null });
+    partes.push('sem casa de bonecas');
+  } else if (/\bcasa de bonecas\b/.test(n)) {
+    const ca = n.match(/(\d{1,3})\s*(?:o\s*)?andar/);
+    acoes.push({ tipo: 'casa_bonecas', ligado: true, andar: ca ? Number(ca[1]) : null });
+    partes.push(ca ? `casa de bonecas do ${ca[1]}º andar` : 'casa de bonecas');
   }
 
   // câmera e som

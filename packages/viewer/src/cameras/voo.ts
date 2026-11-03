@@ -40,3 +40,30 @@ export function enquadrar(caixa: Caixa, fovGraus: number, aspecto: number, eleva
   const direcao = new THREE.Vector3(Math.cos(el) * Math.SQRT1_2, Math.sin(el), Math.cos(el) * Math.SQRT1_2);
   return { posicao: alvo.clone().addScaledVector(direcao, distancia), alvo };
 }
+
+export interface EnquadramentoOrtografico {
+  /** Bem acima do centro da caixa, olhando para baixo. */
+  posicao: THREE.Vector3;
+  /** No piso da caixa (minY), no centro em X/Z. */
+  alvo: THREE.Vector3;
+  /** Metade da altura do volume de visão, em metros do mundo: `top`/`-bottom` da câmera ortográfica; com o
+   * `aspecto` da tela dá o `left`/`right` (× aspecto). */
+  meiaAlturaMundo: number;
+}
+
+/**
+ * Planta 3D humanizada (Plano 12c, item 3): câmera ortográfica de cima, enquadrando a caixa toda (o pavimento)
+ * com a margem, do jeito certo pra tela larga ou estreita. Pura: só os números, quem monta a
+ * `THREE.OrthographicCamera` aplica `posicao`/`alvo`/`meiaAlturaMundo`.
+ */
+export function enquadrarDeCima(caixa: Caixa, aspecto: number, margem = 1.1): EnquadramentoOrtografico {
+  const cx = (caixa.minX + caixa.maxX) / 2;
+  const cz = (caixa.minZ + caixa.maxZ) / 2;
+  const alvo = new THREE.Vector3(cx, caixa.minY, cz);
+  const distanciaAcima = Math.max(20, (caixa.maxY - caixa.minY) + 15); // alto o bastante para não raspar o telhado
+  const posicao = new THREE.Vector3(cx, caixa.maxY + distanciaAcima, cz);
+  const largura = (caixa.maxX - caixa.minX) * margem;
+  const profundidade = (caixa.maxZ - caixa.minZ) * margem;
+  const meiaAlturaMundo = Math.max(profundidade / 2, largura / (2 * Math.max(aspecto, 1e-6)));
+  return { posicao, alvo, meiaAlturaMundo };
+}

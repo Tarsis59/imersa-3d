@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 import { notFound } from 'next/navigation';
 import { buscarPortal } from '@/lib/portal';
+import { estiloMarca, URL_GOOGLE_FONT } from '@/lib/tema';
 import { carregarEntornoPublico, enviarLead, linkArquivoPublico, listarPontosPublico, rotaAtePublico } from './actions';
 import { PortalVitrine } from './portal';
 
@@ -43,17 +44,26 @@ export default async function PaginaPortal({ params }: Props) {
   if (r.status !== 200) throw new Error('portal indisponível');
   const p = r.dados;
   const local = [p.projeto.cidade, p.projeto.uf].filter(Boolean).join(' – ');
+  const fonteGoogle = URL_GOOGLE_FONT[p.empresa.marca.fonte];
   return (
-    <div className="mx-auto grid max-w-6xl gap-6 px-4 py-6">
+    // marca da incorporadora (Plano 12b, item 11): cor, fonte e logo do cliente deste link
+    <div className="mx-auto grid max-w-6xl gap-6 px-4 py-6" style={estiloMarca(p.empresa.marca)}>
+      {fonteGoogle && <link rel="stylesheet" href={fonteGoogle} />}
       <header className="flex flex-wrap items-end justify-between gap-3">
-        <div className="grid gap-1">
-          <span className="text-sm text-suave">{p.empresa.nome}</span>
-          <h1 className="text-2xl font-bold">
-            {p.projeto.nome} · {p.predio.nome}
-          </h1>
-          <p className="text-sm text-suave">
-            {local && `${local} · `}Atendimento: <strong>{p.consultora.nome}</strong>
-          </p>
+        <div className="flex items-center gap-3">
+          {p.empresa.marca.logoUrl && (
+            // eslint-disable-next-line @next/next/no-img-element -- link assinado, fora dos domínios do loader do Next
+            <img data-testid="logo-marca" src={p.empresa.marca.logoUrl} alt={`Logo de ${p.empresa.nome}`} className="h-10 w-auto rounded" />
+          )}
+          <div className="grid gap-1">
+            <span className="text-sm text-suave">{p.empresa.nome}</span>
+            <h1 className="text-2xl font-bold">
+              {p.projeto.nome} · {p.predio.nome}
+            </h1>
+            <p className="text-sm text-suave">
+              {local && `${local} · `}Atendimento: <strong>{p.consultora.nome}</strong>
+            </p>
+          </div>
         </div>
         <a href="#contato" className="rounded-lg bg-acento px-4 py-2 text-sm font-semibold text-acento-texto hover:opacity-90">
           Quero falar com {p.consultora.nome.split(' ')[0]}

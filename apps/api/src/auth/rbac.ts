@@ -17,11 +17,12 @@ export type Acao =
   | 'integracao:gerir'
   | 'catalogo:editar'
   | 'configuracao:salvar'
-  | 'estande:gerir';
+  | 'estande:gerir'
+  | 'marca:editar';
 
 const TODOS: readonly Papel[] = PAPEIS;
 const GESTAO: readonly Papel[] = ['super_admin', 'admin'];
-const SENSIVEIS: readonly Acao[] = ['projeto:criar', 'membro:convidar', 'auditoria:ler', 'empreendimento:editar', 'importacao:executar', 'unidade:status', 'captura:revisar', 'lead:ler', 'integracao:gerir', 'catalogo:editar', 'estande:gerir'];
+const SENSIVEIS: readonly Acao[] = ['projeto:criar', 'membro:convidar', 'auditoria:ler', 'empreendimento:editar', 'importacao:executar', 'unidade:status', 'captura:revisar', 'lead:ler', 'integracao:gerir', 'catalogo:editar', 'estande:gerir', 'marca:editar'];
 
 const MATRIZ: Record<Acao, readonly Papel[]> = {
   'projeto:ler': TODOS,
@@ -46,6 +47,8 @@ const MATRIZ: Record<Acao, readonly Papel[]> = {
   'configuracao:salvar': [...GESTAO, 'consultora'],
   // estande: um link público que fica anos ligado num PC; só a gestão cria, recarrega e desativa
   'estande:gerir': GESTAO,
+  // marca da incorporadora (logo, cor e fonte): aparece para todo cliente que abrir o link, por isso só a gestão
+  'marca:editar': GESTAO,
 };
 
 export const pode = (papel: Papel, acao: Acao): boolean => MATRIZ[acao].includes(papel);

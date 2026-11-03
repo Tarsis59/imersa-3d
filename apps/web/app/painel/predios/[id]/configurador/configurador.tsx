@@ -6,6 +6,7 @@ import { criarViewer, type FonteMovel, type Superficie, type UnidadeViewer, type
 import { Aviso, Botao, Campo, Cartao, Selecao } from '@/components/ui';
 import { Amostra } from '@/components/amostra';
 import { DECODIFICADORES } from '@/lib/decodificadores';
+import { TEXTURAS_PBR } from '@/lib/texturasPbr';
 import {
   acabamentoDe,
   m2,
@@ -127,7 +128,7 @@ export function Configurador({
     const el = canvas.current;
     if (!el) return;
     const c = inicial.current;
-    const v = criarViewer(el, { unidades: c.unidades, modeloUrl: c.modeloUrl, decodificadores: DECODIFICADORES, configurador: true });
+    const v = criarViewer(el, { unidades: c.unidades, modeloUrl: c.modeloUrl, decodificadores: DECODIFICADORES, texturasPbr: TEXTURAS_PBR, configurador: true });
     viewer.current = v;
     let vivo = true;
     v.aoSelecionarMovel((id) => vivo && setSelecionado(id));

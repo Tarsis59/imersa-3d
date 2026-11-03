@@ -197,6 +197,8 @@ export interface Lead {
   status: StatusLead;
   criadoEm: string;
   unidade: string | null;
+  /** "lote X da quadra Y" (Plano 12e): pedido de contato a partir de um lote do loteamento, em vez de uma unidade. */
+  lote: string | null;
   predio: string;
   predioId: string;
   projeto: string;
@@ -236,19 +238,33 @@ export const ROTULO_LAZER: Record<CategoriaLazer, string> = {
   jardim: 'Jardim',
   outro: 'Outro',
 };
+/** Menu da Vitrine por categoria (Plano 12d, item 7): grupo "guarda-chuva", diferente do tipo exato do espaço. */
+export const GRUPOS_LAZER = ['lazer', 'sociais', 'gastronomia', 'beach_sports', 'pet'] as const;
+export type GrupoLazer = (typeof GRUPOS_LAZER)[number];
+export const ROTULO_GRUPO: Record<GrupoLazer, string> = {
+  lazer: 'Lazer',
+  sociais: 'Sociais',
+  gastronomia: 'Gastronomia',
+  beach_sports: 'Beach Sports',
+  pet: 'Pet',
+};
 export interface ItemLazer {
   id: string;
   categoria: CategoriaLazer;
+  grupo: GrupoLazer;
   nome: string;
   descricao: string | null;
   x: number;
   y: number;
   z: number;
   ordem: number;
+  /** Fotos da ficha (ids de arquivos já enviados no projeto; Plano 12b, item 6). */
+  fotos: string[];
 }
 
 export interface Portal {
-  empresa: { nome: string };
+  /** Marca da incorporadora (Plano 12b, item 11): aplicada como variáveis CSS no portal, no estande e na Vitrine. */
+  empresa: { nome: string; marca: Marca };
   /** `whatsapp`: só dígitos com o 55 (o corretor informa ao gerar o link); null = sem botão de WhatsApp. */
   consultora: { nome: string; whatsapp: string | null };
   projeto: { id: string; nome: string; descricao: string | null; cidade: string | null; uf: string | null; lat: number | null; lon: number | null; rotacaoGraus: number; estiloDecorado: 'moderno' | 'classico' | 'jovem' };
@@ -263,12 +279,32 @@ export interface Portal {
   lazer: ItemLazer[];
   /** Loteamento: os lotes com quadra, medidas, preço e situação (vazio num prédio). */
   lotes: import('@/app/painel/predios/[id]/vitrine/lotes').LoteVitrine[];
+  /** Terreno e infraestrutura do loteamento (Plano 12d, item 8): ruas, calçadas, meio-fio e curvas de nível. */
+  terreno: import('@imersa/viewer').TerrenoLoteamentoLido | null;
   /** Fotos do imóvel com GPS (quadros no 3D). */
   fotos: Array<{ id: string; nome: string; lat: number; lon: number; rumo: number | null }>;
+  /** Galeria do empreendimento (Plano 12b, item 7): fotos escolhidas pela gestão, na ordem dela. */
+  galeria: Array<{ id: string; nome: string }>;
   /** Assistente com IA (direto na API), ou null se desligado. */
   assistenteUrl: string | null;
   /** Transmissão do status das unidades ao vivo (EventSource direto na API). */
   aoVivoUrl: string;
+}
+
+export const FONTES_MARCA = ['sistema', 'inter', 'poppins', 'roboto', 'merriweather'] as const;
+export type FonteMarca = (typeof FONTES_MARCA)[number];
+export const ROTULO_FONTE: Record<FonteMarca, string> = {
+  sistema: 'Do sistema',
+  inter: 'Inter',
+  poppins: 'Poppins',
+  roboto: 'Roboto',
+  merriweather: 'Merriweather',
+};
+/** Marca da incorporadora (Plano 12b, item 11): logo, cor primária e fonte. */
+export interface Marca {
+  logoUrl: string | null;
+  corPrimaria: string | null;
+  fonte: FonteMarca;
 }
 
 // ------------------------------------------------------------------ BIM
@@ -304,6 +340,25 @@ export interface GirosDoPredio {
   ultimo: GiroPredio | null;
   pronto: GiroPredio | null;
   vitrine: { arquivoId: string; unidades: string[] } | null;
+}
+
+/** Bake da luz (AO + difusa de dia e de noite, Plano 12a, item 6): GLB "assado" no Blender, na GPU do Kaggle. */
+export interface BakePredio {
+  id: string;
+  status: 'na_fila' | 'processando' | 'pronto' | 'erro';
+  mensagem: string | null;
+  metricas: { dispositivo?: string; mb?: number; largura?: number; tempos_s?: Record<string, number> };
+  arquivoId: string | null;
+  criadoEm: string;
+  atualizadoEm: string;
+  /** Feito com o modelo que o prédio usa hoje. */
+  atual: boolean;
+}
+export interface BakesDoPredio {
+  temModelo: boolean;
+  ultimo: BakePredio | null;
+  pronto: BakePredio | null;
+  vitrine: { arquivoId: string } | null;
 }
 
 /** Estúdio de marketing: vídeos do prédio (Blender, fiel ao projeto, com o selo "Imagem ilustrativa"). */

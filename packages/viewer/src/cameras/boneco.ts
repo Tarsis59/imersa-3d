@@ -18,17 +18,19 @@ export interface PresetBoneco {
   /** Cabelo comprido (rabo de cavalo) ou curto; boné por cima, se tiver. */
   cabeloLongo: boolean;
   bone: number | null;
+  /** Altura: pequena variação por pessoa (Plano 12a, item 9), em volta de 1 (~1,72 m). */
+  altura: number;
 }
 
 export const BONECOS: readonly PresetBoneco[] = [
-  { id: 'ana', nome: 'Ana', pele: 0xc68a63, roupa: 0x2f7d8a, calca: 0x2b3442, sapato: 0xf2f2f2, cabelo: 0x2a1b14, cabeloLongo: true, bone: null },
-  { id: 'beto', nome: 'Beto', pele: 0x8d5a3b, roupa: 0xe0a53a, calca: 0x3b4d6b, sapato: 0x222222, cabelo: 0x111111, cabeloLongo: false, bone: 0x1f5fa8 },
-  { id: 'carla', nome: 'Carla', pele: 0xf0c9a6, roupa: 0xb8445a, calca: 0xe8e2d6, sapato: 0x7a4b2c, cabelo: 0x9b5a2a, cabeloLongo: true, bone: null },
-  { id: 'davi', nome: 'Davi', pele: 0xe2b48c, roupa: 0x4c6b3c, calca: 0x2a2a2e, sapato: 0xd94f2b, cabelo: 0x5a3a22, cabeloLongo: false, bone: null },
+  { id: 'ana', nome: 'Ana', pele: 0xc68a63, roupa: 0x2f7d8a, calca: 0x2b3442, sapato: 0xf2f2f2, cabelo: 0x2a1b14, cabeloLongo: true, bone: null, altura: 0.97 },
+  { id: 'beto', nome: 'Beto', pele: 0x8d5a3b, roupa: 0xe0a53a, calca: 0x3b4d6b, sapato: 0x222222, cabelo: 0x111111, cabeloLongo: false, bone: 0x1f5fa8, altura: 1 },
+  { id: 'carla', nome: 'Carla', pele: 0xf0c9a6, roupa: 0xb8445a, calca: 0xe8e2d6, sapato: 0x7a4b2c, cabelo: 0x9b5a2a, cabeloLongo: true, bone: null, altura: 0.95 },
+  { id: 'davi', nome: 'Davi', pele: 0xe2b48c, roupa: 0x4c6b3c, calca: 0x2a2a2e, sapato: 0xd94f2b, cabelo: 0x5a3a22, cabeloLongo: false, bone: null, altura: 1.04 },
 ];
 
 /** A corretora virtual (Plano 11d, item 19): blazer escuro, guia o cliente pelo 3D. Não aparece na escolha de boneco. */
-export const CORRETORA: PresetBoneco = { id: 'corretora', nome: 'Corretora', pele: 0xb07a55, roupa: 0x1f2a44, calca: 0x1f2a44, sapato: 0x111111, cabelo: 0x3a2418, cabeloLongo: true, bone: null };
+export const CORRETORA: PresetBoneco = { id: 'corretora', nome: 'Corretora', pele: 0xb07a55, roupa: 0x1f2a44, calca: 0x1f2a44, sapato: 0x111111, cabelo: 0x3a2418, cabeloLongo: true, bone: null, altura: 1 };
 
 export const presetBoneco = (id: string): PresetBoneco => BONECOS.find((b) => b.id === id) ?? BONECOS[0]!;
 
@@ -49,6 +51,8 @@ export interface PoseAnimada {
   quique: number;
   /** Inclinação do tronco para a frente (rad). */
   inclinacao: number;
+  /** Balanço do quadril (Plano 12a, item 9): giro do tronco de um lado para o outro a cada passo (rad). */
+  quadrilGiro: number;
 }
 
 /**
@@ -74,8 +78,9 @@ export function poseDoBoneco(fase: number, velocidade: number, noAr: boolean, ac
     bracoDLado: 0,
     quique: andando ? Math.abs(Math.sin(ang)) * 0.05 * (0.6 + intensidade) : Math.sin(t * 1.6) * 0.008,
     inclinacao: 0.12 * intensidade,
+    quadrilGiro: andando ? pernaE * 0.12 : 0, // o quadril gira para o lado da perna que vai para a frente
   };
-  if (noAr) pose = { ...pose, pernaE: 0.6, pernaD: 0.15, joelhoE: 1.0, joelhoD: 0.5, bracoE: -0.9, bracoD: -0.9, quique: 0, inclinacao: 0.05 };
+  if (noAr) pose = { ...pose, pernaE: 0.6, pernaD: 0.15, joelhoE: 1.0, joelhoD: 0.5, bracoE: -0.9, bracoD: -0.9, quique: 0, inclinacao: 0.05, quadrilGiro: 0 };
   if (acenando > 0) pose = { ...pose, bracoD: 0, bracoDLado: 2.5 + Math.sin(t * 9) * 0.35 * acenando };
   return pose;
 }
@@ -171,6 +176,7 @@ export function criarBoneco(preset: PresetBoneco, preparar: (m: THREE.Material) 
     rabo.visible = p.cabeloLongo;
     bone.visible = p.bone !== null;
     cabelo.visible = p.bone === null;
+    objeto.scale.setScalar(p.altura); // pequena variação de altura por pessoa (Plano 12a, item 9); o pé continua no chão
   };
   aplicar(preset);
   let fase = 0;
@@ -195,6 +201,7 @@ export function criarBoneco(preset: PresetBoneco, preparar: (m: THREE.Material) 
       bD.rotation.z = pose.bracoDLado;
       corpo.position.y = pose.quique;
       corpo.rotation.x = -pose.inclinacao;
+      corpo.rotation.y = pose.quadrilGiro;
     },
     trocar: aplicar,
     destruir() {

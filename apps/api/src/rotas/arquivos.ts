@@ -94,7 +94,7 @@ export function rotasArquivos(app: FastifyInstance, d: Dependencias): void {
         await c.query(
           `SELECT id, nome, tipo, status, motivo_rejeicao AS "motivoRejeicao", coalesce(tamanho, tamanho_declarado)::float8 AS tamanho,
                   verificado_antivirus AS "verificadoAntivirus", criado_em AS "criadoEm"
-             FROM assets WHERE project_id = $1 AND status <> 'em_revisao' AND tipo NOT IN ('giro', 'video') ORDER BY criado_em DESC`,
+             FROM assets WHERE project_id = $1 AND status <> 'em_revisao' AND tipo NOT IN ('giro', 'video', 'bake') ORDER BY criado_em DESC`,
           [id],
         )
       ).rows;

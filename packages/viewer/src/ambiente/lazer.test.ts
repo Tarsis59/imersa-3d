@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { poseParaLazer } from './lazer';
+import { AMPLITUDE_ONDA, REFLEXO_AGUA, RUGOSIDADE_AGUA, definirNivelAgua, materialDeAgua, poseParaLazer } from './lazer';
 
 describe('tour do lazer', () => {
   it('a câmera fica do lado de fora: o ponto entre ela e o prédio, olhando para o ponto', () => {
@@ -15,5 +15,27 @@ describe('tour do lazer', () => {
     expect(alvo.y).toBe(31);
     expect(posicao.y).toBeGreaterThan(30);
     expect(Math.hypot(posicao.x, posicao.z)).toBeGreaterThan(10);
+  });
+});
+
+describe('água da piscina', () => {
+  it('no aparelho fraco cai no material simples, sem reflexo nem ondulação', () => {
+    const alto = materialDeAgua(() => undefined, 'alto');
+    expect(alto.envMapIntensity).toBeCloseTo(REFLEXO_AGUA.alto);
+    expect((alto.userData.amplitudeAgua as { value: number }).value).toBeCloseTo(AMPLITUDE_ONDA.alto);
+    const baixo = materialDeAgua(() => undefined, 'baixo');
+    expect(baixo.envMapIntensity).toBe(0);
+    expect((baixo.userData.amplitudeAgua as { value: number }).value).toBe(0);
+    expect(baixo.roughness).toBeCloseTo(RUGOSIDADE_AGUA.baixo);
+  });
+
+  it('troca o nível sem recriar o material', () => {
+    const m = materialDeAgua(() => undefined, 'alto');
+    definirNivelAgua(m, 'baixo');
+    expect(m.roughness).toBeCloseTo(RUGOSIDADE_AGUA.baixo);
+    expect(m.envMapIntensity).toBe(0);
+    expect((m.userData.amplitudeAgua as { value: number }).value).toBe(0);
+    definirNivelAgua(m, 'alto');
+    expect((m.userData.amplitudeAgua as { value: number }).value).toBeCloseTo(AMPLITUDE_ONDA.alto);
   });
 });

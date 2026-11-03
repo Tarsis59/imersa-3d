@@ -74,6 +74,14 @@ export async function pedirGiro(predioId: string): Promise<{ erro?: string }> {
   return {};
 }
 
+/** Pede o bake da luz (AO + difusa de dia e de noite) do modelo atual (Blender na GPU gratuita do Kaggle). */
+export async function pedirBake(predioId: string): Promise<{ erro?: string }> {
+  const r = await api(`/predios/${encodeURIComponent(predioId)}/bakes`, { metodo: 'POST', corpo: {}, token: await tokenParaAcao() });
+  if (r.status !== 201) return { erro: mensagem(r.status, r.dados) };
+  revalidatePath(`/painel/predios/${predioId}`);
+  return {};
+}
+
 /** Pede um vídeo de marketing do prédio no formato escolhido (render no Blender, na GPU gratuita do Kaggle). */
 export async function pedirVideo(
   predioId: string,

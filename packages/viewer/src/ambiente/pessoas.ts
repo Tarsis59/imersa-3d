@@ -60,10 +60,20 @@ export interface Morador {
   roupa: number;
   calca: number;
   pele: number;
+  /** Parada ocasional (Plano 12a, item 9): anda, para um pouco, anda de novo — ciclo próprio de cada pessoa. */
+  parada: Parada;
 }
 
-const ROUPAS = [0x2563eb, 0xdc2626, 0x16a34a, 0xf59e0b, 0x7c3aed, 0xf1f5f9, 0x0f172a, 0xdb2777, 0x0891b2];
-const CALCAS = [0x1e293b, 0x334155, 0x1d4ed8, 0x78716c, 0x111827];
+/** Ciclo de "anda e para" de uma pessoa: a cada `cicloS` segundos, fica parada `duracaoS`, começando em `faseS`. */
+export interface Parada {
+  cicloS: number;
+  duracaoS: number;
+  faseS: number;
+}
+
+// paleta realista (tons do dia a dia, não cores de desenho animado): jeans, cinzas, bege, branco, grafite, vinho...
+const ROUPAS = [0x3b5169, 0x8c6b52, 0x5b6b57, 0xc9c2b4, 0x2e2e32, 0x6b4a46, 0x7d8a99, 0xd8cdb8, 0x44403c, 0x9ba3ad];
+const CALCAS = [0x2b3647, 0x3f3a36, 0x55524c, 0x1c1c1e, 0x6e6a63, 0x2f4156];
 const PELES = [0xf2d3b3, 0xe0b48f, 0xc68d62, 0x9c6a43, 0x6b4428];
 
 /** Gerador estável: os mesmos moradores para o mesmo prédio. */
@@ -75,7 +85,7 @@ function aleatorio(semente: number): () => number {
   };
 }
 
-/** Moradores espalhados pela volta, com ritmo, sentido, altura e roupa variados. */
+/** Moradores espalhados pela volta, com ritmo, sentido, altura, roupa e parada variados. */
 export function planejarMoradores(quantos: number, comprimento: number, semente = 7): Morador[] {
   const rnd = aleatorio(semente);
   const escolher = <T>(l: readonly T[]) => l[Math.floor(rnd() * l.length)]!;
@@ -88,11 +98,35 @@ export function planejarMoradores(quantos: number, comprimento: number, semente 
     roupa: escolher(ROUPAS),
     calca: escolher(CALCAS),
     pele: escolher(PELES),
+    parada: { cicloS: 22 + rnd() * 18, duracaoS: 3 + rnd() * 5, faseS: rnd() * 40 },
   }));
 }
 
 /** Quantos moradores por nível de qualidade (no aparelho fraco, nenhum). */
 export const MORADORES_POR_NIVEL: Record<'alto' | 'medio' | 'baixo', number> = { alto: 16, medio: 8, baixo: 0 };
+
+const moduloPositivo = (a: number, m: number) => ((a % m) + m) % m;
+
+/**
+ * Tempo "andado" (segundos equivalentes) até `t`, com paradas periódicas: anda `cicloS − duracaoS` segundos, fica
+ * parado `duracaoS`, e repete — sem saltos (continua de onde tinha parado). Pura: dá para testar sem o 3D.
+ */
+export function tempoAndado(t: number, parada: Parada): number {
+  const { cicloS, duracaoS, faseS } = parada;
+  if (!(duracaoS > 0) || duracaoS >= cicloS) return t; // parada mal configurada: anda sempre
+  const andarS = cicloS - duracaoS;
+  const T = t + faseS;
+  const ciclosCompletos = Math.floor(T / cicloS);
+  const andadoNoCiclo = Math.min(moduloPositivo(T, cicloS), andarS);
+  return ciclosCompletos * andarS + andadoNoCiclo;
+}
+
+/** Se a pessoa está parada no instante `t` (olhando o relógio, parada no meio da volta). Pura, mesma regra de `tempoAndado`. */
+export function estaParado(t: number, parada: Parada): boolean {
+  const { cicloS, duracaoS, faseS } = parada;
+  if (!(duracaoS > 0) || duracaoS >= cicloS) return false;
+  return moduloPositivo(t + faseS, cicloS) >= cicloS - duracaoS;
+}
 /** Comprimento de um passo, em metros (o balanço das pernas acompanha a distância andada). */
 const PASSO_M = 0.75;
 
@@ -157,6 +191,7 @@ export function criarPessoas(caminho: Caminho, moradores: readonly Morador[], pr
   const parte = new THREE.Matrix4();
   const escala = new THREE.Matrix4();
   const giro = new THREE.Matrix4();
+  const quadril = new THREE.Matrix4();
   const lado = new THREE.Vector3();
   return {
     objeto,
@@ -165,14 +200,20 @@ export function criarPessoas(caminho: Caminho, moradores: readonly Morador[], pr
     quadro(t) {
       for (let i = 0; i < visiveis; i++) {
         const m = moradores[i]!;
-        const andado = m.inicio + m.sentido * m.velocidade * t;
+        const parado = estaParado(t, m.parada);
+        const andado = m.inicio + m.sentido * m.velocidade * tempoAndado(t, m.parada);
         const p = posicaoNoCaminho(caminho, andado);
         const rumo = p.rumo + (m.sentido < 0 ? Math.PI : 0);
         lado.set(Math.cos(rumo), 0, -Math.sin(rumo)).multiplyScalar(m.lado);
-        base.makeRotationY(rumo).setPosition(p.x + lado.x, 0, p.z + lado.z).multiply(escala.makeScale(m.altura, m.altura, m.altura));
         const fase = (Math.abs(andado) / PASSO_M) * Math.PI;
-        const balanco = Math.sin(fase);
-        const sobe = Math.abs(Math.cos(fase)) * 0.03; // o corpo sobe um pouco a cada passo
+        const balanco = parado ? 0 : Math.sin(fase);
+        const sobe = parado ? 0 : Math.abs(Math.cos(fase)) * 0.03; // o corpo sobe um pouco a cada passo
+        // balanço do quadril (Plano 12a, item 9): o tronco gira e desloca de leve a cada passo, o peso muda de pé
+        base
+          .makeRotationY(rumo)
+          .setPosition(p.x + lado.x, 0, p.z + lado.z)
+          .multiply(escala.makeScale(m.altura, m.altura, m.altura))
+          .multiply(quadril.makeRotationY(balanco * 0.07).setPosition(Math.cos(fase) * 0.025, 0, 0));
         corpos.setMatrixAt(i, parte.copy(base).multiply(giro.makeTranslation(0, 1.16 + sobe, 0)));
         cabecas.setMatrixAt(i, parte.copy(base).multiply(giro.makeTranslation(0, 1.6 + sobe, 0)));
         for (const k of [0, 1]) {

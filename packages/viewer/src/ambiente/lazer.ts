@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import type { Pose } from '../cameras/voo';
+import { VENTO } from './vegetacao';
 
 /** Ponto do lazer do empreendimento (piscina, academia...) nos eixos da cena. */
 export interface PontoLazer {
@@ -38,10 +39,13 @@ export function poseParaLazer(p: { x: number; y: number; z: number }, centroPred
 
 export interface MarcadoresLazer {
   objeto: THREE.Group;
+  materiais: THREE.Material[];
   /** Id do ponto do objeto tocado (bolinha, haste ou placa), ou null. */
   idDe(o: THREE.Object3D | null): string | null;
   /** Ponto em destaque no tour (maior e com cor forte); `null` = nenhum. */
   destacar(id: string | null): void;
+  /** Água da piscina (Plano 12a, item 12): reflexo do céu e ondulação; no aparelho fraco cai no material simples. */
+  definirNivel(nivel: 'alto' | 'medio' | 'baixo'): void;
   /** Objetos para o raio do clique. */
   clicaveis(): THREE.Object3D[];
   destruir(): void;
@@ -49,6 +53,58 @@ export interface MarcadoresLazer {
 
 const COR = 0x0ea5e9;
 const COR_DESTAQUE = 0xf59e0b;
+const RAIO_AGUA_M = 5.5;
+type NivelAgua = 'alto' | 'medio' | 'baixo';
+/** Ondulação (amplitude, em metros), rugosidade e intensidade do reflexo do céu por nível; no aparelho fraco, zero. */
+export const AMPLITUDE_ONDA: Record<NivelAgua, number> = { alto: 0.05, medio: 0.035, baixo: 0 };
+export const RUGOSIDADE_AGUA: Record<NivelAgua, number> = { alto: 0.05, medio: 0.1, baixo: 0.6 };
+export const REFLEXO_AGUA: Record<NivelAgua, number> = { alto: 1.15, medio: 0.8, baixo: 0 };
+
+/**
+ * Ondulação animada no shader (Plano 12a, item 12): a superfície sobe e desce num padrão de ondas que anda
+ * devagar (mesmo relógio do vento); cada piscina com sua fase, pela posição no mundo. Chamar depois de preparar
+ * o material (encadeia o `onBeforeCompile` que já existe).
+ */
+function ondularAgua(m: THREE.Material, amplitude: { value: number }): void {
+  const antes = m.onBeforeCompile;
+  m.onBeforeCompile = (shader, r) => {
+    antes.call(m, shader, r);
+    shader.uniforms.uAguaTempo = VENTO.tempo;
+    shader.uniforms.uAguaAmplitude = amplitude;
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <common>', '#include <common>\nuniform float uAguaTempo;\nuniform float uAguaAmplitude;')
+      .replace(
+        '#include <begin_vertex>',
+        `#include <begin_vertex>
+        vec3 ondaMundo = (modelMatrix * vec4(transformed, 1.0)).xyz;
+        float onda = sin(ondaMundo.x * 0.6 + uAguaTempo * 1.6) + sin(ondaMundo.z * 0.5 - uAguaTempo * 1.3) * 0.7;
+        transformed.y += onda * uAguaAmplitude;`,
+      );
+  };
+  const chave = m.customProgramCacheKey.bind(m);
+  m.customProgramCacheKey = () => `${chave()}-agua`;
+}
+
+/**
+ * Material da água da piscina (Plano 12a, item 12): reflete o céu (envMap/fresnel do próprio PBR, com o mapa de
+ * ambiente do céu físico) e ondula no shader. `preparar` primeiro (CSM), a ondulação encadeia depois.
+ */
+export function materialDeAgua(preparar: (m: THREE.Material) => void, nivel: NivelAgua = 'alto'): THREE.MeshStandardMaterial {
+  const m = new THREE.MeshStandardMaterial({ color: 0x1f6f8c, roughness: RUGOSIDADE_AGUA[nivel], metalness: 0.05, envMapIntensity: REFLEXO_AGUA[nivel] });
+  preparar(m);
+  const amplitude = { value: AMPLITUDE_ONDA[nivel] };
+  ondularAgua(m, amplitude);
+  m.userData.amplitudeAgua = amplitude;
+  return m;
+}
+
+/** Troca o nível da água sem recriar nem recompilar o material (só os números mudam). */
+export function definirNivelAgua(m: THREE.MeshStandardMaterial, nivel: NivelAgua): void {
+  m.roughness = RUGOSIDADE_AGUA[nivel];
+  m.envMapIntensity = REFLEXO_AGUA[nivel];
+  const amplitude = m.userData.amplitudeAgua as { value: number } | undefined;
+  if (amplitude) amplitude.value = AMPLITUDE_ONDA[nivel];
+}
 
 /** Placa com o nome desenhada num canvas (sem fonte nem imagem para baixar). */
 /** Placa de texto sempre de frente para a câmera (lazer, etiquetas das unidades). */
@@ -79,16 +135,18 @@ export function placa(texto: string): THREE.Sprite {
   return sprite;
 }
 
-export function criarMarcadoresLazer(pontos: readonly PontoLazer[]): MarcadoresLazer {
+export function criarMarcadoresLazer(pontos: readonly PontoLazer[], preparar: (m: THREE.Material) => void = () => undefined, nivelInicial: NivelAgua = 'alto'): MarcadoresLazer {
   const objeto = new THREE.Group();
   objeto.name = 'lazer';
   const haste = new THREE.CylinderGeometry(0.05, 0.05, ALTURA_MARCADOR_M, 8);
   haste.translate(0, ALTURA_MARCADOR_M / 2, 0);
   const bola = new THREE.SphereGeometry(0.45, 20, 14);
   const anel = new THREE.RingGeometry(0.7, 0.95, 32).rotateX(-Math.PI / 2);
+  const geoAgua = new THREE.CircleGeometry(RAIO_AGUA_M, 24).rotateX(-Math.PI / 2);
   const porObjeto = new Map<THREE.Object3D, string>();
   const partes = new Map<string, { bola: THREE.Mesh; anel: THREE.Mesh; material: THREE.MeshBasicMaterial; placa: THREE.Sprite }>();
   const materiais: THREE.Material[] = [];
+  const aguas: THREE.MeshStandardMaterial[] = [];
   for (const p of pontos) {
     const g = new THREE.Group();
     g.position.set(p.x, p.y, p.z);
@@ -106,12 +164,23 @@ export function criarMarcadoresLazer(pontos: readonly PontoLazer[]): MarcadoresL
     s.position.y = ALTURA_MARCADOR_M + 1.1;
     materiais.push(s.material);
     g.add(h, a, b, s);
+    if (p.agua) {
+      // piscina ou espelho d'água: um disco com reflexo do céu e ondulação (Plano 12a, item 12)
+      const matAgua = materialDeAgua(preparar, nivelInicial);
+      materiais.push(matAgua);
+      aguas.push(matAgua);
+      const malhaAgua = new THREE.Mesh(geoAgua, matAgua);
+      malhaAgua.position.y = 0.02;
+      malhaAgua.receiveShadow = true;
+      g.add(malhaAgua);
+    }
     for (const o of [b, h, s]) porObjeto.set(o, p.id);
     partes.set(p.id, { bola: b, anel: a, material, placa: s });
     objeto.add(g);
   }
   return {
     objeto,
+    materiais,
     idDe: (o) => (o ? (porObjeto.get(o) ?? null) : null),
     destacar(id) {
       for (const [k, p] of partes) {
@@ -122,11 +191,15 @@ export function criarMarcadoresLazer(pontos: readonly PontoLazer[]): MarcadoresL
         p.anel.scale.setScalar(ativo ? 1.6 : 1);
       }
     },
+    definirNivel(nivel) {
+      for (const m of aguas) definirNivelAgua(m, nivel);
+    },
     clicaveis: () => [...porObjeto.keys()],
     destruir() {
       haste.dispose();
       bola.dispose();
       anel.dispose();
+      geoAgua.dispose();
       for (const m of materiais) {
         if (m instanceof THREE.SpriteMaterial) m.map?.dispose();
         m.dispose();

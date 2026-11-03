@@ -22,6 +22,9 @@ const Visita = z.object({
   webgpu: z.boolean().nullable().default(null),
 });
 const Periodo = z.object({ dias: z.coerce.number().int().min(1).max(90).default(7) });
+const PeriodoWebgpu = z.object({ dias: z.coerce.number().int().min(1).max(90).default(30) });
+/** % mínimo de visitas de celular com WebGPU para trocar o renderizador (Plano 12a, item 16). */
+const LIMIAR_CELULAR_WEBGPU = 0.8;
 const ctx = (s: Sessao) => ({ tenantId: s.tenantId, userId: s.userId });
 
 export function rotasTelemetria(app: FastifyInstance, { pool, exigir }: Dependencias): void {
@@ -98,6 +101,62 @@ export function rotasTelemetria(app: FastifyInstance, { pool, exigir }: Dependen
         celular: { sessoes: x.celular, fpsP50: arred(x.celular_fps_p50) },
         // parte das visitas (que mediram) com WebGPU: a decisão de migrar o 3D sai daqui
         webgpu: { visitas: x.webgpu, medidas: x.webgpu_medido },
+      };
+    });
+  });
+
+  /**
+   * "Pronto para WebGPU?" (Plano 12a, item 16): não troca o renderizador (os shaders usam `onBeforeCompile`,
+   * que o WebGPURenderer do three não aceita) — só mede, por tipo de aparelho, para decidir quando trocar.
+   * Regra explícita: trocar só quando ≥ 80% das visitas de celular tiverem WebGPU e o FPS medido não for pior.
+   */
+  app.get('/telemetria/viewer/webgpu', async (req) => {
+    const s = await exigir(req, 'auditoria:ler');
+    const { dias } = PeriodoWebgpu.parse(req.query);
+    return withTenant(pool, ctx(s), async (c) => {
+      const r = await c.query<{
+        celular: number;
+        celular_medido: number;
+        celular_webgpu: number;
+        computador: number;
+        computador_medido: number;
+        computador_webgpu: number;
+        fps_com_webgpu_p50: number | null;
+        fps_sem_webgpu_p50: number | null;
+      }>(
+        `SELECT count(*) FILTER (WHERE celular)::int AS celular,
+                count(webgpu) FILTER (WHERE celular)::int AS celular_medido,
+                count(*) FILTER (WHERE celular AND webgpu)::int AS celular_webgpu,
+                count(*) FILTER (WHERE NOT celular)::int AS computador,
+                count(webgpu) FILTER (WHERE NOT celular)::int AS computador_medido,
+                count(*) FILTER (WHERE NOT celular AND webgpu)::int AS computador_webgpu,
+                percentile_cont(0.5) WITHIN GROUP (ORDER BY fps_medio) FILTER (WHERE celular AND webgpu) AS fps_com_webgpu_p50,
+                percentile_cont(0.5) WITHIN GROUP (ORDER BY fps_medio) FILTER (WHERE celular AND webgpu IS FALSE) AS fps_sem_webgpu_p50
+           FROM telemetria_viewer
+          WHERE criado_em > now() - make_interval(days => $1)`,
+        [dias],
+      );
+      const x = r.rows[0]!;
+      const arred = (n: number | null) => (n === null ? null : Math.round(Number(n) * 10) / 10);
+      const percentual = (comWebgpu: number, medidas: number) => (medidas ? Math.round((comWebgpu / medidas) * 1000) / 1000 : null);
+      const celularPct = percentual(x.celular_webgpu, x.celular_medido);
+      const fpsComWebgpu = arred(x.fps_com_webgpu_p50);
+      const fpsSemWebgpu = arred(x.fps_sem_webgpu_p50);
+      // sem as duas medidas de FPS para comparar, não dá para garantir "não pior": a troca não é liberada
+      const fpsNaoPior = fpsComWebgpu !== null && fpsSemWebgpu !== null && fpsComWebgpu >= fpsSemWebgpu;
+      return {
+        dias,
+        celular: { visitas: x.celular, medidas: x.celular_medido, comWebgpu: x.celular_webgpu, percentual: celularPct },
+        computador: {
+          visitas: x.computador,
+          medidas: x.computador_medido,
+          comWebgpu: x.computador_webgpu,
+          percentual: percentual(x.computador_webgpu, x.computador_medido),
+        },
+        fps: { comWebgpu: fpsComWebgpu, semWebgpu: fpsSemWebgpu },
+        limiarCelular: LIMIAR_CELULAR_WEBGPU,
+        pronto: celularPct !== null && celularPct >= LIMIAR_CELULAR_WEBGPU && fpsNaoPior,
+        regra: `Trocar o renderizador para WebGPU só quando ${Math.round(LIMIAR_CELULAR_WEBGPU * 100)}% ou mais das visitas de celular medidas tiverem WebGPU disponível e o FPS medido com WebGPU não for pior que sem WebGPU.`,
       };
     });
   });
